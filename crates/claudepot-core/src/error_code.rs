@@ -2149,6 +2149,7 @@ mod tests {
                 E::CredentialWrite("keychain item did not read back".to_string()),
                 E::ProfileFetch("/profile returned 503".to_string()),
                 E::AlreadyRegistered("a@example.com".to_string(), uuid::Uuid::nil()),
+                E::AlreadyRegisteredFromBrowser("a@example.com".to_string(), uuid::Uuid::nil()),
                 E::Store("no such table: accounts".to_string()),
                 E::NotFound,
                 E::AuthRejected,
@@ -2163,6 +2164,7 @@ mod tests {
                     | E::CredentialWrite(_)
                     | E::ProfileFetch(_)
                     | E::AlreadyRegistered(_, _)
+                    | E::AlreadyRegisteredFromBrowser(_, _)
                     | E::Store(_)
                     | E::NotFound
                     | E::AuthRejected

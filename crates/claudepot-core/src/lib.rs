@@ -73,7 +73,6 @@ pub mod host_activate;
 pub mod json_store;
 pub mod keys;
 pub mod launcher;
-pub(crate) mod login_browser;
 pub mod main_thread;
 pub mod mcp_probe;
 pub mod mcp_snippet;

@@ -111,216 +111,6 @@ impl crate::error_code::ErrorCode for OnboardError {
 /// GUI stuck on a spinner forever. Matches Kannon's 10-minute window.
 pub const LOGIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
 
-/// How many trailing stderr lines from `claude auth login` to keep
-/// for inclusion in the user-facing error message. The whole stream
-/// still goes to `tracing` for log inspection; this cap just limits
-/// what gets stuffed into the dialog so a runaway child can't bloat
-/// memory or render unreadable. Issue #16: the previous behaviour
-/// dropped stderr entirely on failure, leaving users with only the
-/// exit code.
-/// Where the browser is sent to drop its `claude.ai` session when the
-/// flow could not be isolated. See [`clear_browser_session`].
-pub const LOGOUT_URL: &str = "https://claude.ai/logout";
-
-/// How long to let a logout land before the authorize URL is opened in
-/// the same browser.
-///
-/// Fixed, because there is nothing to observe: the cookie lives in the
-/// user's browser and Claudepot drives it through the OS handler with
-/// no channel back. Only reached on the fallback path.
-const LOGOUT_SETTLE: std::time::Duration = std::time::Duration::from_secs(3);
-
-/// How long to wait for `claude auth login` to hand us its authorize
-/// URL through the shim. Generous: it is emitted within a second in
-/// practice, and overshooting costs nothing because the wait ends the
-/// moment the file appears.
-const URL_HANDOFF_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
-
-/// The platform command that hands a URL to the user's default browser.
-///
-/// Split from the caller so the platform choice is testable without
-/// spawning anything.
-fn browser_open_command(url: &str) -> (&'static str, Vec<String>) {
-    #[cfg(target_os = "macos")]
-    {
-        ("/usr/bin/open", vec![url.to_string()])
-    }
-    #[cfg(target_os = "linux")]
-    {
-        ("xdg-open", vec![url.to_string()])
-    }
-    #[cfg(target_os = "windows")]
-    {
-        // `start` needs an empty title argument first, or it treats the
-        // URL as the window title and opens nothing.
-        (
-            "cmd",
-            vec![
-                "/C".to_string(),
-                "start".to_string(),
-                String::new(),
-                url.to_string(),
-            ],
-        )
-    }
-}
-
-/// Send the browser to `claude.ai/logout` and give it a moment to land.
-///
-/// **Only on the fallback path.** When the flow can be opened in a
-/// private window there is no session to fight and this is skipped —
-/// see [`crate::login_browser`]. It remains for Safari and for any
-/// browser whose private mode is not reachable from the command line.
-///
-/// Best-effort, never fatal: every failure leaves the behaviour that
-/// shipped before isolation existed.
-pub async fn clear_browser_session() {
-    let (program, args) = browser_open_command(LOGOUT_URL);
-    tracing::info!(
-        url = LOGOUT_URL,
-        "clearing browser claude.ai session (no private window available)"
-    );
-    match tokio::process::Command::new(program)
-        .args(&args)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .no_window()
-        .spawn()
-    {
-        Ok(mut child) => {
-            let _ = child.wait().await;
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "could not open the logout URL; continuing");
-            return;
-        }
-    }
-    tokio::time::sleep(LOGOUT_SETTLE).await;
-}
-
-/// A shimmed `PATH` that makes `claude auth login` hand us its
-/// authorize URL instead of launching a browser with it.
-///
-/// CC opens the URL through the OS handler (`open` / `xdg-open`),
-/// resolved via `PATH` — verified against CC 2.1.246. Putting a shim of
-/// that name first means the URL lands in a file and **no browser is
-/// launched**, so Claudepot chooses the window. That is the whole
-/// mechanism behind opening the flow in a private window.
-pub(crate) struct BrowserHandoff {
-    /// Held so the directory outlives the login.
-    _dir: tempfile::TempDir,
-    path_env: std::ffi::OsString,
-    url_file: PathBuf,
-}
-
-/// Build the shim. Returns `None` on any failure, which leaves CC to
-/// open the browser itself exactly as before — the shim is an
-/// optimisation of *which window*, never a prerequisite for logging in.
-pub(crate) fn prepare_browser_handoff() -> Option<BrowserHandoff> {
-    // Windows' handler is not a PATH-resolved executable, so there is
-    // nothing to shim; that platform keeps the fallback path.
-    if cfg!(target_os = "windows") {
-        return None;
-    }
-    let dir = tempfile::Builder::new()
-        .prefix("claudepot-openshim-")
-        .tempdir()
-        .ok()?;
-    let url_file = dir.path().join("authorize-url.txt");
-
-    // Record any http(s) argument and exit 0. Silent and successful:
-    // if this looks like a failure CC may fall back to printing only,
-    // and the user is left with no browser and no explanation.
-    let script = format!(
-        "#!/bin/sh\nfor a in \"$@\"; do\n  case \"$a\" in http*) printf '%s\\n' \"$a\" >> {} ;; esac\ndone\nexit 0\n",
-        shell_single_quote(&url_file.to_string_lossy())
-    );
-    // Both names: macOS resolves `open`, Linux `xdg-open`. Writing both
-    // costs nothing and removes a platform branch.
-    for name in ["open", "xdg-open"] {
-        let p = dir.path().join(name);
-        std::fs::write(&p, &script).ok()?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o700)).ok()?;
-        }
-    }
-
-    let mut path_env = std::ffi::OsString::from(dir.path());
-    path_env.push(":");
-    path_env.push(crate::path_env::enriched_path());
-
-    Some(BrowserHandoff {
-        _dir: dir,
-        path_env,
-        url_file,
-    })
-}
-
-/// Quote a path for safe interpolation into the `/bin/sh` shim.
-pub(crate) fn shell_single_quote(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "'\\''"))
-}
-
-/// Wait for the shim to record the authorize URL, then put it in front
-/// of the user — in a private window where the default browser has one,
-/// otherwise by clearing the session and opening normally.
-async fn hand_url_to_browser(url_file: PathBuf) {
-    let deadline = tokio::time::Instant::now() + URL_HANDOFF_WAIT;
-    let url = loop {
-        if let Ok(text) = tokio::fs::read_to_string(&url_file).await {
-            if let Some(u) = text.lines().find(|l| l.starts_with("http")) {
-                break u.to_string();
-            }
-        }
-        if tokio::time::Instant::now() >= deadline {
-            // CC did not use the shim. It has therefore either opened a
-            // browser by some other means or printed the URL itself —
-            // both leave the user able to continue, so this is a note,
-            // not an error.
-            tracing::warn!("no authorize URL arrived via the shim; CC opened the browser itself");
-            return;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    };
-
-    let plan = crate::login_browser::plan_open(
-        crate::login_browser::default_browser_id().await.as_deref(),
-        &url,
-    );
-
-    let (program, args) = match plan {
-        crate::login_browser::OpenPlan::Private { program, args } => {
-            tracing::info!(
-                "opening the login in a private window; the browser session is untouched"
-            );
-            (program, args)
-        }
-        crate::login_browser::OpenPlan::LogoutThenDefault => {
-            clear_browser_session().await;
-            let (p, a) = browser_open_command(&url);
-            (p.to_string(), a)
-        }
-    };
-
-    if let Err(e) = tokio::process::Command::new(&program)
-        .args(&args)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .no_window()
-        .spawn()
-    {
-        // The one failure the user must be told about: the shim
-        // swallowed the URL and we could not open it, so nothing is on
-        // screen. CC prints the URL to stdout too, which is piped to
-        // tracing, so it remains recoverable.
-        tracing::error!(error = %e, url = %url, "could not open the login URL — open it manually to continue");
-    }
-}
-
 const STDERR_TAIL_LINES: usize = 12;
 
 /// Bounded grace window for the stderr drain task to flush remaining
@@ -362,10 +152,7 @@ pub async fn run_auth_login_in_place_cancellable(
     cancel: Option<std::sync::Arc<tokio::sync::Notify>>,
 ) -> Result<(), OnboardError> {
     let claude_path = which_claude()?;
-    // Resolve the binary first: a missing `claude` must fail without
-    // having touched the browser at all.
-    let handoff = prepare_browser_handoff();
-    run_auth_login_in_place_cancellable_with_binary(&claude_path, cancel, handoff.as_ref()).await
+    run_auth_login_in_place_cancellable_with_binary(&claude_path, cancel).await
 }
 
 /// Internal seam: accepts an explicit binary path so tests can point
@@ -376,7 +163,6 @@ pub async fn run_auth_login_in_place_cancellable(
 pub(crate) async fn run_auth_login_in_place_cancellable_with_binary(
     claude_path: &std::path::Path,
     cancel: Option<std::sync::Arc<tokio::sync::Notify>>,
-    handoff: Option<&BrowserHandoff>,
 ) -> Result<(), OnboardError> {
     tracing::info!(
         binary = %claude_path.display(),
@@ -386,13 +172,6 @@ pub(crate) async fn run_auth_login_in_place_cancellable_with_binary(
 
     let mut cmd = tokio::process::Command::new(claude_path);
     cmd.arg("auth").arg("login");
-    if let Some(h) = handoff {
-        // Shimmed `open` first on PATH: CC records the URL instead of
-        // launching a browser, and `hand_url_to_browser` chooses the
-        // window. Without a handoff CC opens the browser itself.
-        cmd.env("PATH", &h.path_env);
-    }
-    let opener = handoff.map(|h| tokio::spawn(hand_url_to_browser(h.url_file.clone())));
     let mut child = cmd
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
@@ -453,12 +232,6 @@ pub(crate) async fn run_auth_login_in_place_cancellable_with_binary(
         }
     };
 
-    // The login is over: stop watching for a URL. A watcher left
-    // running would poll a tempdir that is about to be removed, and
-    // could open a browser after a cancel.
-    if let Some(o) = opener {
-        o.abort();
-    }
 
     // On failure paths only, give the stderr drain task a small grace
     // window to flush whatever's still buffered before we read the
@@ -530,8 +303,7 @@ pub async fn run_auth_login_cancellable(
     cancel: Option<std::sync::Arc<tokio::sync::Notify>>,
 ) -> Result<PathBuf, OnboardError> {
     let claude_path = which_claude()?;
-    let handoff = prepare_browser_handoff();
-    run_auth_login_cancellable_with_binary(&claude_path, cancel, handoff.as_ref()).await
+    run_auth_login_cancellable_with_binary(&claude_path, cancel).await
 }
 
 /// Internal seam: accepts an explicit binary path so tests can point
@@ -539,7 +311,6 @@ pub async fn run_auth_login_cancellable(
 pub(crate) async fn run_auth_login_cancellable_with_binary(
     claude_path: &std::path::Path,
     cancel: Option<std::sync::Arc<tokio::sync::Notify>>,
-    handoff: Option<&BrowserHandoff>,
 ) -> Result<PathBuf, OnboardError> {
     let temp_dir = tempfile::Builder::new()
         .prefix("claudepot-onboard-")
@@ -558,11 +329,6 @@ pub(crate) async fn run_auth_login_cancellable_with_binary(
     cmd.arg("auth")
         .arg("login")
         .env("CLAUDE_CONFIG_DIR", &config_dir);
-    if let Some(h) = handoff {
-        // See the sibling spawn in the in-place variant.
-        cmd.env("PATH", &h.path_env);
-    }
-    let opener = handoff.map(|h| tokio::spawn(hand_url_to_browser(h.url_file.clone())));
     let mut child = cmd
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
@@ -621,12 +387,6 @@ pub(crate) async fn run_auth_login_cancellable_with_binary(
         }
     };
 
-    // The login is over: whatever the outcome, stop watching for a URL.
-    // A watcher left running would poll a tempdir that is about to be
-    // removed, and could open a browser after a cancel.
-    if let Some(o) = opener {
-        o.abort();
-    }
 
     // Resolve the tail BEFORE we hand back the result so the caller
     // sees a fully-rendered Display. See the parallel block in
@@ -713,106 +473,6 @@ fn which_claude() -> Result<PathBuf, OnboardError> {
 
 #[cfg(test)]
 mod tests {
-    /// Still the fallback for Safari, so a typo here silently does
-    /// nothing on exactly the browsers that most need it.
-    #[test]
-    fn logout_url_is_the_claude_ai_logout_endpoint() {
-        assert_eq!(super::LOGOUT_URL, "https://claude.ai/logout");
-    }
-
-    /// The shim is the whole isolation mechanism: if it does not record
-    /// the URL, `hand_url_to_browser` never fires and CC's own opener
-    /// was never displaced. Runs the generated script for real against
-    /// a stub argv.
-    #[cfg(unix)]
-    #[test]
-    fn open_shim_records_an_http_url_and_exits_clean() {
-        let h = super::prepare_browser_handoff().expect("handoff on unix");
-        let shim = h._dir.path().join("open");
-        let out = std::process::Command::new(&shim)
-            .arg("https://claude.com/cai/oauth/authorize?state=xyz")
-            .output()
-            .expect("shim runs");
-        assert!(
-            out.status.success(),
-            "shim must exit 0, got {:?}",
-            out.status
-        );
-        let recorded = std::fs::read_to_string(&h.url_file).expect("url file written");
-        assert!(
-            recorded.contains("cai/oauth/authorize?state=xyz"),
-            "got {recorded:?}"
-        );
-    }
-
-    /// Non-URL argv must not be recorded — CC passes other arguments to
-    /// the handler, and picking one up would send garbage to a browser.
-    #[cfg(unix)]
-    #[test]
-    fn open_shim_ignores_non_url_arguments() {
-        let h = super::prepare_browser_handoff().expect("handoff on unix");
-        let shim = h._dir.path().join("open");
-        let out = std::process::Command::new(&shim)
-            .args(["-a", "Safari"])
-            .output()
-            .expect("shim runs");
-        assert!(out.status.success());
-        let recorded = std::fs::read_to_string(&h.url_file).unwrap_or_default();
-        assert!(recorded.trim().is_empty(), "got {recorded:?}");
-    }
-
-    /// The shim directory must come FIRST, or the real `open` wins and
-    /// the URL is launched in the user's own session — the exact
-    /// failure this displaces.
-    #[cfg(unix)]
-    #[test]
-    fn shim_directory_precedes_the_inherited_path() {
-        let h = super::prepare_browser_handoff().expect("handoff on unix");
-        let path = h.path_env.to_string_lossy().to_string();
-        let first = path.split(':').next().unwrap_or_default();
-        assert_eq!(first, h._dir.path().to_string_lossy());
-    }
-
-    /// A path with a quote or a space must not break out of the shim's
-    /// `/bin/sh` body.
-    #[test]
-    fn shell_quoting_neutralises_quotes_and_spaces() {
-        assert_eq!(super::shell_single_quote("/tmp/a b"), "'/tmp/a b'");
-        assert_eq!(super::shell_single_quote("/tmp/it's"), r#"'/tmp/it'\''s'"#);
-    }
-
-    #[test]
-    fn browser_open_command_passes_the_url_through() {
-        let (program, args) = super::browser_open_command(super::LOGOUT_URL);
-        assert!(!program.is_empty());
-        assert!(
-            args.iter().any(|a| a == super::LOGOUT_URL),
-            "the URL must reach the handler; got {args:?}"
-        );
-    }
-
-    /// On Windows `start` consumes the first quoted argument as the
-    /// window title, so the empty placeholder is load-bearing: without
-    /// it the URL becomes the title and no browser opens.
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn windows_start_keeps_its_empty_title_placeholder() {
-        let (program, args) = super::browser_open_command(super::LOGOUT_URL);
-        assert_eq!(program, "cmd");
-        assert_eq!(args[0], "/C");
-        assert_eq!(args[1], "start");
-        assert_eq!(args[2], "", "empty title placeholder must precede the URL");
-        assert_eq!(args[3], super::LOGOUT_URL);
-    }
-
-    /// The wait exists because nothing can be observed; if it is ever
-    /// zeroed the authorize page can load against the session the
-    /// logout has not dropped yet, which is the bug this prevents.
-    #[test]
-    fn logout_settle_is_nonzero() {
-        assert!(super::LOGOUT_SETTLE > std::time::Duration::ZERO);
-    }
-
     use super::*;
 
     /// The -2 sentinel for "timed out" must render a clear, actionable
@@ -936,7 +596,7 @@ mod tests {
         let stub_path = stub.clone();
 
         let task = tokio::spawn(async move {
-            run_auth_login_cancellable_with_binary(&stub_path, Some(notify_clone), None).await
+            run_auth_login_cancellable_with_binary(&stub_path, Some(notify_clone)).await
         });
 
         // Let the child actually spawn before we fire the Notify so

@@ -504,7 +504,17 @@ async fn verify_active_via_keychain(
         // NetworkError. For now the conservative mapping is NetworkError
         // (never a *false* re-login), logged loudly since reaching here is
         // unexpected.
-        Err(e @ (RE::NoCredentials | RE::AlreadyRegistered(..) | RE::Store(_) | RE::NotFound)) => {
+        Err(
+            e @ (RE::NoCredentials
+            | RE::AlreadyRegistered(..)
+            // Raised only by the browser-login registration path, which
+            // `resolve_cc_identity` is not part of. Transient like its
+            // sibling: it says nothing about whether CC's stored
+            // credentials are still good.
+            | RE::AlreadyRegisteredFromBrowser(..)
+            | RE::Store(_)
+            | RE::NotFound),
+        ) => {
             tracing::warn!(
                 "active-account verify: unexpected resolver error mapped to NetworkError: {e}"
             );

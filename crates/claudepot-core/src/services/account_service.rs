@@ -890,6 +890,25 @@ pub enum RegisterError {
     ProfileFetch(String),
     #[error("already registered: {0} (uuid: {1})")]
     AlreadyRegistered(String, Uuid),
+    /// The **browser** login came back as an account that is already
+    /// registered — its own variant because the remedy differs and
+    /// nothing else can carry it.
+    ///
+    /// Claude Code's authorize URL carries no `prompt` parameter (no
+    /// `select_account`, no `login` — the flow is plain OAuth 2.0 +
+    /// PKCE, not OIDC; re-verified against CC 2.1.250), so the endpoint
+    /// honours whatever `claude.ai` session the browser already holds.
+    /// Asking for account B while signed in as A therefore returns A,
+    /// silently and by design.
+    ///
+    /// [`Self::AlreadyRegistered`] means only "you already have this
+    /// one" and is reached from importing CC's current credentials and
+    /// from a pasted token, where no browser is involved. Telling *those*
+    /// users to sign out of `claude.ai` would be advice about a step
+    /// they never took, which is why this is a second variant rather
+    /// than a reworded shared string.
+    #[error("browser signed in as an account already registered: {0} (uuid: {1})")]
+    AlreadyRegisteredFromBrowser(String, Uuid),
     #[error("store error: {0}")]
     Store(String),
     #[error("account not found")]
@@ -971,6 +990,9 @@ impl crate::error_code::ErrorCode for RegisterError {
             RegisterError::CredentialWrite(_) => "account_register.credential_write",
             RegisterError::ProfileFetch(_) => "account_register.profile_fetch",
             RegisterError::AlreadyRegistered(_, _) => "account_register.already_registered",
+            RegisterError::AlreadyRegisteredFromBrowser(_, _) => {
+                "account_register.already_registered_from_browser"
+            }
             RegisterError::Store(_) => "account_register.store",
             RegisterError::NotFound => "account_register.not_found",
             RegisterError::AuthRejected => "account_register.auth_rejected",
@@ -992,7 +1014,8 @@ impl crate::error_code::ErrorCode for RegisterError {
             | RegisterError::CredentialWrite(detail)
             | RegisterError::ProfileFetch(detail)
             | RegisterError::Store(detail) => serde_json::json!({ "detail": detail }),
-            RegisterError::AlreadyRegistered(email, uuid) => {
+            RegisterError::AlreadyRegistered(email, uuid)
+            | RegisterError::AlreadyRegisteredFromBrowser(email, uuid) => {
                 serde_json::json!({ "email": email, "uuid": uuid.to_string() })
             }
         }
@@ -1141,7 +1164,7 @@ pub(crate) async fn login_and_reimport_with_progress_test_binary(
 
     progress.phase(LoginPhase::WaitingForBrowser);
     if let Err(e) =
-        onboard::run_auth_login_in_place_cancellable_with_binary(claude_binary, cancel, None).await
+        onboard::run_auth_login_in_place_cancellable_with_binary(claude_binary, cancel).await
     {
         let msg = e.to_string();
         progress.error(LoginPhase::WaitingForBrowser, &msg);
@@ -1302,7 +1325,7 @@ pub async fn register_from_browser_with_progress(
                 existing.email, existing.uuid
             );
             progress.error(LoginPhase::VerifyingIdentity, &msg);
-            return Err(RegisterError::AlreadyRegistered(
+            return Err(RegisterError::AlreadyRegisteredFromBrowser(
                 existing.email,
                 existing.uuid,
             ));

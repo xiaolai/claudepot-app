@@ -106,6 +106,15 @@
       "message": "already registered: a@example.com (uuid: 00000000-0000-0000-0000-000000000000)"
     },
     {
+      "code": "account_register.already_registered_from_browser",
+      "owner": "core",
+      "params": [
+        "email",
+        "uuid"
+      ],
+      "message": "browser signed in as an account already registered: a@example.com (uuid: 00000000-0000-0000-0000-000000000000)"
+    },
+    {
       "code": "account_register.store",
       "owner": "core",
       "params": [

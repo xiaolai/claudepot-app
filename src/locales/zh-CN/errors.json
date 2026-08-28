@@ -1,6 +1,7 @@
 {
   "account_register": {
     "already_registered": "{{email}} 已经注册过了。",
+    "already_registered_from_browser": "{{email}} 已注册——这是你的浏览器在 claude.ai 上已登录的账户，登录流程会直接沿用它，而不会让你选择。若要添加其他账户，请先在 claude.ai 退出登录（或换一个浏览器配置），然后重试。",
     "auth_rejected": "Claude Code 存储的登录已失效，且无法刷新。请重新登录以恢复。",
     "cc_changed_during_refresh": "刷新期间 Claude Code 改动了自己存储的登录。没有丢失任何东西——请重试。",
     "cc_live_refresh_skipped": "检测到正在运行的 Claude Code 会话，已跳过令牌刷新，以免将其登出。等该会话自行刷新后即会恢复，无需处理。",

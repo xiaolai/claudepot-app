@@ -1,6 +1,7 @@
 {
   "account_register": {
     "already_registered": "{{email}} is already registered.",
+    "already_registered_from_browser": "{{email}} is already registered — that is the account your browser was signed in to at claude.ai, and the sign-in reuses it rather than offering a choice. To add a different account, sign out at claude.ai (or use another browser profile) and try again.",
     "auth_rejected": "Claude Code's stored login has expired and couldn't be refreshed. Sign in again to recover it.",
     "cc_changed_during_refresh": "Claude Code changed its stored login while Claudepot was refreshing it. Nothing was lost — try again.",
     "cc_live_refresh_skipped": "A Claude Code session is running, so the token refresh was skipped rather than signing it out. It clears itself once that session refreshes — nothing to do.",

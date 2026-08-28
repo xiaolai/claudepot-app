@@ -10,6 +10,7 @@
 
 use super::*;
 use crate::error::{OAuthError, SwapError};
+use crate::error_code::ErrorCode;
 use crate::oauth::refresh::TokenResponse;
 use crate::testing::{fresh_blob_json, make_account, setup_test_data_dir, test_store};
 
@@ -238,6 +239,42 @@ impl crate::cli_backend::swap::TokenRefresher for MockRefresher {
 }
 
 // -- register_from_current_with tests --
+
+/// The two "already registered" variants must not be merged back into
+/// one. `AlreadyRegisteredFromBrowser` carries advice — sign out at
+/// claude.ai — that is only true of the browser flow, because Claude
+/// Code's authorize URL has no `prompt` parameter and so reuses whatever
+/// session the browser holds. Importing CC's current credentials
+/// involves no browser at all, so it must keep the plain variant;
+/// telling this user to sign out of claude.ai would be advice about a
+/// step they never took.
+///
+/// Locks the half reachable without spawning `claude auth login`. The
+/// browser half is a single `return` in
+/// `register_from_browser_with_progress`.
+#[tokio::test]
+async fn importing_current_credentials_never_blames_the_browser_session() {
+    let _lock = crate::testing::lock_data_dir();
+    let _env = setup_test_data_dir();
+    let (store, _db) = test_store();
+
+    let platform = MockPlatform::new(Some(fresh_blob_json()));
+    let fetcher = MockProfileFetcher::ok("alice@example.com");
+
+    register_from_current_with(&store, &platform, &fetcher)
+        .await
+        .expect("first registration succeeds");
+
+    let err = register_from_current_with(&store, &platform, &fetcher)
+        .await
+        .expect_err("the second is a duplicate");
+
+    assert!(
+        matches!(err, RegisterError::AlreadyRegistered(ref e, _) if e == "alice@example.com"),
+        "the non-browser path keeps the plain variant, got: {err:?}"
+    );
+    assert_eq!(err.code(), "account_register.already_registered");
+}
 
 #[tokio::test]
 async fn test_register_from_current_success() {
