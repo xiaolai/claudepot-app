@@ -216,6 +216,14 @@ pub struct EnvOverview {
     pub docs_fetched_at: String,
     pub docs_sha256: String,
     pub binary_crosscheck_version: String,
+    /// Where the *safety* flags came from — a weaker claim than
+    /// `binary_crosscheck_version`, and surfaced separately so it cannot
+    /// be mistaken for one. See [`spec::SafetyProvenance`]: the lists
+    /// behind `pre_trust_safe` / `provider_managed` are read from a
+    /// source mirror pinned at 2.1.88, with no version to compare and
+    /// therefore no gate that could disable them. The disclosure names
+    /// it rather than the pane hiding rows on the strength of it.
+    pub safety_provenance: spec::SafetyProvenance,
     /// Which Claude Code the cross-check was compared against, and where it
     /// lives — a user with several installs can see which one was measured.
     pub installed_version: Option<String>,
@@ -312,6 +320,7 @@ pub fn resolve_all(
         docs_fetched_at: s.docs_fetched_at.clone(),
         docs_sha256: s.docs_sha256.clone(),
         binary_crosscheck_version: s.binary_crosscheck_version.clone(),
+        safety_provenance: s.safety_provenance(),
         installed_version: installed_version.map(str::to_string),
         installed_path: installed_path.map(str::to_string),
         settings_path: settings::user_settings_path().to_string_lossy().to_string(),

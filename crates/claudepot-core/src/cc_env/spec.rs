@@ -201,6 +201,14 @@ pub struct EnvSpec {
     /// binary's number for the source would be exactly the quiet lie the
     /// two provenance fields exist to prevent.
     pub cc_source_read_at: String,
+    /// Which KIND of source the safety lists were read from —
+    /// `pinned_mirror` today, `installed_binary` if a future extraction
+    /// reads them from the running build. Emitted by the generator from
+    /// the path it actually opened; see [`SafetyProvenance`] for why
+    /// this is not a constant on this side.
+    pub cc_source_kind: String,
+    /// The version that source is stuck at, or `unknown`.
+    pub cc_source_version: String,
     /// Category keys and labels, in the generator's order. Shipped rather
     /// than mirrored in the renderer, so adding or reordering a category is
     /// one edit instead of two that can disagree.
@@ -240,7 +248,70 @@ impl CrosscheckValidity {
     }
 }
 
+/// Where the *safety* classification came from, and why that is a
+/// weaker claim than the binary cross-check beside it.
+///
+/// `binary_crosscheck_version` is compared against the running build and
+/// self-disables on a mismatch ([`CrosscheckValidity`]). The safety
+/// lists — `SAFE_ENV_VARS`, `PROVIDER_MANAGED_ENV_VARS`, and therefore
+/// every row's `pre_trust_safe` / `provider_managed` flag — have no such
+/// gate: `scripts/build-cc-env-spec.py` reads them from
+/// `~/github/claude_code_src/src/utils/managedEnvConstants.ts`, a
+/// third-party source mirror **pinned at 2.1.88 and abandoned upstream
+/// on 2026-04-15**. `.claude/rules/cc-upstream-watch.md` forbids that
+/// mirror as a verification source; the generator predates the rule.
+///
+/// This type exists so the weakness is *legible* rather than silent. It
+/// cannot be resolved by comparing versions — the mirror has no version
+/// to compare, it is simply old — so the honest surface is the date it
+/// was read and the fact that it is a mirror.
+///
+/// Why it matters rather than being pedantry: the flags are not
+/// cosmetic. `ANTHROPIC_CUSTOM_HEADERS` is pre-trust-safe *and* able to
+/// carry `Authorization: Bearer …`; "safe to apply from an untrusted
+/// source" and "safe to display" are different axes, and a row carrying
+/// a stale answer to the first can leak on the second.
+///
+/// The lists are minified out of the shipped binary, so closing this
+/// needs a new extraction strategy, not a re-run of the generator.
+///
+/// **Every field is read from the generated artifact, never hardcoded
+/// here.** A constant on this side would keep announcing "pinned mirror,
+/// 2.1.88" as fact after the generator moved to a different source —
+/// which is the same status-surface-asserts-an-unverified-claim failure
+/// this disclosure exists to prevent, reintroduced by the fix for it.
+/// The generator derives both from the path it actually opened and the
+/// tarball it found beside it.
+#[derive(Clone, Debug, Serialize, Eq, PartialEq)]
+pub struct SafetyProvenance {
+    /// `cc_source_read_at` — the mtime of the file the lists were read
+    /// from, not the date of the release they describe.
+    pub read_at: String,
+    /// True while the lists come from the pinned source mirror. Derived
+    /// from the artifact's `cc_source_kind`, so a future extraction from
+    /// the installed binary flips it without anyone editing Rust.
+    pub from_pinned_mirror: bool,
+    /// The version that source is stuck at, or `unknown` when the
+    /// generator could not determine it. Rendered as-is — an honest
+    /// blank beats a stale constant.
+    pub mirror_version: String,
+}
+
 impl EnvSpec {
+    /// Provenance of the safety flags. See [`SafetyProvenance`] — this
+    /// is deliberately not a validity *gate*: unlike the binary
+    /// cross-check there is nothing to compare against, and hiding the
+    /// flags would leave the pane unable to warn about anything at all.
+    /// The caller's job is to say where they came from, not to suppress
+    /// them.
+    pub fn safety_provenance(&self) -> SafetyProvenance {
+        SafetyProvenance {
+            read_at: self.cc_source_read_at.clone(),
+            from_pinned_mirror: self.cc_source_kind == "pinned_mirror",
+            mirror_version: self.cc_source_version.clone(),
+        }
+    }
+
     /// Compare the snapshot's binary version with the installed one.
     pub fn crosscheck_validity(&self, installed_version: Option<&str>) -> CrosscheckValidity {
         match installed_version {
@@ -310,6 +381,8 @@ fn spec_or_empty() -> &'static EnvSpec {
             docs_sha256: String::new(),
             binary_crosscheck_version: String::new(),
             cc_source_read_at: String::new(),
+            cc_source_kind: String::new(),
+            cc_source_version: String::new(),
             categories: Vec::new(),
             documented_count: 0,
             undocumented_in_build: Vec::new(),
@@ -538,5 +611,35 @@ mod tests {
         assert!(!s.docs_fetched_at.is_empty());
         assert_eq!(s.docs_sha256.len(), 64);
         assert!(!s.binary_crosscheck_version.is_empty());
+    }
+
+    /// The provenance the disclosure renders must come from the shipped
+    /// artifact, not from a literal in this file. The first version of
+    /// `SafetyProvenance` hardcoded `from_pinned_mirror: true` and the
+    /// version string, which would have gone on asserting "pinned
+    /// mirror, 2.1.88" as fact after the generator changed source — the
+    /// failure the disclosure exists to prevent.
+    #[test]
+    fn safety_provenance_is_read_from_the_artifact() {
+        let s = spec();
+        let p = s.safety_provenance();
+        assert_eq!(p.read_at, s.cc_source_read_at);
+        assert_eq!(p.mirror_version, s.cc_source_version);
+        assert_eq!(p.from_pinned_mirror, s.cc_source_kind == "pinned_mirror");
+        // and the artifact actually carries them
+        assert!(!s.cc_source_kind.is_empty(), "generator must emit cc_source_kind");
+        assert!(
+            !s.cc_source_version.is_empty(),
+            "generator must emit cc_source_version (`unknown` is allowed, empty is not)"
+        );
+    }
+
+    /// A different source kind must flip the flag with no Rust edit —
+    /// the whole point of moving it into the artifact.
+    #[test]
+    fn a_non_mirror_source_kind_clears_the_pinned_mirror_flag() {
+        let mut s = spec().clone();
+        s.cc_source_kind = "installed_binary".to_string();
+        assert!(!s.safety_provenance().from_pinned_mirror);
     }
 }

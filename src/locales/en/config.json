@@ -373,6 +373,7 @@
       "provenanceTitle": "Where these facts come from",
       "docsFetched": "Official documentation fetched {{date}}, sha256",
       "snapshotFrom": "Undocumented-name snapshot taken from Claude Code",
+      "safetySource": "Safety flags (pre-trust-safe, provider-managed) come from a Claude Code source mirror pinned at {{version}}, read {{date}} — not from your installed build. There is no version to compare, so unlike the snapshot above these cannot disable themselves when stale.",
       "installed": "Your installed Claude Code:",
       "unresolved": "could not be resolved",
       "atPath": " at ",

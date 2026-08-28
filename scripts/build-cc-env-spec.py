@@ -630,6 +630,38 @@ def parse_docs(md: str):
     return rows
 
 
+def _safety_source_kind() -> str:
+    """`pinned_mirror` while the safety lists come from the abandoned
+    third-party source checkout; `installed_binary` once a future
+    extraction reads them from the running Claude Code.
+
+    Derived from the path actually opened rather than declared, so it
+    cannot disagree with what was read.
+    """
+    return ("pinned_mirror" if "claude_code_src" in CC_SRC_CONSTANTS
+            else "installed_binary")
+
+
+def _safety_source_version() -> str:
+    """The version the safety source is stuck at.
+
+    Read from the published tarball sitting in the mirror checkout
+    (`claude-code-<version>.tgz`) so the number is evidence rather than a
+    literal someone maintains by hand. `unknown` when it cannot be
+    determined — an honest blank beats a stale constant, and the consumer
+    renders it as-is.
+    """
+    root = CC_SRC_CONSTANTS.split("/src/")[0]
+    try:
+        for name in sorted(os.listdir(root)):
+            m = re.fullmatch(r"claude-code-(\d+\.\d+\.\d+)\.tgz", name)
+            if m:
+                return m.group(1)
+    except OSError:
+        pass
+    return "unknown"
+
+
 def _ts_set(src: str, ident: str) -> list:
     """Extract a `new Set([...])` literal from TypeScript. Comments are
     stripped first: PROVIDER_MANAGED_ENV_VARS' own comments contain
@@ -751,6 +783,16 @@ def rebuild_evidence(refresh: bool) -> dict:
         # same kind of quiet lie the two provenance fields exist to prevent.
         "cc_source_read_at": datetime.date.fromtimestamp(
             os.path.getmtime(CC_SRC_CONSTANTS)).isoformat(),
+        # WHICH KIND of source the safety lists came from, recorded in the
+        # artifact rather than hardcoded in the Rust that renders it. The
+        # consumer discloses this to the user as provenance, and a
+        # constant on that side would go on asserting "pinned mirror" as
+        # fact after this generator moved to a different source — the
+        # exact status-surface-states-an-unverified-claim failure the
+        # disclosure exists to prevent. Change the source and the artifact
+        # says so on the next rebuild.
+        "cc_source_kind": _safety_source_kind(),
+        "cc_source_version": _safety_source_version(),
         "cc_safe_env_vars": _ts_set(cc_src, "SAFE_ENV_VARS"),
         "cc_provider_managed_env_vars": _ts_set(
             cc_src, "PROVIDER_MANAGED_ENV_VARS"),
@@ -797,6 +839,8 @@ def build_spec(ev: dict) -> dict:
         "docs_sha256": ev["docs_sha256"],
         "binary_crosscheck_version": ev["binary_crosscheck_version"],
         "cc_source_read_at": ev["cc_source_read_at"],
+        "cc_source_kind": ev["cc_source_kind"],
+        "cc_source_version": ev["cc_source_version"],
         # Shipped so the renderer groups by the generator's own order and
         # labels instead of hand-copying this table into TypeScript, where
         # it would drift the first time a category is added or reordered.

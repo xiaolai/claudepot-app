@@ -62,6 +62,11 @@ const overview = (over: Partial<EnvOverview> = {}): EnvOverview => ({
   docs_fetched_at: "2026-07-28",
   docs_sha256: "a".repeat(64),
   binary_crosscheck_version: "2.1.220",
+  safety_provenance: {
+    read_at: "2026-04-01",
+    from_pinned_mirror: true,
+    mirror_version: "2.1.88",
+  },
   installed_version: "2.1.220",
   installed_path: "/opt/claude",
   settings_path: "/home/u/.claude/settings.json",
@@ -891,5 +896,22 @@ describe("EnvVarsPane navigation and reconciliation", () => {
     // Provenance is two facts, and the measured binary path is one of them.
     expect(screen.getByText("/opt/claude")).toBeTruthy();
     expect(screen.getByText(/2026-07-28/)).toBeTruthy();
+  });
+
+  // The safety flags have weaker provenance than the binary cross-check
+  // beside them and — unlike it — no gate that can switch them off when
+  // stale. The disclosure has to say so; silence there is what made the
+  // gap invisible in the first place.
+  it("discloses that the safety flags come from a pinned source mirror", async () => {
+    ccEnvListSpy.mockResolvedValue(overview());
+    const user = userEvent.setup();
+    render(<EnvVarsPane />);
+    await user.click(await screen.findByRole("button", { name: /about/i }));
+    expect(
+      await screen.findByText(/pinned at 2\.1\.88, read 2026-04-01/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/cannot disable themselves when stale/i),
+    ).toBeInTheDocument();
   });
 });

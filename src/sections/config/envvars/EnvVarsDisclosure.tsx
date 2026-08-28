@@ -74,6 +74,18 @@ export function EnvVarsDisclosure({ data }: { data: EnvOverview }) {
           {t("envvars.disclosure.snapshotFrom")}{" "}
           <code>{data.binary_crosscheck_version}</code>
         </li>
+        {/* Separate line, not folded into the one above: the safety
+            flags have weaker provenance than the binary cross-check and
+            no gate that can disable them when stale. Saying so is the
+            whole point — see `spec::SafetyProvenance`. */}
+        {data.safety_provenance.from_pinned_mirror && (
+          <li>
+            {t("envvars.disclosure.safetySource", {
+              version: data.safety_provenance.mirror_version,
+              date: data.safety_provenance.read_at,
+            })}
+          </li>
+        )}
         <li>
           {t("envvars.disclosure.installed")}{" "}
           {data.installed_version ? (

@@ -1,5 +1,5 @@
 {
- "binary_crosscheck_version": "2.1.241",
+ "binary_crosscheck_version": "2.1.250",
  "binary_env_names": [
   "ANTHROPIC_API_HOST",
   "ANTHROPIC_API_KEY",
@@ -24,10 +24,12 @@
   "ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION",
   "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME",
   "ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES",
+  "ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES3",
   "ANTHROPIC_DEFAULT_HAIKU_MODEL",
   "ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION",
   "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME",
   "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES",
+  "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES4",
   "ANTHROPIC_DEFAULT_MODEL",
   "ANTHROPIC_DEFAULT_OPUS_MODEL",
   "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION",
@@ -49,7 +51,6 @@
   "ANTHROPIC_GOOGLE_CLOUD_PROJECT",
   "ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID",
   "ANTHROPIC_IDENTITY_TOKEN",
-  "ANTHROPIC_IDENTITY_TOKENP",
   "ANTHROPIC_IDENTITY_TOKEN_FILE",
   "ANTHROPIC_LOG",
   "ANTHROPIC_MODEL",
@@ -110,6 +111,7 @@
   "CLAUDE_CODE_ALWAYS_ENABLE_EFFORT",
   "CLAUDE_CODE_AMBER_ASTROLABE",
   "CLAUDE_CODE_API_BASE_URL",
+  "CLAUDE_CODE_API_BASE_URLB",
   "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR",
   "CLAUDE_CODE_API_KEY_HELPER_TTL_MS",
   "CLAUDE_CODE_ARTIFACT",
@@ -127,17 +129,24 @@
   "CLAUDE_CODE_ARTIFACT_DELETE",
   "CLAUDE_CODE_ARTIFACT_LIVE_BASE_URL",
   "CLAUDE_CODE_ARTIFACT_MCP",
+  "CLAUDE_CODE_ARTIFACT_MCP6",
+  "CLAUDE_CODE_ARTIFACT_PREVIEW",
+  "CLAUDE_CODE_ARTIFACT_PREVIEW0",
   "CLAUDE_CODE_ARTIFACT_ROOM",
   "CLAUDE_CODE_ARTIFACT_SYNC_BASE_URL",
   "CLAUDE_CODE_ARTIFACT_TYPES",
+  "CLAUDE_CODE_ARTIFACT_TYPE_CATALOG",
+  "CLAUDE_CODE_ARTIFACT_TYPE_CLOUD_CREATE",
   "CLAUDE_CODE_ARTIFACT_VERIFY",
   "CLAUDE_CODE_ARTIFACT_VIEWER_BASE_URL",
   "CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL",
   "CLAUDE_CODE_ATTRIBUTION_HEADER",
   "CLAUDE_CODE_AUTH_FAIL_EXIT_MS",
   "CLAUDE_CODE_AUTO_BACKGROUND_TIMEOUT_MS",
+  "CLAUDE_CODE_AUTO_BACKGROUND_WORKER_CHECKIN_SECONDS",
   "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
   "CLAUDE_CODE_AUTO_CONNECT_IDE",
+  "CLAUDE_CODE_AUTO_MODE_ARTIFACT_CONSENT_RULE",
   "CLAUDE_CODE_AUTO_MODE_CLASSIFY_ASK_USER_QUESTION",
   "CLAUDE_CODE_AUTO_MODE_CLASSIFY_EDITS",
   "CLAUDE_CODE_AUTO_MODE_EDIT_REMOVAL",
@@ -162,6 +171,7 @@
   "CLAUDE_CODE_BG_TASKS_REPORT_RUNNING",
   "CLAUDE_CODE_BISON_CAIRN",
   "CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE",
+  "CLAUDE_CODE_BREEZY_HORIZON",
   "CLAUDE_CODE_BRIDGE_MCP_CARRIER",
   "CLAUDE_CODE_BRIDGE_PROMPT_SHA256",
   "CLAUDE_CODE_BRIDGE_SESSION_ID",
@@ -170,17 +180,21 @@
   "CLAUDE_CODE_BS_AS_CTRL_BACKSPACE",
   "CLAUDE_CODE_BUBBLEWRAP",
   "CLAUDE_CODE_BYOC_ENABLE_DATADOG",
+  "CLAUDE_CODE_CCR_LAZY_SUBAGENT_HYDRATE",
   "CLAUDE_CODE_CERT_STORE",
   "CLAUDE_CODE_CHILD_SESSION",
   "CLAUDE_CODE_CLASSIFIER_SUMMARY",
   "CLAUDE_CODE_CLIENT_CERT",
   "CLAUDE_CODE_CLIENT_KEY",
   "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE",
+  "CLAUDE_CODE_CLOUD_SESSION_ID",
   "CLAUDE_CODE_COLD_COMPACT",
   "CLAUDE_CODE_CONTAINER_ID",
   "CLAUDE_CODE_COORDINATOR_EXTRA_TOOLS",
+  "CLAUDE_CODE_COORDINATOR_FORCE_WORKER_INHERIT_MODEL",
   "CLAUDE_CODE_COORDINATOR_MODE",
   "CLAUDE_CODE_COORDINATOR_PROPAGATE_NESTED_MEMORY",
+  "CLAUDE_CODE_COORDINATOR_WORKER_CHECKIN_SECONDS",
   "CLAUDE_CODE_COWORK_FRAME_ARTIFACTS",
   "CLAUDE_CODE_CUSTOM_OAUTH_URL",
   "CLAUDE_CODE_DAEMON_COLD_START",
@@ -193,10 +207,11 @@
   "CLAUDE_CODE_DESIGN_OAUTH_CLIENT_ID",
   "CLAUDE_CODE_DEV_RAW_CHANGELOG_URL",
   "CLAUDE_CODE_DIAGNOSTICS_FILE",
-  "CLAUDE_CODE_DIR_SYNC_ARCHIVE",
   "CLAUDE_CODE_DIR_SYNC_DISABLE_ANCHORING",
+  "CLAUDE_CODE_DIR_SYNC_ENGINE",
+  "CLAUDE_CODE_DIR_SYNC_FFWD",
   "CLAUDE_CODE_DIR_SYNC_GIT",
-  "CLAUDE_CODE_DIR_SYNC_OVERLAY",
+  "CLAUDE_CODE_DIR_SYNC_STREAM",
   "CLAUDE_CODE_DISABLE_1M_CONTEXT",
   "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING",
   "CLAUDE_CODE_DISABLE_ADMIN_ENV_UNION",
@@ -224,15 +239,18 @@
   "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY",
   "CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING",
   "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS",
+  "CLAUDE_CODE_DISABLE_HOME_SETTINGS_SEED",
   "CLAUDE_CODE_DISABLE_HOOK_FORWARDING",
   "CLAUDE_CODE_DISABLE_LAUNCH_COMPOSER",
   "CLAUDE_CODE_DISABLE_LEGACY_MODEL_REMAP",
   "CLAUDE_CODE_DISABLE_MEMORY_BULK_INFLATE",
   "CLAUDE_CODE_DISABLE_MEMORY_MASS_DELETE_HOLD",
   "CLAUDE_CODE_DISABLE_MEMORY_PERIODIC_RESYNC",
+  "CLAUDE_CODE_DISABLE_MEMORY_RO_UNSAVED_NOTICE",
   "CLAUDE_CODE_DISABLE_MEMORY_STREAM_LIST",
   "CLAUDE_CODE_DISABLE_MOUSE",
   "CLAUDE_CODE_DISABLE_MOUSE_CLICKS",
+  "CLAUDE_CODE_DISABLE_MOUSE_CLICKSC",
   "CLAUDE_CODE_DISABLE_MTLS_RELOAD_ON_STALE_CONNECTION",
   "CLAUDE_CODE_DISABLE_NESTED_CHAIN_IDLE",
   "CLAUDE_CODE_DISABLE_NESTED_USER_REPAIR",
@@ -295,16 +313,18 @@
   "CLAUDE_CODE_EXIT_AFTER_FIRST_RENDER",
   "CLAUDE_CODE_EXIT_AFTER_STOP_DELAY",
   "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS",
+  "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMSV",
   "CLAUDE_CODE_EXPERIMENTAL_OBSERVER_AGENTS",
   "CLAUDE_CODE_EXTRA_BODY",
   "CLAUDE_CODE_EXTRA_METADATA",
+  "CLAUDE_CODE_FEDERATION_CACHE_DIR",
   "CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS",
   "CLAUDE_CODE_FLEETVIEW_SIMPLE",
   "CLAUDE_CODE_FLEET_PAST_SESSIONS",
   "CLAUDE_CODE_FORCE_BRIDGE",
   "CLAUDE_CODE_FORCE_EVALUATE_MEMORY",
+  "CLAUDE_CODE_FORCE_FIRST_LAUNCH",
   "CLAUDE_CODE_FORCE_FULLSCREEN_UPSELL",
-  "CLAUDE_CODE_FORCE_FULL_LOGO",
   "CLAUDE_CODE_FORCE_MEMORY_SURVEY",
   "CLAUDE_CODE_FORCE_MID_CONVERSATION_SYSTEM",
   "CLAUDE_CODE_FORCE_RC_LONG_TURN_NUDGE",
@@ -327,8 +347,11 @@
   "CLAUDE_CODE_GLOB_NO_IGNORE",
   "CLAUDE_CODE_GLOB_TIMEOUT_SECONDS",
   "CLAUDE_CODE_GOAL_CHECKIN_MINUTES",
+  "CLAUDE_CODE_GOAL_CHECKIN_MINUTES0",
   "CLAUDE_CODE_GORSE_PLOVER",
+  "CLAUDE_CODE_GZIP_CCR_REQUEST_BODIES",
   "CLAUDE_CODE_GZIP_REQUEST_BODIES",
+  "CLAUDE_CODE_HANDBACK_PROVENANCE",
   "CLAUDE_CODE_HARBOR_KITE",
   "CLAUDE_CODE_HARBOR_KITE_CLOUD",
   "CLAUDE_CODE_HARBOR_KITE_PACING_OFF",
@@ -339,6 +362,7 @@
   "CLAUDE_CODE_HOLD_UNANSWERED_PARKED_PERMISSION",
   "CLAUDE_CODE_HOME_SEED_HOLD_TIMEOUT_MS",
   "CLAUDE_CODE_HOME_SEED_VERDICT_TIMEOUT_MS",
+  "CLAUDE_CODE_HOOKS_SAME_THREAD",
   "CLAUDE_CODE_HOST_AUTH_ENV_VAR",
   "CLAUDE_CODE_HOST_AUTH_REFRESH_TIMEOUT_MS",
   "CLAUDE_CODE_HOST_CREDS_FILE",
@@ -357,11 +381,11 @@
   "CLAUDE_CODE_INTRO_FRAME",
   "CLAUDE_CODE_INVOKED_SKILLS",
   "CLAUDE_CODE_IS_COWORK",
-  "CLAUDE_CODE_JSONL_TRANSCRIPT",
   "CLAUDE_CODE_JUNIPER_SUNDIAL",
   "CLAUDE_CODE_KB_COHESION_FIXES",
   "CLAUDE_CODE_LANTERN_PRISM",
   "CLAUDE_CODE_LARCH_CISTERN",
+  "CLAUDE_CODE_LEGACY_BUNDLE",
   "CLAUDE_CODE_LOOP_KEEPALIVE",
   "CLAUDE_CODE_LOOP_PERSISTENT",
   "CLAUDE_CODE_MANAGED_SETTINGS_PATH",
@@ -376,6 +400,7 @@
   "CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY",
   "CLAUDE_CODE_MAX_TURNS",
   "CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION",
+  "CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSIONN",
   "CLAUDE_CODE_MCP_ALLOWLIST_ENV",
   "CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS",
   "CLAUDE_CODE_MCP_MEMORY_CGROUP",
@@ -392,6 +417,7 @@
   "CLAUDE_CODE_NANKEEN_KESTREL",
   "CLAUDE_CODE_NATIVE_CURSOR",
   "CLAUDE_CODE_NEW_INIT",
+  "CLAUDE_CODE_NEW_INITA",
   "CLAUDE_CODE_NO_FLICKER",
   "CLAUDE_CODE_NO_MODEL_FALLBACK",
   "CLAUDE_CODE_OAUTH_401_WAIT_MS",
@@ -420,6 +446,7 @@
   "CLAUDE_CODE_PLAN_V2_AGENT_COUNT",
   "CLAUDE_CODE_PLAN_V2_EXPLORE_AGENT_COUNT",
   "CLAUDE_CODE_PLUGIN_ARCHIVE_URL",
+  "CLAUDE_CODE_PLUGIN_ATTRIBUTION",
   "CLAUDE_CODE_PLUGIN_BINARY_ASSETS",
   "CLAUDE_CODE_PLUGIN_CACHE_DIR",
   "CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS",
@@ -440,6 +467,7 @@
   "CLAUDE_CODE_PROFILE_QUERY",
   "CLAUDE_CODE_PROFILE_STARTUP",
   "CLAUDE_CODE_PROJECT_DIR_NAME",
+  "CLAUDE_CODE_PROMPT_CACHE_TTL",
   "CLAUDE_CODE_PROPAGATE_TRACEPARENT",
   "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
   "CLAUDE_CODE_PROXY_AUTHENTICATE",
@@ -453,7 +481,6 @@
   "CLAUDE_CODE_RC_PERMISSION_NUDGE",
   "CLAUDE_CODE_REFUSAL_FALLBACK_CATCH_ALL",
   "CLAUDE_CODE_RELAUNCH_TERMINAL_SIZE",
-  "CLAUDE_CODE_RELAUNCH_TERMINAL_SIZEYU",
   "CLAUDE_CODE_REMOTE",
   "CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE",
   "CLAUDE_CODE_REMOTE_HERMETIC_MODE",
@@ -465,9 +492,13 @@
   "CLAUDE_CODE_REMOTE_SESSION_UUID",
   "CLAUDE_CODE_REMOTE_SETTINGS_PATH",
   "CLAUDE_CODE_REMOTE_SETTINGS_POLL_MS",
+  "CLAUDE_CODE_REMOTE_TOOLS_POLICY",
+  "CLAUDE_CODE_REMOTE_TOOLS_SERVE",
+  "CLAUDE_CODE_REMOTE_TOOLS_SESSION_CHANNEL",
   "CLAUDE_CODE_REPL",
   "CLAUDE_CODE_REPORT_FINDINGS",
   "CLAUDE_CODE_REPO_CHECKOUTS",
+  "CLAUDE_CODE_RESTRICTED",
   "CLAUDE_CODE_RESUME_FROM_SESSION",
   "CLAUDE_CODE_RESUME_INTERRUPTED_TURN",
   "CLAUDE_CODE_RESUME_INTERRUPTED_TURN_MAX_AGE_MS",
@@ -475,6 +506,7 @@
   "CLAUDE_CODE_RESUME_SOURCE_ALIVE",
   "CLAUDE_CODE_RESUME_THRESHOLD_MINUTES",
   "CLAUDE_CODE_RESUME_TOKEN_THRESHOLD",
+  "CLAUDE_CODE_RESUME_TOLERATES_CONTEXT_APPENDS",
   "CLAUDE_CODE_RETIRE_UNANSWERED_PARKED_PERMISSION",
   "CLAUDE_CODE_RETRY_WATCHDOG",
   "CLAUDE_CODE_SABLE_THRUSH",
@@ -507,6 +539,7 @@
   "CLAUDE_CODE_SKIP_BEDROCK_AUTH",
   "CLAUDE_CODE_SKIP_FAST_MODE_NETWORK_ERRORS",
   "CLAUDE_CODE_SKIP_FAST_MODE_ORG_CHECK",
+  "CLAUDE_CODE_SKIP_FAST_MODE_ORG_CHECKA",
   "CLAUDE_CODE_SKIP_FOUNDRY_AUTH",
   "CLAUDE_CODE_SKIP_HFI_VERSION_CHECK",
   "CLAUDE_CODE_SKIP_MANTLE_AUTH",
@@ -524,6 +557,7 @@
   "CLAUDE_CODE_STOP_HOOK_BLOCK_CAP",
   "CLAUDE_CODE_SUBAGENT_CACHE_EVICT",
   "CLAUDE_CODE_SUBAGENT_MODEL",
+  "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL",
   "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB",
   "CLAUDE_CODE_SUBSCRIPTION_TYPE",
   "CLAUDE_CODE_SUPERVISED",
@@ -557,6 +591,8 @@
   "CLAUDE_CODE_THINKING_DISPLAY_UPDATES",
   "CLAUDE_CODE_THISTLE_GREBE",
   "CLAUDE_CODE_THRIFTY_SONIC",
+  "CLAUDE_CODE_TICKLISH_WHISPER",
+  "CLAUDE_CODE_TICKLISH_WHISPER_TIMEOUT_MS",
   "CLAUDE_CODE_TMPDIR",
   "CLAUDE_CODE_TMUX_PREFIX",
   "CLAUDE_CODE_TMUX_PREFIX_CONFLICTS",
@@ -564,6 +600,7 @@
   "CLAUDE_CODE_TMUX_TRUECOLOR",
   "CLAUDE_CODE_TOASTY_THIMBLE",
   "CLAUDE_CODE_TODO_REMINDER_MODE",
+  "CLAUDE_CODE_TOOL_MEMORY_CGROUP_EXCLUDE",
   "CLAUDE_CODE_TOOL_MEMORY_LIMIT",
   "CLAUDE_CODE_TOTAL_TOKENS_REMINDER",
   "CLAUDE_CODE_TOTAL_TOKENS_REMINDER_AFTER_USER_TURN",
@@ -597,9 +634,12 @@
   "CLAUDE_CODE_WEBSEARCH_USE_CCR_PROXY",
   "CLAUDE_CODE_WEBSOCKET_AUTH_FILE_DESCRIPTOR",
   "CLAUDE_CODE_WEB_FETCH_AGENT",
+  "CLAUDE_CODE_WILLOW_TERN",
   "CLAUDE_CODE_WORKER_EPOCH",
   "CLAUDE_CODE_WORKFLOWS",
+  "CLAUDE_CODE_WORKFLOW_LAUNCH_SHA256",
   "CLAUDE_CODE_WORKFLOW_PREFIX_STAGGER_MS",
+  "CLAUDE_CODE_WORKFLOW_PROMPT_PROVENANCE",
   "CLAUDE_CODE_WORKFLOW_SIZE_WARNING_AGENTS",
   "CLAUDE_CODE_WORKFLOW_SIZE_WARNING_TOKENS",
   "CLAUDE_CODE_WORKSPACE_HOST_PATHS",
@@ -822,9 +862,11 @@
   "VERTEX_REGION_CLAUDE_4_6_SONNET",
   "VERTEX_REGION_CLAUDE_HAIKU_4_5"
  ],
+ "cc_source_kind": "pinned_mirror",
  "cc_source_read_at": "2026-04-01",
- "docs_fetched_at": "2026-08-24",
- "docs_sha256": "a0355c4d410e46dfd5757bdce0966d99578d71d605ce7ef9804d7c103e865c28",
+ "cc_source_version": "2.1.88",
+ "docs_fetched_at": "2026-08-28",
+ "docs_sha256": "4eb837c060ff00b76edcf21f2b58fa2ec5d7a2384935e3deafff97b20c05390c",
  "docs_url": "https://code.claude.com/docs/en/env-vars.md",
  "rows": [
   {
@@ -1120,11 +1162,11 @@
    "name": "CLAUDE_CODE_ARTIFACT_AUTO_OPEN"
   },
   {
-   "doc": "Set to `1` to let Claude read and reply to [comments on an artifact](/docs/en/artifacts#collect-comments-on-an-artifact) when [feature-flag fetching](#features-that-need-feature-flag-fetching) is off. Set to `0` to turn comment reading and replying off even when fetching is on. Has no effect when `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` has [turned artifacts off](/docs/en/artifacts#availability). Requires Claude Code v2.1.221 or later",
+   "doc": "Set to `0` to stop Claude reading and replying to [comments on an artifact](/docs/en/artifacts#collect-comments-on-an-artifact). Has no effect when `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` has [turned artifacts off](/docs/en/artifacts#availability). Requires Claude Code v2.1.221 or later",
    "name": "CLAUDE_CODE_ARTIFACT_COMMENTS"
   },
   {
-   "doc": "Set to `1` to let Claude [reply on its own to comments sent to it](/docs/en/artifacts#let-claude-reply-to-comments-on-its-own) when [feature-flag fetching](#features-that-need-feature-flag-fetching) is off, or `0` to turn that off even when fetching is on. Needs comment reading on as well. Requires Claude Code v2.1.228 or later",
+   "doc": "Set to `0` to stop Claude [replying on its own to comments sent to it](/docs/en/artifacts#let-claude-reply-to-comments-on-its-own). Requires Claude Code v2.1.228 or later",
    "name": "CLAUDE_CODE_ARTIFACT_COMMENTS_AUTOREACT"
   },
   {
@@ -1208,7 +1250,7 @@
    "name": "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN"
   },
   {
-   "doc": "Set to `1` to disable the [Artifact](/docs/en/artifacts) tool, which publishes session output as a private web page on claude.ai. Equivalent to the [`disableArtifact`](/docs/en/settings-reference#disableartifact) setting",
+   "doc": "Set to `1` to turn off the [Artifact](/docs/en/artifacts) tool, which publishes session output as a private web page on claude.ai. Once you set it, no settings file turns the tool back on. To turn the tool off from a settings file instead, set [`enableArtifact`](/docs/en/settings-reference#enableartifact) to `false`; the deprecated [`disableArtifact`](/docs/en/settings-reference#disableartifact) key also turns it off",
    "name": "CLAUDE_CODE_DISABLE_ARTIFACT"
   },
   {
@@ -1222,6 +1264,10 @@
   {
    "doc": "Set to `1` to disable all background task functionality, including the `run_in_background` parameter on Bash and subagent tools, auto-backgrounding, and the Ctrl+B shortcut",
    "name": "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"
+  },
+  {
+   "doc": "Set to `1` to stop Claude Code from treating an [Amazon Bedrock](/docs/en/amazon-bedrock) streaming response with a missing or empty `Content-Type` header as the binary `application/vnd.amazon.eventstream` format. Amazon Bedrock always sends that header, so when it's absent, a [proxy stripped it](/docs/en/amazon-bedrock#streaming-errors-behind-a-gateway-or-proxy) and by default Claude Code decodes the body as the binary format anyway. Set this variable only when the proxy strips the header and also re-emits the body as server-sent events; Claude Code then reads the body as server-sent events instead. Requires Claude Code v2.1.239 or later",
+   "name": "CLAUDE_CODE_DISABLE_BEDROCK_CONTENT_TYPE_DEFAULT"
   },
   {
    "doc": "Set to `1` to skip the check that an [Amazon Bedrock](/docs/en/amazon-bedrock) streaming response carries the `application/vnd.amazon.eventstream` content-type. Without this variable, a response with a different content-type fails with an error naming that content-type, which means a [gateway or proxy is transforming the response](/docs/en/amazon-bedrock#streaming-errors-behind-a-gateway-or-proxy). Set it only when the gateway rewrites the `Content-Type` header but passes the binary event-stream body through unmodified; if the body itself was transformed, requests fail with `Truncated event message received` instead. Requires Claude Code v2.1.208 or later",
@@ -1288,7 +1334,7 @@
    "name": "CLAUDE_CODE_DISABLE_MTLS_RELOAD_ON_STALE_CONNECTION"
   },
   {
-   "doc": "Set to any non-empty value, such as `1`, to disable nonessential network traffic: auto-updates, telemetry, error reporting, the `/feedback` command, release notes, [gateway model discovery](/docs/en/llm-gateway-connect#add-gateway-models-to-the-model-picker) refreshes, and availability checks such as the [fast mode](/docs/en/fast-mode#use-fast-mode-behind-proxies-and-llm-gateways) check. It also stops the [background runs of plugin `command` sources](/docs/en/plugin-marketplaces#when-claude-code-re-runs-the-command), which are local commands rather than network traffic, because they can trigger dependency installs. **Setting it to `0` or `false` still disables this traffic**, unlike most on/off variables; unset the variable to allow it again. Also disables feature-flag fetching, which makes [Remote Control](/docs/en/remote-control#requirements) and the other [features that need feature-flag fetching](#features-that-need-feature-flag-fetching) unavailable. Official plugin marketplace auto-install isn't covered; disable it with `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL`",
+   "doc": "Set to any non-empty value, such as `1`, to disable nonessential network traffic: auto-updates, telemetry, error reporting, the `/feedback` command, [Claude-drafted feedback](/docs/en/tools-reference#sendfeedback-tool-behavior), release notes, [gateway model discovery](/docs/en/llm-gateway-connect#add-gateway-models-to-the-model-picker) refreshes, and availability checks such as the [fast mode](/docs/en/fast-mode#use-fast-mode-behind-proxies-and-llm-gateways) check. It also stops the [background runs of plugin `command` sources](/docs/en/plugin-marketplaces#when-claude-code-re-runs-the-command), which are local commands rather than network traffic, because they can trigger dependency installs. **Setting it to `0` or `false` still disables this traffic**, unlike most on/off variables; unset the variable to allow it again. Also disables feature-flag fetching, which makes [Remote Control](/docs/en/remote-control#requirements) and the other [features that need feature-flag fetching](#features-that-need-feature-flag-fetching) unavailable. Official plugin marketplace auto-install isn't covered; disable it with `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL`",
    "name": "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"
   },
   {
@@ -1604,6 +1650,10 @@
    "name": "CLAUDE_CODE_PROJECT_DIR_NAME"
   },
   {
+   "doc": "Set `5m` or `1h`, the only values Claude Code accepts, to choose the [prompt cache TTL](/docs/en/prompt-caching#cache-lifetime) for the main conversation: your interactive, `-p`, and SDK turns, plus the helpers that run inline with them. Takes precedence over the `promptCacheTtl` setting and over `ENABLE_PROMPT_CACHING_1H`, and `FORCE_PROMPT_CACHING_5M` overrides it. The API bills 1-hour cache writes at a higher rate. Requires Claude Code v2.1.242 or later",
+   "name": "CLAUDE_CODE_PROMPT_CACHE_TTL"
+  },
+  {
    "doc": "Set to `1` to propagate W3C trace context when `ANTHROPIC_BASE_URL` points at a custom proxy. Propagation covers the `traceparent` header on model and HTTP MCP requests and the `TRACEPARENT` environment variable for Bash, PowerShell, and hook subprocesses. By default, propagation is enabled only when connected directly to the Anthropic API. Added in v2.1.152. See [Traces (beta)](/docs/en/monitoring-usage#traces-beta)",
    "name": "CLAUDE_CODE_PROPAGATE_TRACEPARENT"
   },
@@ -1622,6 +1672,10 @@
   {
    "doc": "Set automatically in [cloud sessions](/docs/en/claude-code-on-the-web) to the current session's ID. Read this to construct a link back to the session transcript. See [Link output back to the session](/docs/en/cloud-environments#link-output-back-to-the-session)",
    "name": "CLAUDE_CODE_REMOTE_SESSION_ID"
+  },
+  {
+   "doc": "Set to `1` to start the session in restricted mode, the same as passing [`--restricted`](/docs/en/cli-reference#cli-flags). Claude Code ignores this variable in a settings file's `env` block. Requires Claude Code v2.1.248 or later",
+   "name": "CLAUDE_CODE_RESTRICTED"
   },
   {
    "doc": "Set to `1` to automatically resume if the previous session ended mid-turn. Used in SDK mode so the model continues without requiring the SDK to re-send the prompt. To turn this off, unset the variable or set it to `0`. Before v2.1.221, Claude Code ignored `0` and other falsy values, so setting `0` still triggered the resume in non-interactive mode and unsetting the variable was the only way to turn it off",
@@ -1650,6 +1704,10 @@
   {
    "doc": "Set the mouse wheel scroll multiplier in [fullscreen rendering](/docs/en/fullscreen#mouse-wheel-scrolling). Accepts any positive value up to 20, including fractional values below 1 such as `0.5` to slow accelerated trackpad and wheel scrolling in terminals that already amplify wheel events. Set to `3` to match `vim` if your terminal sends one wheel event per notch without amplification. Ignored in the JetBrains IDE terminal, where Claude Code uses its own scroll handling",
    "name": "CLAUDE_CODE_SCROLL_SPEED"
+  },
+  {
+   "doc": "Set to `0` to turn off [Claude-drafted feedback](/docs/en/tools-reference#sendfeedback-tool-behavior) for a session. Set to `1` to turn it on where your account already has access; the variable can't grant access itself, and the other switches that turn feedback off, such as `DISABLE_FEEDBACK_COMMAND` and the [`feedbackDrafts`](/docs/en/settings-reference#feedbackdrafts) setting's `off` value, still apply",
+   "name": "CLAUDE_CODE_SEND_FEEDBACK"
   },
   {
    "doc": "Override the time budget in milliseconds for [SessionEnd](/docs/en/hooks#sessionend) hooks. Applies to session exit, `/clear`, and switching sessions via interactive `/resume`. By default the budget is 1.5 seconds, automatically raised to the highest per-hook `timeout` configured in settings files, up to 60 seconds. Timeouts on plugin-provided hooks do not raise the budget",
@@ -1720,6 +1778,10 @@
    "name": "CLAUDE_CODE_SUBAGENT_MODEL"
   },
   {
+   "doc": "Set `5m` or `1h`, the only values Claude Code accepts, to choose the [prompt cache TTL](/docs/en/prompt-caching#cache-lifetime) for requests outside the main conversation, such as [subagents](/docs/en/sub-agents), workflows, and background work. Takes precedence over the `subagentPromptCacheTtl` setting and over `ENABLE_PROMPT_CACHING_1H`, and `FORCE_PROMPT_CACHING_5M` overrides it. The API bills 1-hour cache writes at a higher rate. Requires Claude Code v2.1.242 or later",
+   "name": "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL"
+  },
+  {
    "doc": "Set to `1` to strip Anthropic and cloud provider credentials from subprocess environments (Bash tool, hooks, MCP stdio servers). The parent Claude process keeps these credentials for API calls, but child processes cannot read them, reducing exposure to prompt injection attacks that attempt to exfiltrate secrets via shell expansion. On Linux, this also runs Bash subprocesses in an isolated PID namespace so they cannot read host process environments via `/proc`; as a side effect, `ps`, `pgrep`, and `kill` cannot see or signal host processes. `claude-code-action` sets this automatically when `allowed_non_write_users` is configured",
    "name": "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB"
   },
@@ -1764,7 +1826,11 @@
    "name": "CLAUDE_CODE_TMUX_TRUECOLOR"
   },
   {
-   "doc": "On Linux and WSL, set to a size such as `4G` to [cap the memory that Bash and PowerShell tool commands can use](/docs/en/tools-reference#memory-limit-on-linux-and-wsl). Write the size in plain digits, alone for a number of bytes or with a `K`, `M`, `G`, or `T` suffix. Set `0` or `off` to turn the cap off. Once a tool command has turned the cap on or off, a changed value takes effect the next time you launch `claude`. Requires Claude Code v2.1.233 or later",
+   "doc": "On Linux and WSL, set to a comma-separated list of the kinds of processes Claude Code [excludes from the tool memory cap](/docs/en/tools-reference#memory-limit-on-linux-and-wsl), such as `mcp` or `lsp`. Set `none` to cap every kind, or `all-new` to cap only Bash, PowerShell, and Monitor tool commands. Claude Code keeps Bash, PowerShell, and Monitor tool commands under the cap whatever you list. Requires Claude Code v2.1.246 or later",
+   "name": "CLAUDE_CODE_TOOL_MEMORY_CGROUP_EXCLUDE"
+  },
+  {
+   "doc": "On Linux and WSL, set to a size such as `4G` to [cap the memory that Bash and PowerShell tool commands can use](/docs/en/tools-reference#memory-limit-on-linux-and-wsl), and Monitor tool commands on v2.1.246 or later. Write the size in plain digits, alone for a number of bytes or with a `K`, `M`, `G`, or `T` suffix. Set `0` or `off` to turn the cap off. Once the first process Claude Code starts has turned the cap on or off, a changed value takes effect the next time you launch `claude`. Requires Claude Code v2.1.233 or later",
    "name": "CLAUDE_CODE_TOOL_MEMORY_LIMIT"
   },
   {
@@ -1884,7 +1950,7 @@
    "name": "DISABLE_EXTRA_USAGE_COMMAND"
   },
   {
-   "doc": "Set to `1` to disable the `/feedback` command. Also disables `/bug` and `/share`, which report through the same path; before v2.1.212 they were aliases of `/feedback`, so the command was disabled under every name. The older name `DISABLE_BUG_COMMAND` is also accepted",
+   "doc": "Set to `1` to disable the `/feedback` command and [Claude-drafted feedback](/docs/en/tools-reference#sendfeedback-tool-behavior). Also disables `/bug` and `/share`, which report through the same path; before v2.1.212 they were aliases of `/feedback`, so the command was disabled under every name. The older name `DISABLE_BUG_COMMAND` is also accepted",
    "name": "DISABLE_FEEDBACK_COMMAND"
   },
   {
@@ -1948,11 +2014,11 @@
    "name": "DO_NOT_TRACK"
   },
   {
-   "doc": "Set to `false` to disable [claude.ai MCP servers](/docs/en/mcp#use-mcp-servers-from-claude-ai) in Claude Code. Enabled by default for logged-in users. To disable per-project or per-org, set [`disableClaudeAiConnectors`](/docs/en/settings-reference#disableclaudeaiconnectors) in settings instead",
+   "doc": "Set to `false` to stop Claude Code from fetching [claude.ai MCP servers](/docs/en/mcp#use-mcp-servers-from-claude-ai). Enabled by default for logged-in users. To disable per-project or per-org, set [`disableClaudeAiConnectors`](/docs/en/settings-reference#disableclaudeaiconnectors) in settings instead",
    "name": "ENABLE_CLAUDEAI_MCP_SERVERS"
   },
   {
-   "doc": "Set to `1` to request a 1-hour [prompt cache TTL](/docs/en/prompt-caching#cache-lifetime) instead of the default 5 minutes. Intended for API key, [Amazon Bedrock](/docs/en/amazon-bedrock), [Google Cloud's Agent Platform](/docs/en/google-vertex-ai), [Microsoft Foundry](/docs/en/microsoft-foundry), and [Claude Platform on AWS](/docs/en/claude-platform-on-aws) users. Subscription users within included usage receive 1-hour TTL automatically. Subscription users drawing on [usage credits](https://support.claude.com/en/articles/12429409-extra-usage-for-paid-claude-plans) can set it to keep the 1-hour TTL. 1-hour cache writes are billed at a higher rate",
+   "doc": "Set to `1` to request a 1-hour [prompt cache TTL](/docs/en/prompt-caching#cache-lifetime) instead of the default 5 minutes. Intended for API key, [Amazon Bedrock](/docs/en/amazon-bedrock), [Google Cloud's Agent Platform](/docs/en/google-vertex-ai), [Microsoft Foundry](/docs/en/microsoft-foundry), and [Claude Platform on AWS](/docs/en/claude-platform-on-aws) users. Subscription users within included usage receive the 1-hour TTL automatically on the [main conversation](/docs/en/prompt-caching#which-ttl-each-request-gets). Subscription users drawing on [usage credits](https://support.claude.com/en/articles/12429409-extra-usage-for-paid-claude-plans) can set it to keep the 1-hour TTL. 1-hour cache writes are billed at a higher rate. To choose the TTL per request bucket instead, use `CLAUDE_CODE_PROMPT_CACHE_TTL` and `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`, which take precedence over this variable",
    "name": "ENABLE_PROMPT_CACHING_1H"
   },
   {
@@ -1976,7 +2042,7 @@
    "name": "FORCE_HYPERLINK"
   },
   {
-   "doc": "Set to `1` to force the 5-minute prompt cache TTL even when 1-hour TTL would otherwise apply. Overrides `ENABLE_PROMPT_CACHING_1H`",
+   "doc": "Set to `1` to force the 5-minute prompt cache TTL even when 1-hour TTL would otherwise apply. Overrides `CLAUDE_CODE_PROMPT_CACHE_TTL`, `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`, `ENABLE_PROMPT_CACHING_1H`, and the `promptCacheTtl` and `subagentPromptCacheTtl` settings",
    "name": "FORCE_PROMPT_CACHING_5M"
   },
   {

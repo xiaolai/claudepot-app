@@ -137,6 +137,18 @@ export interface EnvOverview {
   docs_fetched_at: string;
   docs_sha256: string;
   binary_crosscheck_version: string;
+  /** Where the *safety* flags came from — deliberately not the same
+   *  claim as `binary_crosscheck_version`. The `SAFE_ENV_VARS` /
+   *  `PROVIDER_MANAGED` lists behind `pre_trust_safe` and
+   *  `provider_managed` are read from a Claude Code source mirror
+   *  pinned at 2.1.88 and abandoned upstream, so there is no version to
+   *  compare and no gate that could disable them. The disclosure names
+   *  the source instead of the pane hiding rows on the strength of it. */
+  safety_provenance: {
+    read_at: string;
+    from_pinned_mirror: boolean;
+    mirror_version: string;
+  };
   installed_version: string | null;
   installed_path: string | null;
   /** The settings file this pane actually edits, resolved. Not a constant

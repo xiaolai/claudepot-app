@@ -363,6 +363,7 @@
       "provenanceTitle": "这些事实的来源",
       "docsFetched": "官方文档抓取于 {{date}}，sha256",
       "snapshotFrom": "文档未收录名称的快照取自 Claude Code",
+      "safetySource": "安全标记（信任前安全、由服务商管理）来自固定在 {{version}} 的 Claude Code 源码镜像，读取于 {{date}}——而非你已安装的版本。它没有可比对的版本号，因此与上面的快照不同，过期时无法自行停用。",
       "installed": "你已安装的 Claude Code：",
       "unresolved": "无法解析",
       "atPath": "，位于 ",
