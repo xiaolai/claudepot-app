@@ -135,6 +135,37 @@ impl<'a> UserFrame<'a> {
 /// there is nothing to address. The cost is that CC sends us no
 /// `peer_message_status` receipt, which is why `send_prompt` reports
 /// "handed to the socket", never "delivered".
+///
+/// # Why this stays true even though the receipt got more informative
+///
+/// CC 2.1.248 made two outcomes explicit that used to vanish: sending
+/// to a session with `crossSessionInbound: "refuse"` now reports
+/// `refused` instead of a silent success, and an inbox that drops a
+/// message (rate limit, full queue) says so. The full status set on the
+/// wire is `held | denied | expired | delivered | refused | dropped`,
+/// correlated by `orig_msg_id` — and `refused` travels as
+/// `{status: "expired", status_detail: "refused"}`, normalised by the
+/// receiver.
+///
+/// Adopting any of it needs more than setting `from`. The receipt is
+/// **not** written back on the sending connection; CC opens a *new*
+/// connection to the reply address, and only after checking that the
+/// address is `uds:`-shaped and resolves **inside CC's own peer socket
+/// namespace** under an allowed owner uid. CC's own log names the
+/// rejection: *"hold-receipt skipped: reply address unshaped or outside
+/// our socket namespace"*. So receiving one means Claudepot binds a
+/// listening inbox in a directory Claude Code owns and presents itself
+/// to every peer as a CC session — a new accept-frames attack surface,
+/// adopted to improve a status string. That trade is refused here, not
+/// overlooked.
+///
+/// Note the fall-through is **silent**: no `from` means CC returns
+/// early, with no error and no log. The absence of receipts is
+/// therefore not evidence of anything, and must not be read as one.
+///
+/// Verified against Claude Code 2.1.250 (2026-08-28); the
+/// `peer messaging inbox` row in `crates/xtask/cc-upstream-watch.md`
+/// re-checks it.
 pub(crate) fn encode_line<T: Serialize>(frame: &T) -> Result<Vec<u8>, serde_json::Error> {
     let mut buf = serde_json::to_vec(frame)?;
     buf.push(b'\n');

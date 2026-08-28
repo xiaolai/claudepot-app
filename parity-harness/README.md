@@ -91,7 +91,32 @@ treat a CC minor-version jump or a quarter — whichever comes first —
 as the trigger to diff `utils/settings/settings.ts` between pinned and
 current and re-derive anything that moved.
 
-### 4.0 Decision (2026-08-18): the pin stays at 2.1.88 — deliberately
+### 4.0 Decision (2026-08-18, re-checked 2026-08-28): the pin stays at 2.1.88
+
+**Re-checked against the installed 2.1.250 binary on 2026-08-28, when a
+re-pin was explicitly requested.** The adapter gap is still shut, so the
+answer is unchanged and the request could not be honoured:
+
+- `claude --help` still has no `--dump-settings` /
+  `--dump-effective-settings` / `--print-settings` flag — zero matches
+  for `dump`, `effective`, `print-settings` or `show-settings`;
+- `strings` over the binary finds no `--dump*` surface at all;
+- `loadSettingsFromDisk` and `mergedSettings` *do* appear, but
+  `mergedSettings` is a **private class field** (`this.mergedSettings`)
+  on a minified settings-cache class — not an exported API, not a CLI
+  verb, and not reachable over the SDK control protocol;
+- the only `*[Ss]ettings"` method name in the bundle is
+  `getArtilleryComputerSettings`, which is unrelated.
+
+So re-deriving the twelve `expected.json` files against 2.1.250 remains
+impossible with current tooling, and bumping `PINNED_CC_VERSION` would
+mean editing twelve `notes.md` files to cite `claude-code@2.1.250` for a
+derivation that never happened — after which CI would enforce the lie on
+every future run. **A re-pin is not a decision waiting on authorization;
+it is blocked.** Reopen when the adapter gap opens, not on request and
+not on a calendar.
+
+### 4.0.1 The original decision (2026-08-18): freeze, with evidence
 
 Re-pin or freeze was an open question after CC reached 2.1.233. It is
 now answered **freeze**, with the evidence, so nobody re-opens it from
