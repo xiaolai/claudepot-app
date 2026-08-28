@@ -34,6 +34,7 @@ function report(over: {
       effective_days: 30,
       is_cc_default: true,
       cleanup_suppressed: false,
+      desktop_key_rejected: false,
       ...over.state,
     },
     risk: {
@@ -41,7 +42,7 @@ function report(over: {
       already_deletable: 0,
       at_risk_within_horizon: 0,
       oldest_ms: Date.UTC(2026, 5, 6),
-      nested_immortal: 0,
+      nested_below_session: 0,
       horizon_days: 7,
       scan_incomplete: false,
       ...over.risk,
@@ -99,14 +100,28 @@ describe("RetentionPane", () => {
     expect(screen.queryByText(/cross the cutoff/i)).toBeNull();
   });
 
-  it("explains why disk usage cannot reveal the loss", async () => {
+  // Until 2026-08-28 this asserted the opposite — that nested files are
+  // "never removed". That was true of CC 2.1.88 and false at 2.1.250,
+  // which `rm -rf`s the whole session folder when it unlinks the parent
+  // transcript. A test can lock in a falsehood as easily as a fact, and
+  // this one did; it now asserts the loss is *larger*, never that these
+  // files survive.
+  it("says nested files are destroyed with their parent session folder", async () => {
     retentionReportMock.mockResolvedValue(
-      report({ risk: { nested_immortal: 9291 } }),
+      report({ risk: { nested_below_session: 9291 } }),
     );
     render(<RetentionPane pushToast={toast()} />);
     expect(
-      await screen.findByText(/disk usage cannot reveal this loss/i),
+      await screen.findByText(/the whole session folder beside it/i),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(/not the size of what a sweep removes/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/never removed/i)).not.toBeInTheDocument();
+    // The count is a total, not a risk figure: the scan never correlates a
+    // nested file to a doomed sibling transcript, so the copy must not
+    // claim these particular files die with these particular transcripts.
+    expect(screen.queryByText(/go with them/i)).not.toBeInTheDocument();
   });
 
   // `cleanupPeriodDays` is a global TTL over ~20 directories under
@@ -226,6 +241,89 @@ describe("RetentionPane", () => {
     expect(
       screen.getByText(/transcripts are being written/i),
     ).toBeInTheDocument();
+  });
+
+  // A rejected `desktopSessionCleanupPeriodDays` suppresses CC's whole
+  // sweep while `cleanupPeriodDays` stays valid. The generic suppressed
+  // copy says the cause is "either cleanupPeriodDays or an unreadable
+  // file" — both false here, and it would send the user to inspect a
+  // setting the pane is simultaneously showing as fine.
+  it("names the desktop key when that is what suppressed cleanup", async () => {
+    retentionReportMock.mockResolvedValue(
+      report({
+        state: {
+          mode: "explicit",
+          configured_days: 30,
+          effective_days: 30,
+          is_cc_default: false,
+          cleanup_suppressed: true,
+          desktop_key_rejected: true,
+        },
+      }),
+    );
+    render(<RetentionPane pushToast={toast()} />);
+    expect(
+      await screen.findByText(/desktopSessionCleanupPeriodDays/),
+    ).toBeInTheDocument();
+    // and must actively clear the healthy key, not just omit it
+    expect(
+      screen.getByText(/`cleanupPeriodDays` is not the problem/),
+    ).toBeInTheDocument();
+  });
+
+  // The edge the desktop-key copy must never reach: an unreadable
+  // settings file resolves BOTH keys to invalid, so a flag derived from
+  // the desktop key alone would name it and clear `cleanupPeriodDays` on
+  // no evidence. Core now refuses to set the flag in that state; this
+  // asserts the pane's half of the contract.
+  it("falls back to the generic copy when no key can be blamed", async () => {
+    retentionReportMock.mockResolvedValue(
+      report({
+        state: {
+          mode: "invalid",
+          configured_days: null,
+          effective_days: 30,
+          is_cc_default: false,
+          cleanup_suppressed: true,
+          desktop_key_rejected: false,
+        },
+      }),
+    );
+    render(<RetentionPane pushToast={toast()} />);
+    expect(
+      await screen.findByText(/could not validate its settings/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/desktopSessionCleanupPeriodDays/),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/is not the problem/),
+    ).not.toBeInTheDocument();
+  });
+
+  // The state core's invariant makes unreachable. Asserted anyway, for
+  // the same reason the Rust byte-lock carries an invariant-violation
+  // fixture: if the flag ever did arrive set on an unreadable settings
+  // file, the pane must not name a key on no evidence. This is the
+  // renderer's own stake in the contract, not a duplicate of core's.
+  it("never names the desktop key when the mode says nothing was read", async () => {
+    retentionReportMock.mockResolvedValue(
+      report({
+        state: {
+          mode: "invalid",
+          configured_days: null,
+          effective_days: 30,
+          is_cc_default: false,
+          cleanup_suppressed: true,
+          desktop_key_rejected: true, // deliberately the impossible state
+        },
+      }),
+    );
+    render(<RetentionPane pushToast={toast()} />);
+    await screen.findByText(/skipping cleanup/i);
+    expect(
+      screen.queryByText(/`cleanupPeriodDays` is not the problem/),
+    ).not.toBeInTheDocument();
   });
 
   // While cleanup is suppressed the transcripts are protected by

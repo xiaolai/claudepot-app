@@ -395,10 +395,11 @@
       "scanIncomplete": "Claude Code 的对话记录文件夹有一部分无法读取，这些数字只是下限，不是总数。",
       "silent": "Claude Code 会静默执行 — 它从不报告删除了什么。",
       "suppressed": "Claude Code 完全跳过了清理，因为它无法校验设置。可能是 cleanupPeriodDays 的值被 Claude Code 拒绝，也可能是设置文件无法读取——Claudepot 无法分辨是哪一种。这只是意外地保护了你的对话记录。请修正设置文件，而不要恢复默认值，否则会重新启用删除。",
+      "suppressedDesktopKey": "Claude Code 完全跳过了清理，因为 `desktopSessionCleanupPeriodDays` 的值被拒绝——这会关闭所有记录的清理，而不仅仅是桌面端的。问题不在 `cleanupPeriodDays`。这是在意外地保护你的记录。请修正该键，而不要恢复默认值，否则会重新启动删除。",
       "totalOnMachine_other": "这台机器上共有 {{num}} 条对话记录。",
       "suppressedLegacyZero": "这个值是在 Claude Code 还将 cleanupPeriodDays: 0 视为“停止保存对话记录”时写入的。它现在拒绝该值，因此实际情况恰恰相反：对话记录仍在写入，而清理因设置无效而被完全跳过。在下方选一个保留时长即可修复——这也会同时开始删除更早的记录。"
     },
-    "nestedNote": "清理只删除 {{total}} 个顶层会话对话记录。另有 {{nested}} 个嵌套文件（子代理运行、工具结果）永远不会被删除，所以对话在被删除的同时文件夹仍在增长 — 磁盘占用无法暴露这种丢失。",
+    "nestedNote": "清理会删除 {{total}} 个顶层会话记录——并且删除某个记录时，还会连同旁边的整个会话文件夹一起删除，不检查其中任何文件的时间。另有 {{nested}} 个文件（子代理运行、工作流、远程代理、工具结果）位于这些文件夹内，不计入 {{total}}，因此该数字并不代表一次清理所移除的规模。",
     "keepFor": "对话记录保留时长",
     "preset30": "30 天",
     "preset90": "90 天",

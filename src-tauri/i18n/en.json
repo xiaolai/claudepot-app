@@ -65,6 +65,7 @@
   "retention.headDelete_other": "Claude Code will delete {n} saved conversations on its next launch",
   "retention.scanIncomplete": "Claudepot could not read part of Claude Code's transcript folder, so it cannot tell you what is scheduled for deletion. Settings → Retention.",
   "retention.suppressedInvalid": "Claude Code has stopped deleting saved conversations ({count} on this machine): it could not validate its settings. `cleanupPeriodDays` may hold a value Claude Code rejects, or the settings file may be unreadable — Claudepot cannot tell which. Nothing is being lost, but the protection is accidental. Settings → Retention.",
+  "retention.suppressedDesktopKey": "Claude Code has stopped deleting saved conversations ({count} on this machine): `desktopSessionCleanupPeriodDays` holds a value it rejects, which switches off cleanup for everything. `cleanupPeriodDays` is not the problem. Nothing is being lost, but the protection is accidental. Settings → Retention.",
   "retention.suppressedLegacyZero": "Claude Code is keeping every saved conversation ({count} on this machine). `cleanupPeriodDays: 0` once meant \"stop saving\"; Claude Code now rejects it, so transcripts are being written and cleanup is switched off. Settings → Retention.",
   "retention.suppressedTitle": "Transcript cleanup is switched off",
   "retention.tail": ". Settings → Retention.",

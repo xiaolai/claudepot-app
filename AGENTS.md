@@ -1583,9 +1583,22 @@ the pane:
   either new cause — reads as "cleanup armed". That errs toward warning
   about deletion that is not happening, which is the safe direction, but
   it is not complete.
-- **Invisible on disk.** Cleanup unlinks top-level session transcripts
-  and never walks `subagents/`, so the folder grows while history is
-  destroyed. `TranscriptRisk::nested_immortal` exists to say so.
+- **Bigger than the transcript count.** Deleting
+  `projects/<slug>/<uuid>.jsonl` also `rm -rf`s the session folder
+  `projects/<slug>/<uuid>/` beside it — `subagents/`, `workflows/`,
+  `remote-agents/`, `mcp-tasks/`, everything under them — with **no
+  per-file age check**. A second path recursively sweeps those three
+  by mtime for session folders whose transcript is already gone.
+  `TranscriptRisk::nested_below_session` counts them, because none of
+  them appear in the transcript total.
+
+  This entry said the opposite until 2026-08-28: that cleanup "never
+  walks `subagents/`", so the folder grows while history is destroyed.
+  True of 2.1.88, false at 2.1.250, and false in the direction that
+  matters — the pane told the user nested runs survived a sweep that
+  takes them, and a passing test asserted it. Found by doing the
+  `cc_sweep::SWEPT` reconciliation the watchlist row asks for, which
+  had been listed as "not verified this pass".
 - **It is not a transcript setting.** `cleanupPeriodDays` is a global
   TTL over ~20 directories under `~/.claude`, verified against the
   2.1.233 binary's cleanup module. `TranscriptRisk` counts `projects/`;

@@ -44,6 +44,18 @@ export interface RetentionState {
    *  value, never to "restore the default", which would re-arm
    *  deletion. */
   cleanup_suppressed: boolean;
+  /** `desktopSessionCleanupPeriodDays` (CC 2.1.248+) holds a value CC's
+   *  schema rejects, which suppresses cleanup for *every* transcript.
+   *
+   *  **The producer enforces** that this is only true when the settings
+   *  file read cleanly and `cleanupPeriodDays` itself parsed — an
+   *  unreadable file resolves *both* keys to invalid, and a flag set
+   *  from the desktop key alone could not tell that apart from a
+   *  genuinely bad desktop value. Consumers may therefore name the key
+   *  without re-checking `mode`, and must: CC's own `/doctor` names it,
+   *  and pointing the user at a valid `cleanupPeriodDays` would
+   *  contradict it. */
+  desktop_key_rejected: boolean;
 }
 
 export interface TranscriptRisk {
@@ -54,9 +66,15 @@ export interface TranscriptRisk {
   /** Crosses the cutoff within `horizon_days` (excludes the above). */
   at_risk_within_horizon: number;
   oldest_ms: number | null;
-  /** Files under session dirs that cleanup never walks. These are why
-   *  the folder grows while history is destroyed. */
-  nested_immortal: number;
+  /** Files under session dirs (`subagents/`, `workflows/`,
+   *  `remote-agents/`, tool results).
+   *
+   *  **Deleted, not immortal** — verified against CC 2.1.250: unlinking
+   *  a top-level `<uuid>.jsonl` also `rm -rf`s the sibling `<uuid>/`
+   *  folder, with no per-file age check. Reported separately because
+   *  none of these appear in `total_transcripts`, so that number alone
+   *  understates the loss — not because they survive it. */
+  nested_below_session: number;
   horizon_days: number;
   /** Part of the tree could not be read. The counts are a floor, not a
    *  total — never render reassurance while this is true. */

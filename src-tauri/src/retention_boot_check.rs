@@ -177,8 +177,14 @@ fn suppressed_body(s: &CleanupSuppressedWarning) -> String {
     } else {
         s.total_transcripts.to_string()
     };
+    // Branch order mirrors `message()` exactly: the desktop arm sits
+    // between the two, because it is the one suppressed state whose
+    // cause we actually know. Reordering these silently changes which
+    // key the user is told to go and inspect.
     let key = if s.mode == RetentionMode::LegacyZero {
         "retention.suppressedLegacyZero"
+    } else if s.desktop_key_rejected {
+        "retention.suppressedDesktopKey"
     } else {
         "retention.suppressedInvalid"
     };
@@ -292,6 +298,15 @@ mod tests {
         total_transcripts: u64,
         scan_incomplete: bool,
     ) -> CleanupSuppressedWarning {
+        suppressed_fixture_with(mode, total_transcripts, scan_incomplete, false)
+    }
+
+    fn suppressed_fixture_with(
+        mode: RetentionMode,
+        total_transcripts: u64,
+        scan_incomplete: bool,
+        desktop_key_rejected: bool,
+    ) -> CleanupSuppressedWarning {
         CleanupSuppressedWarning {
             mode,
             configured_days: if mode == RetentionMode::LegacyZero {
@@ -301,6 +316,7 @@ mod tests {
             },
             total_transcripts,
             scan_incomplete,
+            desktop_key_rejected,
         }
     }
 
@@ -317,6 +333,7 @@ mod tests {
                 effective_days: 30,
                 is_cc_default: mode == RetentionMode::CcDefault,
                 cleanup_suppressed: suppressed,
+                desktop_key_rejected: false,
             },
             risk: TranscriptRisk {
                 total_transcripts: total,
@@ -366,13 +383,33 @@ mod tests {
             suppressed_fixture(RetentionMode::LegacyZero, 1, true),
             suppressed_fixture(RetentionMode::Invalid, 7, false),
             suppressed_fixture(RetentionMode::Invalid, 0, true),
+            // The desktop arm. `mode` is Explicit here on purpose: that
+            // is the shape core produces when the settings file read
+            // cleanly, `cleanupPeriodDays` is fine, and only the desktop
+            // key is rejected.
+            suppressed_fixture_with(RetentionMode::Explicit, 12, false, true),
+            suppressed_fixture_with(RetentionMode::Explicit, 3, true, true),
+            // `CcDefault` is the other healthy mode the desktop arm can
+            // travel with: the user never set `cleanupPeriodDays`, and
+            // only the desktop key is bad.
+            suppressed_fixture_with(RetentionMode::CcDefault, 5, false, true),
+            // Core's invariant makes `Invalid + desktop_key_rejected`
+            // unreachable, and core's own
+            // `an_unreadable_settings_file_names_no_key` is what proves
+            // it — asserting that from here would mean widening core's
+            // API for a cross-crate test, which this file already
+            // declines to do above. What is locked here is this side's
+            // stake: if the flag ever did arrive set on an unreadable
+            // file, both compositions still say the same thing rather
+            // than one of them naming a key on no evidence.
+            suppressed_fixture_with(RetentionMode::Invalid, 9, false, true),
         ];
         for s in &cases {
             assert_eq!(suppressed_body(s), s.message(), "fixture: {s:?}");
         }
     }
 
-    /// The two bodies must never be confusable: one says deletion is
+    /// The two bodies must never be confusable:    /// The two bodies must never be confusable: one says deletion is
     /// coming, the other says it has stopped. A user reading the wrong
     /// one takes the wrong action on the only setting in Claude Code
     /// that destroys data.

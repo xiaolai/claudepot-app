@@ -32,11 +32,19 @@
 //!    the transcripts it just unlinked and its caller
 //!    (`cleanupOldMessageFilesInBackground`) discards the return value.
 //!    No log, no toast, no event. Nothing in CC ever tells the user.
-//! 4. **Invisible on disk.** Cleanup unlinks the small, valuable
-//!    top-level session transcripts and never walks `subagents/`, so the
-//!    directory *grows* while history is destroyed. Disk usage can never
-//!    reveal the loss — which is why [`TranscriptRisk`] reports
-//!    `nested_immortal` alongside the at-risk count.
+//! 4. **Bigger than the transcript count.** Deleting
+//!    `projects/<slug>/<uuid>.jsonl` also `rm -rf`s the session folder
+//!    `projects/<slug>/<uuid>/` sitting beside it — `subagents/`,
+//!    `workflows/`, `remote-agents/`, `mcp-tasks/` and everything under
+//!    them, with no per-file age check. So the loss is always larger
+//!    than the transcript number suggests, which is why
+//!    [`TranscriptRisk`] reports `nested_below_session` alongside it.
+//!
+//!    This reverses what this module claimed until 2026-08-28. The old
+//!    reading — cleanup "never walks `subagents/`", so the directory
+//!    grows while history is destroyed — was true of CC 2.1.88 and is
+//!    false at 2.1.250, in the direction that matters: it told the user
+//!    that nested runs survived a sweep that in fact takes them.
 //!
 //! # CC's resolution model
 //!
@@ -80,6 +88,22 @@ use std::path::{Path, PathBuf};
 
 /// Setting key in CC's `settings.json`.
 pub const CLEANUP_PERIOD_DAYS_KEY: &str = "cleanupPeriodDays";
+
+/// CC's ceiling on the *desktop* exemption, added in 2.1.248.
+///
+/// Transcripts created or last written by a desktop-host surface
+/// (Claude Desktop, Cowork) are **exempt from the
+/// [`CLEANUP_PERIOD_DAYS_KEY`] sweep entirely**; this key caps that
+/// exemption. Its schema is `int().nonnegative()`, and its default —
+/// `0` — means *no ceiling*, i.e. keep such transcripts until something
+/// else deletes them.
+///
+/// Note the polarity is the **opposite** of `cleanupPeriodDays`, which
+/// rejects `0` outright ([`MIN_CLEANUP_PERIOD_DAYS`]). A control that
+/// reuses the retention pane's validation for this key would be wrong.
+///
+/// Verified against Claude Code 2.1.250 (2026-08-28).
+pub const DESKTOP_SESSION_CLEANUP_PERIOD_DAYS_KEY: &str = "desktopSessionCleanupPeriodDays";
 
 /// CC's built-in default when the key is absent
 /// (`utils/cleanup.ts:23 DEFAULT_CLEANUP_PERIOD_DAYS`).
@@ -220,10 +244,58 @@ pub struct RetentionState {
     /// 30-day line. The UI must say "fix the value", never "restore
     /// the default".
     pub cleanup_suppressed: bool,
+    /// [`DESKTOP_SESSION_CLEANUP_PERIOD_DAYS_KEY`] holds a value CC's
+    /// schema rejects (negative, or not an integer) **and that is
+    /// demonstrably the cause** — i.e. [`Self::mode`] is healthy, so the
+    /// settings file was read and `cleanupPeriodDays` parsed fine.
+    ///
+    /// The second half is the whole invariant. An unreadable settings
+    /// file resolves to `Invalid` for *both* keys, and a flag set from
+    /// the desktop key alone could not tell that apart from a genuinely
+    /// bad desktop value — so every surface naming this key would be
+    /// asserting `cleanupPeriodDays` is healthy on no evidence.
+    ///
+    /// This exists to name the cause, not to describe the window. When
+    /// it is set while [`Self::mode`] is otherwise healthy, we know
+    /// something the `Invalid` case cannot know: the settings file was
+    /// read successfully, `cleanupPeriodDays` is fine, and *this* key is
+    /// what stopped CC's sweep. Saying "cleanupPeriodDays holds a value
+    /// Claude Code rejects" there would point the user at a valid
+    /// setting and contradict CC's own `/doctor`, which names the key.
+    ///
+    /// The ceiling *value* is deliberately not carried. Nothing renders
+    /// it, and a field with no reader is how the last round of drift
+    /// started.
+    pub desktop_key_rejected: bool,
 }
 
 /// Counts derived by walking the **transcript tree only**, the same way
 /// CC's cleanup walks `projects/`.
+///
+/// # The desktop exemption is not modelled, on purpose
+///
+/// Since CC 2.1.248 a transcript past the cutoff is *kept* when it was
+/// written by a desktop-host surface. CC decides that per file:
+/// a `<uuid>.desktop-released.json` sidecar (`reason: "delete"` releases
+/// it now, `"archive"` releases it once the sidecar itself ages past the
+/// cutoff), otherwise an `entrypoint` of `claude-desktop`,
+/// `claude-desktop-3p` or `local-agent` found in the file's head or tail.
+///
+/// These counts ignore all of that, so every desktop-written transcript
+/// is reported as at risk when CC will not touch it. That is deliberate,
+/// and the reason is which way the error points. The exemption is
+/// **disabled** by conditions Claudepot cannot observe — HIPAA and ZDR
+/// compliance modes, a policy-layer `cleanupPeriodDays`, and any settings
+/// validation error — so a classifier built on the file evidence alone
+/// would mark transcripts exempt that CC then deletes. Today every error
+/// here is over-warning; that change would introduce the first
+/// under-warning one, on the only CC setting that destroys user data.
+///
+/// Measured cost of the current bias on the reference machine
+/// (2026-08-28, CC 2.1.250): **zero** — no `.desktop-released.json`
+/// sidecar and no `entrypoint` field exists in any of its 2,145
+/// transcripts. It is non-zero only for someone running Claude Desktop
+/// or Cowork against the same `~/.claude`.
 ///
 /// # `cleanupPeriodDays` is not a transcript setting
 ///
@@ -268,11 +340,30 @@ pub struct TranscriptRisk {
     pub at_risk_within_horizon: u64,
     /// Oldest surviving transcript, epoch ms.
     pub oldest_ms: Option<i64>,
-    /// Files nested deeper than the project directory (`subagents/`,
-    /// tool-result payloads). CC's cleanup never walks these, so they
-    /// accumulate forever — this is why folder size can rise while
-    /// history is being destroyed.
-    pub nested_immortal: u64,
+    /// Files nested below a session folder (`subagents/`, `workflows/`,
+    /// `remote-agents/`, tool-result payloads).
+    ///
+    /// **These are deleted, not immortal.** Verified against CC 2.1.250:
+    /// when cleanup unlinks a top-level `<uuid>.jsonl` it immediately
+    /// `rm -rf`s the sibling `<uuid>/` directory — no per-file mtime
+    /// check, the whole tree goes. A second path catches session folders
+    /// whose transcript is already gone, recursively sweeping
+    /// `subagents` / `workflows` / `remote-agents` by mtime.
+    ///
+    /// They are counted separately because they are *invisible to the
+    /// transcript count*, not because they survive it.
+    ///
+    /// **The number is a total, not a risk figure**, and the difference
+    /// matters. The walk counts every nested file under every first-level
+    /// directory in `projects/<slug>/`; it does not check that the
+    /// directory is a session folder, that a sibling `<uuid>.jsonl`
+    /// exists, or that the sibling is past the cutoff. So this is "how
+    /// much lives below the transcript layer", not "how much dies in the
+    /// next sweep" — an orphaned session folder is counted here and is
+    /// swept on its own mtime, not with a parent. Correlating each
+    /// directory to a doomed sibling is the only way to make it a risk
+    /// figure; until that exists, no caller may present it as one.
+    pub nested_below_session: u64,
     pub horizon_days: i64,
     /// Some part of the tree could not be read (permissions, a
     /// transient I/O error, a `stat` that failed mid-walk).
@@ -466,8 +557,15 @@ impl RetentionWarning {
 /// Both are worth one line at boot; the copy differs.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CleanupSuppressedWarning {
-    /// Which suppressed state. Always `LegacyZero` or `Invalid` —
-    /// [`cleanup_suppressed_warning`] returns `None` for anything else.
+    /// Which suppressed state.
+    ///
+    /// `LegacyZero` or `Invalid` when the *cleanup* key is the problem.
+    /// It can also be a **healthy** `CcDefault` / `Explicit`: suppression
+    /// is caused by either retention key, and when only the desktop key
+    /// is rejected the cleanup key resolves normally. Read
+    /// [`Self::desktop_key_rejected`] to tell those apart —
+    /// [`cleanup_suppressed_warning`] returns `None` only when nothing
+    /// is suppressed at all.
     pub mode: RetentionMode,
     /// The raw value on disk when it was an integer at all — `Some(0)`
     /// for a legacy zero, `None` when the value was a string, float,
@@ -481,6 +579,15 @@ pub struct CleanupSuppressedWarning {
     /// `total_transcripts` is a floor. Never render it as a total while
     /// this is set.
     pub scan_incomplete: bool,
+    /// The *desktop* retention key is what CC rejected — see
+    /// [`RetentionState::desktop_key_rejected`], which enforces that this
+    /// is only ever true when the settings file was read and
+    /// `cleanupPeriodDays` itself parsed fine. That precondition is what
+    /// lets this arm name a cause where the `Invalid` arm may not.
+    ///
+    /// Note it therefore travels with a **healthy** [`Self::mode`]
+    /// (`Explicit` or `CcDefault`), not with `Invalid`.
+    pub desktop_key_rejected: bool,
 }
 
 impl CleanupSuppressedWarning {
@@ -512,6 +619,20 @@ impl CleanupSuppressedWarning {
             // explicitly set" vs "a settings file could not be read or
             // parsed"); until Claudepot models that distinction, say
             // only what is true of both.
+            // We read the file, `cleanupPeriodDays` came back healthy,
+            // and the desktop key did not. That is a cause we actually
+            // know, so this arm names it — and must, because CC's own
+            // `/doctor` names it too ("settings have validation errors
+            // but desktopSessionCleanupPeriodDays was explicitly set").
+            // Falling through to the hedge below would send the user to
+            // inspect a setting that is perfectly valid.
+            _ if self.desktop_key_rejected => format!(
+                "Claude Code has stopped deleting saved conversations ({count} on this \
+                 machine): `desktopSessionCleanupPeriodDays` holds a value it rejects, \
+                 which switches off cleanup for everything. `cleanupPeriodDays` is not \
+                 the problem. Nothing is being lost, but the protection is accidental. \
+                 Settings → Retention."
+            ),
             _ => format!(
                 "Claude Code has stopped deleting saved conversations ({count} on this \
                  machine): it could not validate its settings. `cleanupPeriodDays` may \
@@ -540,6 +661,7 @@ pub fn cleanup_suppressed_warning(report: &RetentionReport) -> Option<CleanupSup
         configured_days: report.state.configured_days,
         total_transcripts: report.risk.total_transcripts,
         scan_incomplete: report.risk.scan_incomplete,
+        desktop_key_rejected: report.state.desktop_key_rejected,
     })
 }
 
@@ -614,13 +736,22 @@ pub fn resolve_retention() -> RetentionState {
     // reading is the one that does not promise the user a deletion window we
     // could not verify: treat it as invalid, which is also what CC does with
     // a file it cannot validate.
-    let configured = read_i64_setting(&user_settings_path(), CLEANUP_PERIOD_DAYS_KEY)
+    let path = user_settings_path();
+    let configured =
+        read_i64_setting(&path, CLEANUP_PERIOD_DAYS_KEY).unwrap_or(SettingValue::Invalid);
+    // Read separately rather than inferred: CC checks BOTH keys when
+    // deciding whether to skip cleanup, so a settings file that is fine
+    // on `cleanupPeriodDays` and broken on this one still suppresses.
+    let desktop = read_i64_setting(&path, DESKTOP_SESSION_CLEANUP_PERIOD_DAYS_KEY)
         .unwrap_or(SettingValue::Invalid);
-    state_from_configured(configured)
+    state_from_configured(configured, desktop)
 }
 
 /// Split out so the resolution table is testable without a filesystem.
-fn state_from_configured(configured: SettingValue<i64>) -> RetentionState {
+fn state_from_configured(
+    configured: SettingValue<i64>,
+    desktop: SettingValue<i64>,
+) -> RetentionState {
     let (mode, effective_days) = match configured {
         SettingValue::Absent => (RetentionMode::CcDefault, CC_DEFAULT_CLEANUP_PERIOD_DAYS),
         // Present but not an integer — CC's schema rejects it and, with the
@@ -637,6 +768,33 @@ fn state_from_configured(configured: SettingValue<i64>) -> RetentionState {
         }
         SettingValue::Present(d) => (RetentionMode::Explicit, d),
     };
+    // CC's schema for the desktop key is `nonnegative`, so only a
+    // negative number or a non-integer is rejected. `0` is legal and
+    // means "no ceiling" — the opposite of what `0` means on the key
+    // above, which is why this is its own match rather than a shared
+    // helper.
+    let desktop_rejected = match desktop {
+        SettingValue::Absent => false,
+        SettingValue::Invalid => true,
+        SettingValue::Present(d) => d < 0,
+    };
+    // Suppression is caused by *either* key; naming the desktop one is a
+    // stronger claim and needs the stronger precondition.
+    //
+    // `resolve_retention` maps an unreadable or unparseable settings file
+    // to `Invalid` for **both** keys, so `desktop_rejected` alone cannot
+    // distinguish "the desktop key holds a bad value" from "we could not
+    // read the file at all". Reporting the first when it is the second
+    // tells the user `cleanupPeriodDays` is healthy on no evidence — the
+    // status-surface-asserts-an-unverified-claim failure, on the one CC
+    // setting that destroys data.
+    //
+    // A healthy `mode` is exactly the missing evidence: it can only be
+    // `CcDefault` or `Explicit` if the file was read and the cleanup key
+    // parsed. Anything else falls back to the hedged copy, which claims
+    // no cause at all.
+    let desktop_is_the_known_cause =
+        desktop_rejected && matches!(mode, RetentionMode::CcDefault | RetentionMode::Explicit);
     RetentionState {
         mode,
         configured_days: configured.ok(),
@@ -645,14 +803,26 @@ fn state_from_configured(configured: SettingValue<i64>) -> RetentionState {
         // `LegacyZero` suppresses cleanup exactly as `Invalid` does: CC
         // requires >= 1, so the key is present and fails validation,
         // which is the documented skip condition.
-        cleanup_suppressed: matches!(mode, RetentionMode::Invalid | RetentionMode::LegacyZero),
+        //
+        // A rejected *desktop* key suppresses cleanup for the same
+        // reason and by the same code path: CC 2.1.250 loops over
+        // `["cleanupPeriodDays", "desktopSessionCleanupPeriodDays"]` and
+        // skips the whole sweep when the settings file has validation
+        // errors while *either* is present. Missing this half reported
+        // an armed 30-day timer over history CC was in fact leaving
+        // alone, and pointed the user at the one button that starts it.
+        cleanup_suppressed: matches!(mode, RetentionMode::Invalid | RetentionMode::LegacyZero)
+            || desktop_rejected,
+        desktop_key_rejected: desktop_is_the_known_cause,
     }
 }
 
 /// Count transcripts against the cutoff CC will apply, walking exactly
 /// what `cleanupOldSessionFiles` walks: files sitting *directly* in each
 /// `projects/<slug>/` directory. Anything deeper is counted separately
-/// as `nested_immortal` — cleanup never reaches it.
+/// as `nested_below_session`, which is a **total and not a risk
+/// figure** — the walk never correlates a nested file to a doomed
+/// sibling transcript. See that field for what is and is not claimed.
 ///
 /// `now_ms` is injected so the guillotine math is testable.
 pub fn scan_transcript_risk(
@@ -741,7 +911,7 @@ pub fn scan_transcript_risk_in(
             };
             if ft.is_dir() {
                 let (n, ok) = count_nested(&entry.path());
-                risk.nested_immortal += n;
+                risk.nested_below_session += n;
                 if !ok {
                     risk.scan_incomplete = true;
                 }
@@ -772,7 +942,11 @@ pub fn scan_transcript_risk_in(
 }
 
 /// Recursively count `.jsonl` / `.cast` files below a session directory.
-/// These are the ones cleanup never unlinks.
+///
+/// These do not appear in `total_transcripts`, which counts only files
+/// sitting *directly* in `projects/<slug>/`. They are **not** immune to
+/// cleanup — see [`TranscriptRisk::nested_below_session`] for what
+/// actually happens to them.
 ///
 /// Returns `(count, complete)` — `complete == false` when any part of
 /// the subtree could not be read, so the caller can mark the whole scan
@@ -864,6 +1038,15 @@ pub fn clear_retention() -> Result<(), RetentionError> {
 
 #[cfg(test)]
 mod tests {
+
+    /// Every test below predates `desktopSessionCleanupPeriodDays`, and
+    /// every one of them means "that key is not set" — which is the
+    /// default on any machine that has never run Claude Desktop. Kept as
+    /// a helper so the desktop half has to be named explicitly by the
+    /// tests that actually exercise it.
+    fn state_from(configured: SettingValue<i64>) -> RetentionState {
+        state_from_configured(configured, SettingValue::Absent)
+    }
     use super::*;
     use serde_json::Value as JsonValue;
     use std::fs;
@@ -888,7 +1071,7 @@ mod tests {
 
     #[test]
     fn absent_key_is_cc_default_thirty() {
-        let s = state_from_configured(SettingValue::Absent);
+        let s = state_from(SettingValue::Absent);
         assert_eq!(s.mode, RetentionMode::CcDefault);
         assert_eq!(s.effective_days, CC_DEFAULT_CLEANUP_PERIOD_DAYS);
         assert!(s.is_cc_default);
@@ -899,9 +1082,141 @@ mod tests {
     /// key is present and fails validation, so cleanup is suppressed and
     /// transcripts accumulate instead of being destroyed. A `0` left on
     /// disk by an older Claudepot is in exactly this state.
+    /// `0` on the desktop key is CC's default and means *no ceiling*.
+    /// On `cleanupPeriodDays` the same literal is rejected and
+    /// suppresses cleanup. Sharing one validator between them would
+    /// make this test fail, which is the point of having it.
+    #[test]
+    fn desktop_zero_means_no_ceiling_and_does_not_suppress() {
+        let st = state_from_configured(SettingValue::Present(30), SettingValue::Present(0));
+        assert!(!st.desktop_key_rejected);
+        assert!(!st.cleanup_suppressed);
+        assert_eq!(st.mode, RetentionMode::Explicit);
+    }
+
+    #[test]
+    fn desktop_positive_value_is_accepted() {
+        let st = state_from_configured(SettingValue::Present(30), SettingValue::Present(90));
+        assert!(!st.desktop_key_rejected);
+        assert!(!st.cleanup_suppressed);
+    }
+
+    #[test]
+    fn desktop_key_absent_is_the_ordinary_case() {
+        let st = state_from_configured(SettingValue::Present(30), SettingValue::Absent);
+        assert!(!st.desktop_key_rejected);
+        assert!(!st.cleanup_suppressed);
+    }
+
+    /// The regression this half exists for: `cleanupPeriodDays` is
+    /// perfectly valid, so the old code reported an armed 30-day timer —
+    /// while CC, seeing a validation error with the desktop key present,
+    /// was skipping the sweep entirely. Over-warning is the safe
+    /// direction, but the advice it produces is the dangerous one:
+    /// "restore the default" clears the error and re-arms deletion.
+    #[test]
+    fn a_rejected_desktop_key_suppresses_cleanup_on_its_own() {
+        for bad in [SettingValue::Present(-5), SettingValue::Invalid] {
+            let st = state_from_configured(SettingValue::Present(30), bad);
+            assert!(
+                st.cleanup_suppressed,
+                "a settings error on the desktop key suppresses CC's whole sweep"
+            );
+            assert!(st.desktop_key_rejected);
+            // The cleanupPeriodDays half is still read as what it is.
+            assert_eq!(st.mode, RetentionMode::Explicit);
+        }
+    }
+
+    /// Naming the wrong key is worse than naming none: the user opens
+    /// settings, finds `cleanupPeriodDays` perfectly valid, and has
+    /// nowhere to go — while CC's own `/doctor` is naming the other key.
+    #[test]
+    fn a_rejected_desktop_key_names_itself_and_clears_the_other_one() {
+        let w = suppressed_for(SettingValue::Present(30), SettingValue::Present(-5));
+        let body = w.message();
+        assert!(
+            body.contains("desktopSessionCleanupPeriodDays"),
+            "must name the key CC actually rejected: {body}"
+        );
+        assert!(
+            body.contains("`cleanupPeriodDays` is not the problem"),
+            "must clear the healthy key explicitly: {body}"
+        );
+    }
+
+    /// The hedge stays hedged. When `cleanupPeriodDays` itself is the
+    /// rejected one we cannot tell a bad value from an unreadable file
+    /// (`resolve_retention` maps both to `Invalid`), so this arm must
+    /// keep claiming neither.
+    #[test]
+    fn an_invalid_cleanup_key_still_refuses_to_name_a_cause() {
+        let w = suppressed_for(SettingValue::Invalid, SettingValue::Absent);
+        let body = w.message();
+        assert!(body.contains("may hold a value Claude Code rejects"), "{body}");
+        assert!(!body.contains("desktopSessionCleanupPeriodDays"), "{body}");
+    }
+
+    /// The state the first version of this fix got wrong, and the reason
+    /// the invariant lives at the producer rather than in three
+    /// consumers: `resolve_retention` maps an unreadable settings file to
+    /// `Invalid` for **both** keys, so a flag set from the desktop key
+    /// alone would name it and clear `cleanupPeriodDays` — on no
+    /// evidence, on the one CC setting that destroys data.
+    ///
+    /// My earlier guard only tried `(Invalid, Absent)`, which never
+    /// reaches this path. Found by an independent audit.
+    #[test]
+    fn an_unreadable_settings_file_names_no_key() {
+        // Both reads fail — exactly what `resolve_retention` produces
+        // when the file cannot be read or parsed.
+        let st = state_from_configured(SettingValue::Invalid, SettingValue::Invalid);
+        assert!(st.cleanup_suppressed);
+        assert!(
+            !st.desktop_key_rejected,
+            "the desktop key is not a *known* cause when the whole file is unreadable"
+        );
+
+        let body = suppressed_for(SettingValue::Invalid, SettingValue::Invalid).message();
+        assert!(
+            !body.contains("desktopSessionCleanupPeriodDays"),
+            "must not name a key we cannot prove is the cause: {body}"
+        );
+        assert!(
+            !body.contains("is not the problem"),
+            "must not clear `cleanupPeriodDays` when it may itself be invalid: {body}"
+        );
+        assert!(body.contains("may hold a value Claude Code rejects"), "{body}");
+    }
+
+    /// The same precondition from the other side: a rejected desktop key
+    /// alongside a *negative* cleanup value is still not attributable,
+    /// because that cleanup value is itself a settings error.
+    #[test]
+    fn a_bad_cleanup_value_beside_a_bad_desktop_value_names_neither() {
+        let st = state_from_configured(SettingValue::Present(-1), SettingValue::Present(-1));
+        assert!(st.cleanup_suppressed);
+        assert!(!st.desktop_key_rejected);
+    }
+
+    fn suppressed_for(
+        configured: SettingValue<i64>,
+        desktop: SettingValue<i64>,
+    ) -> CleanupSuppressedWarning {
+        let state = state_from_configured(configured, desktop);
+        assert!(state.cleanup_suppressed, "fixture must be suppressed");
+        cleanup_suppressed_warning(&RetentionReport {
+            state,
+            risk: TranscriptRisk::default(),
+            is_durable_archive: false,
+            swept_elsewhere: Default::default(),
+        })
+        .expect("suppressed report yields a warning")
+    }
+
     #[test]
     fn zero_is_rejected_by_cc_and_suppresses_cleanup() {
-        let s = state_from_configured(SettingValue::Present(0));
+        let s = state_from(SettingValue::Present(0));
         assert_eq!(s.mode, RetentionMode::LegacyZero);
         assert!(
             s.cleanup_suppressed,
@@ -922,7 +1237,7 @@ mod tests {
     /// accidentally *protects* transcripts.
     #[test]
     fn negative_suppresses_cleanup_entirely() {
-        let s = state_from_configured(SettingValue::Present(-1));
+        let s = state_from(SettingValue::Present(-1));
         assert_eq!(s.mode, RetentionMode::Invalid);
         assert!(s.cleanup_suppressed);
         assert!(!s.is_cc_default);
@@ -939,7 +1254,7 @@ mod tests {
             SettingValue::Present(3650),
         ] {
             assert!(
-                !state_from_configured(cfg).cleanup_suppressed,
+                !state_from(cfg).cleanup_suppressed,
                 "cfg {cfg:?} must not read as cleanup-suppressed"
             );
         }
@@ -951,7 +1266,7 @@ mod tests {
     /// on history CC was in fact leaving alone.
     #[test]
     fn a_non_integer_value_suppresses_cleanup_and_is_not_the_cc_default() {
-        let s = state_from_configured(SettingValue::Invalid);
+        let s = state_from(SettingValue::Invalid);
         assert_eq!(s.mode, RetentionMode::Invalid);
         assert!(s.cleanup_suppressed);
         assert!(!s.is_cc_default, "must never advise restoring the default");
@@ -996,7 +1311,7 @@ mod tests {
         seed_projects(&root, &[400, 800], &[], now);
         let r = scan_transcript_risk_in(
             &root,
-            &state_from_configured(SettingValue::Present(-1)),
+            &state_from(SettingValue::Present(-1)),
             now,
             7,
         );
@@ -1007,7 +1322,7 @@ mod tests {
 
     #[test]
     fn positive_is_explicit() {
-        let s = state_from_configured(SettingValue::Present(3650));
+        let s = state_from(SettingValue::Present(3650));
         assert_eq!(s.mode, RetentionMode::Explicit);
         assert_eq!(s.effective_days, 3650);
         assert!(!s.is_cc_default);
@@ -1123,10 +1438,12 @@ mod tests {
         let root = tmp.path().join("projects");
         let now = 1_800_000_000_000i64;
         // three top-level: 60d (past cutoff), 27d (within 7d horizon), 1d (safe)
-        // two nested at 400d — cleanup never walks these
+        // two nested at 400d. Their age is irrelevant either way: they
+        // are not counted as transcripts, and CC deletes a session
+        // folder wholesale with its parent rather than by file age.
         seed_projects(&root, &[60, 27, 1], &[400, 400], now);
 
-        let state = state_from_configured(SettingValue::Absent); // 30-day default
+        let state = state_from(SettingValue::Absent); // 30-day default
         let r = scan_transcript_risk_in(&root, &state, now, 7);
 
         assert_eq!(
@@ -1138,21 +1455,25 @@ mod tests {
             r.at_risk_within_horizon, 1,
             "the 27-day file crosses within 7 days"
         );
-        assert_eq!(r.nested_immortal, 2, "subagent files survive forever");
+        assert_eq!(
+            r.nested_below_session, 2,
+            "counted apart from the transcript total — they die with the parent folder"
+        );
     }
 
-    /// The reason the loss is invisible: the immortal nested files are
-    /// the bulk, so directory size rises while transcripts are deleted.
+    /// The reason the count is reported at all: nested files are the
+    /// bulk, and none of them appear in `total_transcripts`, so the
+    /// transcript number alone understates what a sweep destroys.
     #[test]
-    fn nested_immortal_is_reported_separately_from_deletable() {
+    fn nested_files_are_reported_separately_from_deletable() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().join("projects");
         let now = 1_800_000_000_000i64;
         seed_projects(&root, &[400], &[400; 20], now);
         let r =
-            scan_transcript_risk_in(&root, &state_from_configured(SettingValue::Absent), now, 7);
+            scan_transcript_risk_in(&root, &state_from(SettingValue::Absent), now, 7);
         assert_eq!(r.already_deletable, 1);
-        assert_eq!(r.nested_immortal, 20);
+        assert_eq!(r.nested_below_session, 20);
     }
 
     #[test]
@@ -1163,7 +1484,7 @@ mod tests {
         seed_projects(&root, &[60, 27, 1], &[], now);
         let r = scan_transcript_risk_in(
             &root,
-            &state_from_configured(SettingValue::Present(3650)),
+            &state_from(SettingValue::Present(3650)),
             now,
             7,
         );
@@ -1188,7 +1509,7 @@ mod tests {
         let root = tmp.path().join("projects");
         let now = 1_800_000_000_000i64;
         seed_projects(&root, &[60, 27, 1], &[], now);
-        let state = state_from_configured(SettingValue::Present(0));
+        let state = state_from(SettingValue::Present(0));
         let r = scan_transcript_risk_in(&root, &state, now, 7);
 
         assert!(state.cleanup_suppressed);
@@ -1217,7 +1538,7 @@ mod tests {
         incomplete: bool,
     ) -> RetentionReport {
         rep(
-            state_from_configured(mode_source),
+            state_from(mode_source),
             TranscriptRisk {
                 total_transcripts: total,
                 scan_incomplete: incomplete,
@@ -1297,7 +1618,7 @@ mod tests {
         let now = 1_800_000_000_000i64;
         seed_projects(&root, &[60, 27, 1], &[], now);
         let r =
-            scan_transcript_risk_in(&root, &state_from_configured(SettingValue::Absent), now, 7);
+            scan_transcript_risk_in(&root, &state_from(SettingValue::Absent), now, 7);
         assert_eq!(r.oldest_ms, Some(now - 60 * MS_PER_DAY));
     }
 
@@ -1316,7 +1637,7 @@ mod tests {
 
         let r = scan_transcript_risk_in(
             &root,
-            &state_from_configured(SettingValue::Absent),
+            &state_from(SettingValue::Absent),
             1_800_000_000_000,
             7,
         );
@@ -1337,7 +1658,7 @@ mod tests {
     #[test]
     fn incomplete_scan_still_warns() {
         let r = rep(
-            state_from_configured(SettingValue::Absent),
+            state_from(SettingValue::Absent),
             TranscriptRisk {
                 scan_incomplete: true,
                 horizon_days: 7,
@@ -1356,7 +1677,7 @@ mod tests {
     #[test]
     fn suppressed_cleanup_never_warns_even_on_an_incomplete_scan() {
         let r = rep(
-            state_from_configured(SettingValue::Present(-1)),
+            state_from(SettingValue::Present(-1)),
             TranscriptRisk {
                 scan_incomplete: true,
                 horizon_days: 7,
@@ -1374,7 +1695,7 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         let r = scan_transcript_risk_in(
             &root,
-            &state_from_configured(SettingValue::Absent),
+            &state_from(SettingValue::Absent),
             1_800_000_000_000,
             7,
         );
@@ -1399,7 +1720,7 @@ mod tests {
             (1, 7, i64::MIN),
             (i64::MAX, i64::MAX, i64::MAX),
         ] {
-            let st = state_from_configured(SettingValue::Present(days));
+            let st = state_from(SettingValue::Present(days));
             // Must not panic in debug (where overflow aborts).
             let _ = scan_transcript_risk_in(&root, &st, now_ms, horizon);
         }
@@ -1410,7 +1731,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let r = scan_transcript_risk_in(
             &tmp.path().join("nope"),
-            &state_from_configured(SettingValue::Absent),
+            &state_from(SettingValue::Absent),
             1_800_000_000_000,
             7,
         );
@@ -1437,7 +1758,7 @@ mod tests {
     #[test]
     fn no_warning_when_nothing_is_at_risk() {
         let r = rep(
-            state_from_configured(SettingValue::Absent),
+            state_from(SettingValue::Absent),
             TranscriptRisk {
                 total_transcripts: 460,
                 horizon_days: 7,
@@ -1452,7 +1773,7 @@ mod tests {
     #[test]
     fn cc_default_alone_does_not_warn() {
         let r = rep(
-            state_from_configured(SettingValue::Absent),
+            state_from(SettingValue::Absent),
             TranscriptRisk::default(),
         );
         assert!(warning(&r).is_none());
@@ -1461,7 +1782,7 @@ mod tests {
     #[test]
     fn warns_when_transcripts_are_already_past_the_cutoff() {
         let r = rep(
-            state_from_configured(SettingValue::Absent),
+            state_from(SettingValue::Absent),
             TranscriptRisk {
                 already_deletable: 1247,
                 horizon_days: 7,
@@ -1477,7 +1798,7 @@ mod tests {
     #[test]
     fn warns_on_upcoming_risk_even_when_none_are_past_yet() {
         let r = rep(
-            state_from_configured(SettingValue::Present(30)),
+            state_from(SettingValue::Present(30)),
             TranscriptRisk {
                 at_risk_within_horizon: 3,
                 horizon_days: 7,
@@ -1501,14 +1822,14 @@ mod tests {
         let now = 1_800_000_000_000i64;
         seed_projects(&root, &[60, 27, 1], &[], now);
 
-        let before = state_from_configured(SettingValue::Absent);
+        let before = state_from(SettingValue::Absent);
         let r_before = rep(
             before.clone(),
             scan_transcript_risk_in(&root, &before, now, 7),
         );
         assert!(warning(&r_before).is_some());
 
-        let after = state_from_configured(SettingValue::Present(3650));
+        let after = state_from(SettingValue::Present(3650));
         let r_after = rep(
             after.clone(),
             scan_transcript_risk_in(&root, &after, now, 7),
@@ -1519,7 +1840,7 @@ mod tests {
     #[test]
     fn singular_plural_reads_correctly() {
         let one = rep(
-            state_from_configured(SettingValue::Present(30)),
+            state_from(SettingValue::Present(30)),
             TranscriptRisk {
                 already_deletable: 1,
                 horizon_days: 7,
@@ -1548,7 +1869,7 @@ mod tests {
         set_mtime(&other, now - 60 * MS_PER_DAY);
 
         let r =
-            scan_transcript_risk_in(&root, &state_from_configured(SettingValue::Absent), now, 7);
+            scan_transcript_risk_in(&root, &state_from(SettingValue::Absent), now, 7);
         assert_eq!(r.total_transcripts, 1, "only .jsonl/.cast are cleaned");
         assert_eq!(r.already_deletable, 1);
     }

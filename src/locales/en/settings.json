@@ -398,11 +398,12 @@
       "scanIncomplete": "Part of Claude Code’s transcript folder couldn’t be read, so these counts are a floor, not a total.",
       "silent": "Claude Code does this silently — it never reports what it deleted.",
       "suppressed": "Claude Code is skipping cleanup entirely because it could not validate its settings. Either cleanupPeriodDays holds a value Claude Code rejects, or the settings file could not be read — Claudepot cannot tell which. That is protecting your transcripts by accident. Fix the settings file rather than restoring the default, which would re-arm deletion.",
+      "suppressedDesktopKey": "Claude Code is skipping cleanup entirely because `desktopSessionCleanupPeriodDays` holds a value it rejects — which switches off cleanup for every transcript, not just desktop ones. `cleanupPeriodDays` is not the problem. That is protecting your transcripts by accident. Fix that key rather than restoring defaults, which would re-arm deletion.",
       "totalOnMachine_one": "{{num}} transcript on this machine.",
       "totalOnMachine_other": "{{num}} transcripts on this machine.",
       "suppressedLegacyZero": "This was set when Claude Code still accepted cleanupPeriodDays: 0 as “stop saving transcripts”. It now rejects that value, so the opposite is happening: transcripts are being written, and cleanup is skipped entirely because the setting is invalid. Pick a window below to fix it — that also starts deletion of anything older."
     },
-    "nestedNote": "Cleanup only removes the {{total}} top-level session transcripts. {{nested}} nested files (subagent runs, tool results) are never removed, so the folder keeps growing while conversations are deleted — disk usage cannot reveal this loss.",
+    "nestedNote": "Cleanup removes the {{total}} top-level session transcripts — and when it deletes one it also deletes the whole session folder beside it, without checking the age of anything inside. A further {{nested}} files (subagent runs, workflows, remote agents, tool results) sit inside those folders and are not part of the {{total}}, so that number is not the size of what a sweep removes.",
     "keepFor": "Keep transcripts for",
     "preset30": "30 days",
     "preset90": "90 days",

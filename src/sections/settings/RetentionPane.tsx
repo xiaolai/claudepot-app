@@ -170,7 +170,19 @@ function RiskSummary({ report }: { report: RetentionReport }) {
           <div style={{ color: "var(--warn)" }}>
             {state.mode === "legacy_zero"
               ? t("retention.risk.suppressedLegacyZero")
-              : t("retention.risk.suppressed")}
+              : // `mode !== "invalid"` is belt-and-braces, not the
+                // primary guard: core already refuses to set
+                // `desktop_key_rejected` unless the settings file read
+                // cleanly and `cleanupPeriodDays` parsed. It is repeated
+                // here because the two possible errors are not
+                // symmetric — showing the generic copy when the desktop
+                // key really is the cause costs the user one extra
+                // place to look, while naming the wrong key on an
+                // unreadable file sends them to a setting that is fine,
+                // on the one Claude Code setting that destroys data.
+                state.desktop_key_rejected && state.mode !== "invalid"
+                ? t("retention.risk.suppressedDesktopKey")
+                : t("retention.risk.suppressed")}
           </div>
         )}
         {oldest && (
@@ -338,7 +350,7 @@ export function RetentionPane({
 
       {/* Why the folder keeps growing while history shrinks. Only shown
           when there is actually a nested pile to explain. */}
-      {risk.nested_immortal > 0 && (
+      {risk.nested_below_session > 0 && (
         <div
           style={{
             fontSize: "var(--fs-xs)",
@@ -348,7 +360,7 @@ export function RetentionPane({
         >
           {t("retention.nestedNote", {
             total: formatNumber(risk.total_transcripts),
-            nested: formatNumber(risk.nested_immortal),
+            nested: formatNumber(risk.nested_below_session),
           })}
         </div>
       )}
