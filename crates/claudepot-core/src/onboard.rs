@@ -232,7 +232,6 @@ pub(crate) async fn run_auth_login_in_place_cancellable_with_binary(
         }
     };
 
-
     // On failure paths only, give the stderr drain task a small grace
     // window to flush whatever's still buffered before we read the
     // tail. The successful and cancel paths don't need the tail, so
@@ -386,7 +385,6 @@ pub(crate) async fn run_auth_login_cancellable_with_binary(
             Err(OnboardError::AuthLoginCancelled)
         }
     };
-
 
     // Resolve the tail BEFORE we hand back the result so the caller
     // sees a fully-rendered Display. See the parallel block in

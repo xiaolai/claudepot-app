@@ -1153,7 +1153,10 @@ mod tests {
     fn an_invalid_cleanup_key_still_refuses_to_name_a_cause() {
         let w = suppressed_for(SettingValue::Invalid, SettingValue::Absent);
         let body = w.message();
-        assert!(body.contains("may hold a value Claude Code rejects"), "{body}");
+        assert!(
+            body.contains("may hold a value Claude Code rejects"),
+            "{body}"
+        );
         assert!(!body.contains("desktopSessionCleanupPeriodDays"), "{body}");
     }
 
@@ -1186,7 +1189,10 @@ mod tests {
             !body.contains("is not the problem"),
             "must not clear `cleanupPeriodDays` when it may itself be invalid: {body}"
         );
-        assert!(body.contains("may hold a value Claude Code rejects"), "{body}");
+        assert!(
+            body.contains("may hold a value Claude Code rejects"),
+            "{body}"
+        );
     }
 
     /// The same precondition from the other side: a rejected desktop key
@@ -1309,12 +1315,7 @@ mod tests {
         let root = tmp.path().join("projects");
         let now = 1_800_000_000_000i64;
         seed_projects(&root, &[400, 800], &[], now);
-        let r = scan_transcript_risk_in(
-            &root,
-            &state_from(SettingValue::Present(-1)),
-            now,
-            7,
-        );
+        let r = scan_transcript_risk_in(&root, &state_from(SettingValue::Present(-1)), now, 7);
         assert_eq!(r.total_transcripts, 2);
         assert_eq!(r.already_deletable, 0);
         assert_eq!(r.at_risk_within_horizon, 0);
@@ -1470,8 +1471,7 @@ mod tests {
         let root = tmp.path().join("projects");
         let now = 1_800_000_000_000i64;
         seed_projects(&root, &[400], &[400; 20], now);
-        let r =
-            scan_transcript_risk_in(&root, &state_from(SettingValue::Absent), now, 7);
+        let r = scan_transcript_risk_in(&root, &state_from(SettingValue::Absent), now, 7);
         assert_eq!(r.already_deletable, 1);
         assert_eq!(r.nested_below_session, 20);
     }
@@ -1482,12 +1482,7 @@ mod tests {
         let root = tmp.path().join("projects");
         let now = 1_800_000_000_000i64;
         seed_projects(&root, &[60, 27, 1], &[], now);
-        let r = scan_transcript_risk_in(
-            &root,
-            &state_from(SettingValue::Present(3650)),
-            now,
-            7,
-        );
+        let r = scan_transcript_risk_in(&root, &state_from(SettingValue::Present(3650)), now, 7);
         assert_eq!(r.already_deletable, 0);
         assert_eq!(r.at_risk_within_horizon, 0);
         assert_eq!(r.total_transcripts, 3);
@@ -1617,8 +1612,7 @@ mod tests {
         let root = tmp.path().join("projects");
         let now = 1_800_000_000_000i64;
         seed_projects(&root, &[60, 27, 1], &[], now);
-        let r =
-            scan_transcript_risk_in(&root, &state_from(SettingValue::Absent), now, 7);
+        let r = scan_transcript_risk_in(&root, &state_from(SettingValue::Absent), now, 7);
         assert_eq!(r.oldest_ms, Some(now - 60 * MS_PER_DAY));
     }
 
@@ -1772,10 +1766,7 @@ mod tests {
     /// scheduled deletion is.
     #[test]
     fn cc_default_alone_does_not_warn() {
-        let r = rep(
-            state_from(SettingValue::Absent),
-            TranscriptRisk::default(),
-        );
+        let r = rep(state_from(SettingValue::Absent), TranscriptRisk::default());
         assert!(warning(&r).is_none());
     }
 
@@ -1868,8 +1859,7 @@ mod tests {
         fs::write(&other, b"x").unwrap();
         set_mtime(&other, now - 60 * MS_PER_DAY);
 
-        let r =
-            scan_transcript_risk_in(&root, &state_from(SettingValue::Absent), now, 7);
+        let r = scan_transcript_risk_in(&root, &state_from(SettingValue::Absent), now, 7);
         assert_eq!(r.total_transcripts, 1, "only .jsonl/.cast are cleaned");
         assert_eq!(r.already_deletable, 1);
     }

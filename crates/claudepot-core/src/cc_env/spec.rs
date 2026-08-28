@@ -627,7 +627,10 @@ mod tests {
         assert_eq!(p.mirror_version, s.cc_source_version);
         assert_eq!(p.from_pinned_mirror, s.cc_source_kind == "pinned_mirror");
         // and the artifact actually carries them
-        assert!(!s.cc_source_kind.is_empty(), "generator must emit cc_source_kind");
+        assert!(
+            !s.cc_source_kind.is_empty(),
+            "generator must emit cc_source_kind"
+        );
         assert!(
             !s.cc_source_version.is_empty(),
             "generator must emit cc_source_version (`unknown` is allowed, empty is not)"
