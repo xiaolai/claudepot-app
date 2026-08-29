@@ -1511,7 +1511,16 @@ async fn test_login_cancel_emits_error_phase_with_cancelled_msg() {
     // to fire its Notify before exit.
     let stub_dir = tempfile::tempdir().expect("mk stub tempdir");
     let stub = stub_dir.path().join("claude-stub.sh");
-    std::fs::write(&stub, "#!/bin/sh\nexec sleep 30\n").expect("write stub");
+    // Must answer `--version` with a build that clears the `auth`
+    // floor: the login path now gates on `cc_capability` before
+    // spawning `claude auth login` (issue #94), so a stub that hangs on
+    // `--version` is refused and never reaches the cancel path this
+    // test is about.
+    std::fs::write(
+        &stub,
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo '2.1.251 (Claude Code)'; exit 0; fi\nexec sleep 30\n",
+    )
+    .expect("write stub");
     let mut perms = std::fs::metadata(&stub).unwrap().permissions();
     perms.set_mode(0o755);
     std::fs::set_permissions(&stub, perms).unwrap();
@@ -1835,13 +1844,30 @@ async fn activate_resolves_a_prefix_the_way_the_domain_says() {
     store.insert(&acct).unwrap();
     store.set_active_cli(acct.uuid).unwrap();
 
-    let got = activate_cli(&store, "alice", false, false).await.unwrap();
-    assert_eq!(
-        got,
-        Activation::AlreadyActive {
-            email: "alice@example.com".into()
-        }
-    );
+    // Assert on the RESOLUTION outcome only.
+    //
+    // This used to assert `Activation::AlreadyActive`, which is
+    // reachable only when `sync_from_current_cc` succeeds AND leaves
+    // this account active — so it dragged the reconcile and swap paths
+    // into a test whose own header (three lines up) says the swap half
+    // is covered by `cli_backend::swap`'s suite. Those paths consult
+    // the developer's real CC keychain and the real process table, so
+    // the test failed with `Swap(LiveSessionConflict)` for anyone who
+    // had Claude Code running — which, on a Claude Code control centre,
+    // is most of the time. It stayed green in CI, where neither exists.
+    //
+    // What this test owes is that the prefix `alice` resolves. Anything
+    // past resolution is another suite's business.
+    let outcome = activate_cli(&store, "alice", false, false).await;
+    match outcome {
+        // Resolved, and got far enough to attempt or skip the swap.
+        Ok(_) | Err(ActivateError::Swap(_)) => {}
+        Err(e @ (ActivateError::Resolve(_) | ActivateError::NotFound(_))) => panic!(
+            "the prefix `alice` must resolve to alice@example.com — this is the \
+             regression the extraction was for; got {e:?}"
+        ),
+        Err(e) => panic!("unexpected failure before the swap: {e:?}"),
+    }
 }
 
 #[tokio::test]

@@ -36,6 +36,35 @@ pub enum OnboardError {
     #[error("login cancelled")]
     AuthLoginCancelled,
 
+    // `claude auth login` is a POSITIONAL subcommand, and CC's grammar
+    // (`claude [options] [command] [prompt]`) turns an unrecognized
+    // positional into the *prompt*. On a build predating the
+    // subcommand (CC 2.1.41) spawning it does not fail — it sends the
+    // words "auth login" to the model as a headless prompt, bills for
+    // it, and never signs anyone in. See `crate::cc_capability`, and
+    // issue #94 for the polled version of the same fall-through.
+    //
+    // TWO variants, not one with two branches. Both refuse, but they
+    // know different things: one has read the version, the other has
+    // not. A single code forced the localized catalog into one
+    // sentence, and the only sentence true of both branches asserted
+    // the build was too old — a claim the Unknown branch has not
+    // established. Rendering an unverified claim as fact is exactly
+    // what the retention pane's split exists to prevent.
+    #[error(
+        "This Claude Code build ({installed}) is older than `claude auth login`, \
+         which arrived in {since}. Update Claude Code and sign in again."
+    )]
+    AuthSubcommandTooOld { installed: String, since: String },
+
+    #[error(
+        "Claudepot couldn't read your Claude Code version, so it won't run \
+         `claude auth login` — on a build older than {since}, those words are sent \
+         to the model as a prompt instead of signing you in. Check that \
+         `claude --version` works."
+    )]
+    AuthVersionUnreadable { since: String },
+
     #[error("import failed: no credentials at hashed service name for {0}")]
     ImportFailed(String),
 
@@ -63,6 +92,8 @@ impl crate::error_code::ErrorCode for OnboardError {
             OnboardError::CliBinaryNotFound(_) => "onboard.cli_binary_not_found",
             OnboardError::AuthLoginFailed(..) => "onboard.auth_login_failed",
             OnboardError::AuthLoginCancelled => "onboard.auth_login_cancelled",
+            OnboardError::AuthSubcommandTooOld { .. } => "onboard.auth_subcommand_too_old",
+            OnboardError::AuthVersionUnreadable { .. } => "onboard.auth_version_unreadable",
             OnboardError::ImportFailed(_) => "onboard.import_failed",
             OnboardError::Swap(e) => e.code(),
             OnboardError::Io(_) => "onboard.io",
@@ -92,6 +123,13 @@ impl crate::error_code::ErrorCode for OnboardError {
                     .unwrap_or(""),
             }),
             OnboardError::AuthLoginCancelled => serde_json::json!({}),
+            // Both values are CC version strings — identifiers, not
+            // prose, so they stay English in every locale.
+            OnboardError::AuthSubcommandTooOld { installed, since } => serde_json::json!({
+                "installed": installed,
+                "since": since,
+            }),
+            OnboardError::AuthVersionUnreadable { since } => serde_json::json!({ "since": since }),
             // The temp `CLAUDE_CONFIG_DIR` the import looked in, not an
             // email — see `import_credential`'s only constructor.
             OnboardError::ImportFailed(path) => serde_json::json!({ "path": path }),
@@ -164,6 +202,10 @@ pub(crate) async fn run_auth_login_in_place_cancellable_with_binary(
     claude_path: &std::path::Path,
     cancel: Option<std::sync::Arc<tokio::sync::Notify>>,
 ) -> Result<(), OnboardError> {
+    // The gate lives here, not only in `which_claude`, so every
+    // path that reaches `claude auth login` passes it — including
+    // the test seam, whose stub therefore has to answer `--version`.
+    let claude_path = &gate_auth_subcommand(claude_path.to_path_buf()).await?;
     tracing::info!(
         binary = %claude_path.display(),
         timeout_secs = LOGIN_TIMEOUT.as_secs(),
@@ -311,6 +353,10 @@ pub(crate) async fn run_auth_login_cancellable_with_binary(
     claude_path: &std::path::Path,
     cancel: Option<std::sync::Arc<tokio::sync::Notify>>,
 ) -> Result<PathBuf, OnboardError> {
+    // The gate lives here, not only in `which_claude`, so every
+    // path that reaches `claude auth login` passes it — including
+    // the test seam, whose stub therefore has to answer `--version`.
+    let claude_path = &gate_auth_subcommand(claude_path.to_path_buf()).await?;
     let temp_dir = tempfile::Builder::new()
         .prefix("claudepot-onboard-")
         .tempdir()
@@ -469,6 +515,43 @@ fn which_claude() -> Result<PathBuf, OnboardError> {
     })
 }
 
+/// Prove the binary has the `auth` subcommand before anyone spawns
+/// `claude auth login` on it.
+///
+/// `auth` is a positional, and CC's grammar turns an unrecognized
+/// positional into the prompt — so spawning it unchecked is a way to
+/// bill the user for a sign-in that cannot happen. This is the
+/// *user-triggered* half of issue #94; the polled half (`claude daemon
+/// status`, once a minute) is not fixed by a gate at all and does not
+/// spawn any more, see [`crate::cc_daemon`].
+///
+/// It sits in the `*_with_binary` seam rather than beside binary
+/// discovery so that **every** path reaching `claude auth login`
+/// passes it — including the stub-driven tests, which is what makes
+/// the gate provable rather than merely present.
+async fn gate_auth_subcommand(path: PathBuf) -> Result<PathBuf, OnboardError> {
+    use crate::cc_capability::{check, Capability, GatedSubcommand};
+    match check(GatedSubcommand::Auth, &path).await {
+        Capability::Supported => Ok(path),
+        Capability::TooOld { installed, since } => Err(OnboardError::AuthSubcommandTooOld {
+            installed: installed.to_string(),
+            since: since.to_string(),
+        }),
+        Capability::Unknown { since, reason } => {
+            tracing::warn!(
+                binary = %path.display(),
+                %reason,
+                "refusing to spawn `claude auth login`: cannot confirm the binary has \
+                 the `auth` subcommand, and on one that lacks it the words would be \
+                 sent to the model as a billed prompt"
+            );
+            Err(OnboardError::AuthVersionUnreadable {
+                since: since.to_string(),
+            })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -552,6 +635,125 @@ mod tests {
         );
     }
 
+    /// The issue #94 gate, on the real path.
+    ///
+    /// `auth` is a positional, so on a CC older than 2.1.41 the words
+    /// "auth login" are sent to the model as a billed prompt and nobody
+    /// is signed in. These tests drive a stub that RECORDS ITS ARGV, so
+    /// the assertion is not "an error came back" — which a dozen
+    /// unrelated bugs would also satisfy — but "the login argv never
+    /// reached the binary".
+    #[cfg(unix)]
+    mod auth_gate {
+        use super::*;
+        use std::os::unix::fs::PermissionsExt;
+
+        /// A stub that appends its argv to `argv.log` and answers
+        /// `--version` with `version_line`. Any other invocation exits
+        /// non-zero immediately, so a spawn that DOES happen returns
+        /// fast instead of parking on the login timeout.
+        fn recording_stub(dir: &std::path::Path, version_line: &str) -> std::path::PathBuf {
+            let log = dir.join("argv.log");
+            let bin = dir.join("claude-stub.sh");
+            std::fs::write(
+                &bin,
+                format!(
+                    "#!/bin/sh\necho \"$@\" >> {log}\n\
+                     if [ \"$1\" = \"--version\" ]; then {version_line}\nfi\nexit 7\n",
+                    log = log.display(),
+                ),
+            )
+            .unwrap();
+            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+            bin
+        }
+
+        fn argv_log(dir: &std::path::Path) -> String {
+            std::fs::read_to_string(dir.join("argv.log")).unwrap_or_default()
+        }
+
+        #[tokio::test]
+        async fn a_build_older_than_the_floor_never_receives_auth_login() {
+            let d = tempfile::tempdir().unwrap();
+            let bin = recording_stub(d.path(), "echo '2.1.39 (Claude Code)'; exit 0");
+
+            let err = run_auth_login_in_place_cancellable_with_binary(&bin, None)
+                .await
+                .expect_err("2.1.39 predates `claude auth login` (2.1.41)");
+            assert!(
+                matches!(err, OnboardError::AuthSubcommandTooOld { .. }),
+                "got {err:?}"
+            );
+
+            let log = argv_log(d.path());
+            assert!(
+                log.contains("--version"),
+                "the gate must probe; log: {log:?}"
+            );
+            assert!(
+                !log.contains("auth login"),
+                "the login argv reached the binary anyway — this is the billed \
+                 prompt the gate exists to prevent; log: {log:?}"
+            );
+        }
+
+        /// An unreadable version fails closed. Same assertion, because
+        /// "we could not tell" must be as good as "we know it is old".
+        #[tokio::test]
+        async fn an_unreadable_version_never_receives_auth_login() {
+            let d = tempfile::tempdir().unwrap();
+            let bin = recording_stub(d.path(), "echo 'not a version'; exit 0");
+
+            let err = run_auth_login_in_place_cancellable_with_binary(&bin, None)
+                .await
+                .expect_err("an unparseable version must refuse");
+            assert!(
+                matches!(err, OnboardError::AuthVersionUnreadable { .. }),
+                "got {err:?}"
+            );
+            assert!(!argv_log(d.path()).contains("auth login"));
+        }
+
+        /// The other direction. Without it, a `gate_auth_subcommand`
+        /// that refused everything would pass both tests above while
+        /// making sign-in impossible.
+        #[tokio::test]
+        async fn a_current_build_is_spawned_with_auth_login() {
+            let d = tempfile::tempdir().unwrap();
+            let bin = recording_stub(d.path(), "echo '2.1.251 (Claude Code)'; exit 0");
+
+            let err = run_auth_login_in_place_cancellable_with_binary(&bin, None)
+                .await
+                .expect_err("the stub exits 7 for the login call");
+            assert!(
+                matches!(err, OnboardError::AuthLoginFailed(7, _)),
+                "the gate must pass and the spawn must happen; got {err:?}"
+            );
+            assert!(
+                argv_log(d.path()).contains("auth login"),
+                "log: {:?}",
+                argv_log(d.path())
+            );
+        }
+
+        /// The temp-dir variant goes through the same gate — both
+        /// entry points, not just the one that was easiest to test.
+        #[tokio::test]
+        async fn the_tempdir_entry_point_is_gated_too() {
+            let d = tempfile::tempdir().unwrap();
+            let bin = recording_stub(d.path(), "echo '2.1.39 (Claude Code)'; exit 0");
+
+            let err = run_auth_login_cancellable_with_binary(&bin, None)
+                .await
+                .expect_err("2.1.39 predates the floor");
+            assert!(
+                matches!(err, OnboardError::AuthSubcommandTooOld { .. }),
+                "got {err:?}"
+            );
+            assert!(!argv_log(d.path()).contains("auth login"));
+        }
+    }
+
     /// Smoke test for the cancel path. The real `claude` binary isn't
     /// reliably installed in CI, so we stand in with a tiny shell
     /// stub that `exec`s into `sleep 30`. The stub ignores the
@@ -569,9 +771,20 @@ mod tests {
         use tokio::sync::Notify;
 
         // Write a stub binary to a tempdir and make it executable.
+        //
+        // It must answer `--version` with a build recent enough to
+        // clear the `auth` floor, because `run_auth_login_*_with_binary`
+        // now gates on that before spawning — a stub that hung on
+        // `--version` would be refused and never reach the login path
+        // this test is about. That the fixture has to satisfy the gate
+        // is the point: the gate is on the real path, not beside it.
         let stub_dir = tempfile::tempdir().expect("mk stub tempdir");
         let stub = stub_dir.path().join("claude-stub.sh");
-        std::fs::write(&stub, "#!/bin/sh\nexec sleep 30\n").expect("write stub");
+        std::fs::write(
+            &stub,
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo '2.1.251 (Claude Code)'; exit 0; fi\nexec sleep 30\n",
+        )
+        .expect("write stub");
         let mut perms = std::fs::metadata(&stub).unwrap().permissions();
         perms.set_mode(0o755);
         std::fs::set_permissions(&stub, perms).unwrap();

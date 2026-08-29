@@ -456,6 +456,8 @@
   "onboard": {
     "auth_login_cancelled": "Sign-in cancelled.",
     "auth_login_failed": "Browser sign-in failed (exit {{exit_code}}).",
+    "auth_subcommand_too_old": "This Claude Code build ({{installed}}) is older than `claude auth login`, which arrived in {{since}}. Update Claude Code and sign in again.",
+    "auth_version_unreadable": "Claudepot couldn't read your Claude Code version, so it won't run `claude auth login` — on a build older than {{since}}, those words are sent to the model as a prompt instead of signing you in. Check that `claude --version` works.",
     "cli_binary_not_found": "No claude CLI at {{path}}.",
     "import_failed": "The sign-in finished but left no credentials to import.",
     "io": "Filesystem error: {{detail}}"

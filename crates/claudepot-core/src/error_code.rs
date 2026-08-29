@@ -824,6 +824,13 @@ mod tests {
                 E::AuthLoginFailed(1, None),
                 E::AuthLoginCancelled,
                 E::ImportFailed("/tmp/claudepot-onboard-xyz".to_string()),
+                E::AuthSubcommandTooOld {
+                    installed: "2.1.39".to_string(),
+                    since: "2.1.41".to_string(),
+                },
+                E::AuthVersionUnreadable {
+                    since: "2.1.41".to_string(),
+                },
                 E::Swap(crate::cli_backend::SwapError::NoDefaultCredentials),
                 E::Io(std::io::Error::other("no such file or directory")),
             ];
@@ -833,6 +840,8 @@ mod tests {
                     | E::AuthLoginFailed(_, _)
                     | E::AuthLoginCancelled
                     | E::ImportFailed(_)
+                    | E::AuthSubcommandTooOld { .. }
+                    | E::AuthVersionUnreadable { .. }
                     | E::Swap(_)
                     | E::Io(_) => {}
                 }

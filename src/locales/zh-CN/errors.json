@@ -456,6 +456,8 @@
   "onboard": {
     "auth_login_cancelled": "已取消登录。",
     "auth_login_failed": "浏览器登录失败（退出码 {{exit_code}}）。",
+    "auth_subcommand_too_old": "当前 Claude Code 版本（{{installed}}）早于 `claude auth login`，该子命令自 {{since}} 起才提供。请更新 Claude Code 后重新登录。",
+    "auth_version_unreadable": "Claudepot 无法读取你的 Claude Code 版本，因此不会运行 `claude auth login`——在早于 {{since}} 的版本上，这些字词会被当作提示词发送给模型，而不会完成登录。请检查 `claude --version` 是否正常。",
     "cli_binary_not_found": "在 {{path}} 找不到 claude CLI。",
     "import_failed": "登录已完成，但没有可导入的凭据。",
     "io": "文件系统出错：{{detail}}"

@@ -223,18 +223,23 @@ pub async fn refresh(ctx: &AppContext) -> Result<()> {
         .fetch_batch_detailed_verified(&ctx.store, &uuids)
         .await;
 
-    // Scrape the daemon like the GUI's tick does. `build` hardcodes
-    // `bg_workers: None`, so a CLI refresh used to blank whatever the
-    // desktop app had recorded — and the remote panel renders this file
-    // rather than calling anything live, so the worker count simply
-    // vanished from the phone until the GUI next ran. The same shape of
-    // bug as an older desktop build dropping a field it was compiled
-    // without.
-    let bg_workers = tokio::task::spawn_blocking(|| {
-        claudepot_core::cc_daemon::scrape_daemon_status().bg_workers
-    })
-    .await
-    .unwrap_or(None);
+    // Read the daemon roster like the GUI's tick does. `build`
+    // hardcodes `bg_workers: None`, so a CLI refresh used to blank
+    // whatever the desktop app had recorded — and the remote panel
+    // renders this file rather than calling anything live, so the
+    // worker count simply vanished from the phone until the GUI next
+    // ran. The same shape of bug as an older desktop build dropping a
+    // field it was compiled without.
+    //
+    // This read spawned `claude daemon status` until issue #94, which
+    // on a CC build predating that subcommand was billed as a headless
+    // model prompt. Cheap here (a user runs `usage refresh`), ruinous
+    // on the GUI's timer — but the fix belongs in `cc_daemon`, not in
+    // a judgement about cadence at each call site.
+    let bg_workers =
+        tokio::task::spawn_blocking(|| claudepot_core::cc_daemon::daemon_status().bg_workers)
+            .await
+            .unwrap_or(None);
 
     let snapshot = usage_snapshot::build_with_bg_workers(&accounts, &outcomes, bg_workers);
     let path = usage_snapshot::snapshot_path();

@@ -9,14 +9,17 @@ import { NF } from "../icons";
  * the live Activity strip and the sync/collapse strip so it reads
  * as "live state" rather than chrome.
  *
- * Hidden when the daemon is idle or the scrape couldn't pin down a
+ * Hidden when the daemon is idle or the read couldn't pin down a
  * count — a zero is no signal worth the row. See
  * `dev-docs/cc-daemon-research.md` for the broader context.
  */
 export function SidebarBgBadge({ collapsed }: { collapsed?: boolean }) {
   const { t } = useTranslation("components");
   const { status } = useDaemonStatus();
-  const workers = status?.running ? status.bgWorkers ?? 0 : 0;
+  // No `running` gate: `bgWorkers` already counts only workers whose
+  // process is alive, so gating on a supervisor flag could only hide
+  // real ones. See `claudepot-core::cc_daemon`.
+  const workers = status?.bgWorkers ?? 0;
   if (workers <= 0) return null;
 
   const label = t("sidebar.bgWorkers", { count: workers });

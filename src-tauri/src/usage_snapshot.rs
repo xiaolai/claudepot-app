@@ -199,13 +199,14 @@ async fn run_tick(app: &AppHandle) {
         cache.fetch_batch_detailed_verified(&store, &uuids).await
     };
 
-    // Scrape `claude daemon status` once per snapshot write so
-    // downstream consumers (rotation audit, Activities tile) see a
-    // consistent bg-worker count alongside the utilization numbers.
-    // Spawned blocking — the scrape is sync (process spawn + line
-    // parse, ~50ms in the idle case).
+    // Read CC's daemon roster once per snapshot write so downstream
+    // consumers (rotation audit, Sidebar badge) see a consistent
+    // bg-worker count alongside the utilization numbers. Spawned
+    // blocking because the read is sync, though it is now one small
+    // file read rather than the `claude daemon status` subprocess this
+    // used to spawn on every tick — see `cc_daemon` and issue #94.
     let bg_workers = tauri::async_runtime::spawn_blocking(|| {
-        let s = claudepot_core::cc_daemon::scrape_daemon_status();
+        let s = claudepot_core::cc_daemon::daemon_status();
         s.bg_workers
     })
     .await

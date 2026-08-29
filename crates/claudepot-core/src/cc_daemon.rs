@@ -1,894 +1,692 @@
-//! `claude daemon status` scraper.
+//! CC background-daemon status, read from `roster.json`.
 //!
-//! Surfaces CC's background-supervisor state — running/idle, worker
-//! count, sock dir, roster.json path — to Claudepot's UI. Parallel to
-//! [`crate::cc_doctor`] but much smaller: the daemon command is a
-//! plain line-based dump, not an Ink TUI, so no pty + grid-replay is
-//! needed. Plain `Command::output` + line parse.
+//! Surfaces CC's background-supervisor state — running, and how many
+//! background workers it holds — to Claudepot's UI. Two consumers:
 //!
-//! The output format is undocumented (issue #58869). We scrape it
-//! anyway because the worker count is otherwise only reachable by
-//! reading `roster.json` directly, which the research note
-//! (`dev-docs/cc-daemon-research.md`) flags as a more fragile
-//! interface than the CLI surface. Both could change, but the CLI
-//! at least has user-visible regression pressure.
-//!
-//! Two fields drive the rest of Claudepot:
-//! - `running` + `bg_workers` feed an Activities dashboard tile and
-//!   a Sidebar Activity strip badge (render-if-nonzero).
+//! - `SidebarBgBadge` renders the worker count, render-if-nonzero.
 //! - `bg_workers` is plumbed into [`crate::services::usage_snapshot`]
 //!   so [`crate::rotation::eval`]'s audit reason can suffix
-//!   "(N bg workers active)" — answering the user's "why did
-//!   rotation fire when I wasn't even at the keyboard" question.
+//!   "(N bg workers active)" — answering the user's "why did rotation
+//!   fire when I wasn't even at the keyboard" question.
+//!
+//! # Why this does not run `claude daemon status`
+//!
+//! It used to, once a minute, and that was issue #94.
+//!
+//! `claude`'s grammar is `claude [options] [command] [prompt]`, and an
+//! unrecognized **positional** becomes the prompt rather than an
+//! error. On a binary predating the `daemon` subcommand (CC 2.1.139)
+//! `claude daemon status` therefore did not fail — it started a
+//! headless session whose prompt was the word `daemon`, called the
+//! model, and billed for it. A reporter running CC 2.1.39 measured
+//! **288 such sessions in one day at ~20K uncached input tokens
+//! each**, rendering nothing: the scrape was "infallible by design",
+//! so every failure degraded to a hidden badge. Anthropic fixed a
+//! sibling case of the same fall-through upstream at CC 2.1.199.
+//!
+//! A version floor ([`crate::cc_capability`]) fixes that instance and
+//! **not** the mechanism: a floor guards the lower bound only, so a
+//! future CC that renames or removes `daemon` walks through
+//! `>= 2.1.139` and bills again. For data polled on a timer, the only
+//! durable answer is to not reach the CLI at all. Hence this module
+//! reads a file.
+//!
+//! # Why reading the file is the better failure mode, not the safer interface
+//!
+//! `dev-docs/cc-daemon-research.md` §7c.2 recorded the opposite rule —
+//! *don't scrape `roster.json`, the CLI carries user-visible
+//! regression pressure*. That compared the two interfaces on
+//! **fragility**, where the CLI genuinely wins. It is the wrong axis.
+//! Both are undocumented and both will drift; what differs is the
+//! **cost of being wrong**. A `roster.json` schema change costs a
+//! degraded badge. A CLI spawn against the wrong binary costs money,
+//! silently, forever. That asymmetry decides it, and it is why the
+//! rule is now inverted (see the research note's amendment).
+//!
+//! Two things make the file the *sounder* read anyway:
+//!
+//! - it carries `proto`, a schema version it declares about itself,
+//!   which the line-oriented CLI output never did; and
+//! - it is one `read` of a ~100-byte file rather than spawning a
+//!   197 MB binary, which is what a once-a-minute badge should cost.
+//!
+//! # Why there is no `running` flag, and why the count is per worker
+//!
+//! The obvious reading of "is the daemon up" is `supervisorPid`'s
+//! liveness, and this module shipped that for one revision. It is not
+//! sound: the roster's schema carries **no `procStart` for the
+//! supervisor**, so a recycled PID reads as a live daemon — and since
+//! the roster survives the daemon by design (13 days, on the machine
+//! this was measured on) a stale roster's dead workers would then be
+//! reported as active. A fabricated number on a badge is the precise
+//! failure this module criticises the old CLI parser for.
+//!
+//! Every *worker* record, by contrast, carries `pid` **and**
+//! `startedAt`, both required. So the guarded question is asked per
+//! worker — is this pid alive, and did it begin no later than the
+//! roster says it did — via [`crate::agent::liveness::ProcessCheck`],
+//! which already implements exactly that comparison for recycled
+//! `run.pid`s. The count that renders is fully guarded, and the
+//! boolean that could not be is simply not reported. A worker that
+//! outlives its supervisor is a live worker either way; CC prints a
+//! warning for that state rather than calling it idle.
+//!
+//! # Shape, read out of the 2.1.251 binary
+//!
+//! CC's own zod schema and path helpers:
+//!
+//! ```text
+//! function c(){return i(be(),"daemon")}          // <configDir>/daemon
+//! function fDe(){return Te.daemon(["roster.json"])}
+//! un({ proto:        v().int().min(1).max(1),
+//!      supervisorPid: v().catch(0),
+//!      updatedAt:     v().catch(0),
+//!      workers:       De(<short id>, {
+//!          pid: v(), procStart: i().optional(), sessionId: i(),
+//!          cliVersion: i().optional(), startedAt: v(), attempt: v(),
+//!          cwd: i(), … }) })
+//! ```
+//!
+//! `pid` and `startedAt` are the two required fields, which is why
+//! they are the pair this module reads. `procStart` would also serve
+//! and is the wrong choice: it is optional, and it is a
+//! `ps -o lstart=` string with a separate Windows shape, where
+//! `startedAt` is epoch milliseconds and needs no subprocess on
+//! either platform.
+//!
+//! Note the `.catch(0)` on the scalars: CC tolerates a garbage field
+//! without discarding the rest of the file, and so does the reader
+//! below. A roster whose `supervisorPid` is unreadable must still
+//! yield a worker count.
 
-use crate::proc_utils::NoWindowExt;
+use crate::agent::liveness::ProcessCheck;
+use crate::session_live::registry::SysinfoCheck;
 use serde::{Deserialize, Serialize};
-use std::io::Read;
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::path::{Path, PathBuf};
 
-/// Wall-clock cap on the spawn. `claude daemon status` returns
-/// synchronously from a single Unix-socket probe; a 5-second cap
-/// allows for cold-start cost on the first invocation after a CC
-/// upgrade without blocking a tick loop noticeably.
-const SCRAPE_TIMEOUT: Duration = Duration::from_secs(5);
+/// Largest roster we will read.
+///
+/// **1 MiB, not CC's 8 MiB.** CC quarantines its own roster above 8
+/// MiB, so anything past that is a file CC has already disowned. But
+/// `.claude/rules/rust-conventions.md` allows a synchronous
+/// `std::fs` read only for files under 1 MB, and this read is
+/// synchronous by design — both callers wrap it in `spawn_blocking`.
+/// Rather than argue the rule down, the reader takes the tighter
+/// bound.
+///
+/// The window between the two is not a real roster. Worker records run
+/// a few hundred bytes each, so 1 MiB is on the order of two thousand
+/// concurrent background sessions; a file that size is corruption, and
+/// refusing it costs a badge rather than a wrong number.
+const MAX_ROSTER_BYTES: u64 = 1024 * 1024;
+
+/// The `proto` range this build knows how to read. CC 2.1.251 pins its
+/// own accepted range to `[1, 1]`, and this must not be wider: an
+/// earlier revision gated on `p <= MAX` alone, which accepted `proto:
+/// 0` — a value CC itself rejects — and went on to report a worker
+/// count from a schema nobody has ever defined.
+///
+/// A roster declaring a higher proto is reported [`DaemonParseStatus::Degraded`]
+/// with **no counts**, rather than read optimistically. The fields are
+/// simple enough that a newer proto would probably still parse, and
+/// "probably" is how a fabricated number reaches a badge — the same
+/// failure the old CLI parser shipped when it stored the sentence
+/// `updated 765423s ago` into a `PathBuf`.
+const MIN_KNOWN_PROTO: u64 = 1;
+const MAX_KNOWN_PROTO: u64 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DaemonStatus {
-    /// `true` when the supervisor is reachable on its control socket.
-    /// Distinguished from "missing roster" — a daemon can be running
-    /// with zero workers immediately after `stop --keep-workers`.
-    pub running: bool,
-    /// Daemon PID when running. `None` in the idle case.
-    pub pid: Option<u32>,
-    /// Uptime in seconds when running. `None` when idle or when the
-    /// uptime field couldn't be parsed. Read from the `uptime:  <N>s`
-    /// line of the running-daemon header — it is not on the first
-    /// line, which is why this was always `None` before.
-    pub uptime_secs: Option<u64>,
-    /// Active background workers in roster.json. `0` when the daemon
-    /// is idle or the roster is absent — distinguished from `None`
-    /// (which means "we failed to parse the line at all").
+    /// Background workers whose process is **actually alive**, not the
+    /// roster's length. `None` means "could not tell" and must not be
+    /// rendered as a count; `Some(0)` is the healthy idle answer.
+    ///
+    /// Each entry is checked against its own `startedAt`, so a roster
+    /// left behind by a dead daemon contributes nothing however long
+    /// it sits there, and a recycled PID is not mistaken for the
+    /// worker that used to own it.
     pub bg_workers: Option<u32>,
-    /// `/tmp/cc-daemon-<uid>/<hash>` when present.
-    pub sock_dir: Option<PathBuf>,
-    /// `/tmp/cc-daemon-<uid>/<hash>/control.sock` when CC names it.
-    /// `None` when the socket answered — CC prints the word
-    /// `reachable` in place of the path in that case, so a healthy
-    /// daemon yields `None` here and `running: true`. When the socket
-    /// is *un*reachable the path is recovered from the error hint,
-    /// which is the case a UI would want to show.
-    pub control_sock: Option<PathBuf>,
-    /// Path to roster.json, when CC advertises one. **Always `None` on
-    /// CC 2.1.241** — that line now reports the roster's age rather
-    /// than its location. Retained for older CC, which printed a path.
+    /// The roster file consulted. Present whether or not it existed,
+    /// because "which file did you look at" is the first question of
+    /// anyone debugging a wrong count.
     pub roster_path: Option<PathBuf>,
-    /// Path to `~/.claude/daemon.log`. `None` when the status line
-    /// said `absent`, i.e. the log file does not exist yet.
-    pub log_path: Option<PathBuf>,
-    /// How confident we are in the parse. UI uses this to decide
-    /// between "show this" and "show last-known-good" (parallel to
-    /// the `cc_doctor` ParseStatus discipline).
+    /// How much of the read to trust. UI uses this to choose between
+    /// "show this" and "keep the last good snapshot" (the same
+    /// discipline as [`crate::cc_doctor`]).
     pub parse_status: DaemonParseStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DaemonParseStatus {
-    /// `running` and `bg_workers` both parsed cleanly. The other
-    /// fields may be `None` individually but the load-bearing pair
-    /// is trustworthy.
+    /// `bg_workers` is trustworthy.
     Ok,
-    /// Output captured but the parser couldn't pin down both `running`
-    /// and `bg_workers`. Renderer should fall back to the previous
-    /// snapshot rather than show stale-as-fresh.
+    /// The file was read but something in it could not be pinned down.
+    /// Renderer should fall back to the previous snapshot rather than
+    /// show stale-as-fresh.
     Degraded { reason: String },
-    /// Spawn or capture failed outright. Same fallback semantics.
+    /// The file exists and could not be read or parsed at all. Same
+    /// fallback semantics.
     Failed { reason: String },
 }
 
-/// Spawn `claude daemon status` and parse the result. Idempotent and
-/// cheap — safe to call on the same tick as
-/// [`crate::services::usage_snapshot`] writes.
-pub fn scrape_daemon_status() -> DaemonStatus {
-    match capture_status() {
-        Ok(text) => parse_status_output(&text),
-        Err(reason) => failed(reason),
-    }
+/// Where CC keeps the roster: `<config dir>/daemon/roster.json`.
+///
+/// Resolved through [`crate::paths::claude_config_dir`], which honours
+/// `CLAUDE_CONFIG_DIR` exactly as CC's own `be()` does. Hard-coding
+/// the `~/.claude` sibling is the bug `cc_tips::history` shipped — it
+/// reported `num_startups: 0` forever under a custom config dir.
+pub fn roster_path() -> PathBuf {
+    crate::paths::claude_config_dir()
+        .join("daemon")
+        .join("roster.json")
 }
 
-fn failed(reason: String) -> DaemonStatus {
-    DaemonStatus {
-        running: false,
-        pid: None,
-        uptime_secs: None,
+/// Read the daemon status. Cheap, spawns nothing, and safe to call on
+/// the same tick as [`crate::services::usage_snapshot`] writes.
+pub fn daemon_status() -> DaemonStatus {
+    read_daemon_status_at(&roster_path(), &SysinfoCheck::new())
+}
+
+/// Seam for tests: explicit roster path and process check.
+pub fn read_daemon_status_at(path: &Path, procs: &dyn ProcessCheck) -> DaemonStatus {
+    let base = DaemonStatus {
         bg_workers: None,
-        sock_dir: None,
-        control_sock: None,
-        roster_path: None,
-        log_path: None,
-        parse_status: DaemonParseStatus::Failed { reason },
-    }
-}
-
-fn capture_status() -> Result<String, String> {
-    // Reuse cc_doctor's binary resolver so brew-cask / native-install
-    // paths work for Tauri-from-Finder launches that don't inherit
-    // shell PATH.
-    let claude_bin = crate::cc_doctor::probes::resolve_claude_binary()
-        .ok_or_else(|| "claude binary not found in canonical install locations".to_string())?;
-
-    // Spawn directly with piped stdio so we own the child handle —
-    // a previous mpsc-based version leaked the spawned thread + the
-    // claude subprocess when the timeout fired (audit finding,
-    // dev-docs/cc-daemon-research.md). On timeout we kill the child
-    // and reap it before returning the error.
-    let mut child = Command::new(&claude_bin)
-        .arg("daemon")
-        .arg("status")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .no_window()
-        .spawn()
-        .map_err(|e| format!("spawn failed: {e}"))?;
-
-    // 50ms poll. CC's daemon status finishes in ~50ms idle; one or
-    // two cycles is enough. Polling tighter buys nothing because the
-    // child's own work dominates.
-    let poll_step = Duration::from_millis(50);
-    let start = Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(_status)) => break,
-            Ok(None) => {
-                if start.elapsed() >= SCRAPE_TIMEOUT {
-                    let _ = child.kill();
-                    // Best-effort reap so the OS isn't left with a
-                    // zombie. Ignore the error — kill already fired.
-                    let _ = child.wait();
-                    return Err(format!(
-                        "status spawn timed out after {}s",
-                        SCRAPE_TIMEOUT.as_secs()
-                    ));
-                }
-                std::thread::sleep(poll_step);
-            }
-            Err(e) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!("wait failed: {e}"));
-            }
-        }
-    }
-
-    // Drain pipes after the child has exited. CC daemon status
-    // output is sub-1KB so we don't need concurrent draining to
-    // avoid pipe-buffer deadlock.
-    let mut stdout_buf = String::new();
-    let mut stderr_buf = String::new();
-    if let Some(mut h) = child.stdout.take() {
-        let _ = h.read_to_string(&mut stdout_buf);
-    }
-    if let Some(mut h) = child.stderr.take() {
-        let _ = h.read_to_string(&mut stderr_buf);
-    }
-
-    // Idle-daemon exits non-zero ("not running" path), so don't gate
-    // on status. Combine stdout+stderr — observed output uses stdout
-    // but the CLI is undocumented.
-    let mut combined = stdout_buf;
-    if !stderr_buf.is_empty() {
-        if !combined.is_empty() {
-            combined.push('\n');
-        }
-        combined.push_str(&stderr_buf);
-    }
-    Ok(combined)
-}
-
-/// Pure parser. Takes the full captured text and returns the parsed
-/// status. Tested directly with fixture strings — no process spawn.
-///
-/// # The format
-///
-/// Read out of CC 2.1.241's `formatBgDaemonStatus` and the `status`
-/// arm of the `daemon` command, not sampled from one run — a sample
-/// only shows the branches that machine happened to be in, which is
-/// how three of these lines were modelled wrongly. Optional lines are
-/// bracketed; `|` separates alternatives of one line.
-///
-/// ```text
-/// not running                                        # idle: first line
-/// pid:     <N>                                       # running: first line
-/// version: <ver>
-/// uptime:  <N>s
-/// origin:  <origin>
-/// config:  <path>
-/// log:     <path>
-/// [launcher: <cmd> | (none)]
-/// [warning: <...>]
-///
-/// bg sessions:
-///   sock dir:     <path>
-///   control.sock: reachable | unreachable (<err>)
-///   [bg sessions:  disabled (start failure — ...)]
-///   bg workers:   <live> running (control.sock), <roster> in roster.json
-///               | <roster> in roster.json (live count unavailable | control unreachable)
-///   [              <N> from a different CLI version (...)]
-///   roster.json:  absent | updated <N>s ago
-///   daemon.log:   absent | <size> at <path>
-///   [warning:      supervisor not running but <N> workers in roster — ...]
-/// ```
-///
-/// Three of those lines print a **sentence where an older CC printed a
-/// path**, and the parser used to store the sentence as a `PathBuf`:
-/// `control.sock: reachable`, `roster.json: updated <N>s ago`, and
-/// `daemon.log: <size> at <path>` became `control_sock = "reachable"`,
-/// `roster_path = "updated 765423s ago"` and
-/// `log_path = "18.3KB at /Users/…/daemon.log"`. Every path arm now
-/// goes through [`parse_absolute_path_or_none`], so an unrecognized
-/// shape yields `None` — the honest answer — instead of a fabricated
-/// path that `.claude/rules/path-display.md` would then render.
-///
-/// Note there is **no `running` line**: a running daemon announces
-/// itself by leading with `pid:`, so that is what the first-line
-/// branch has to recognize.
-pub fn parse_status_output(text: &str) -> DaemonStatus {
-    let mut out = DaemonStatus {
-        running: false,
-        pid: None,
-        uptime_secs: None,
-        bg_workers: None,
-        sock_dir: None,
-        control_sock: None,
-        roster_path: None,
-        log_path: None,
+        roster_path: Some(path.to_path_buf()),
         parse_status: DaemonParseStatus::Ok,
     };
 
-    // First non-empty line carries the running/not-running verdict.
-    // Idle is the literal "not running"; running leads with
-    // `pid:     <N>`. `parse_running_line`'s digit-after-"pid" search
-    // covers both that shape and any future one-line variant.
-    let mut saw_status_line = false;
-    let mut saw_workers_line = false;
-
-    for raw in text.lines() {
-        let line = raw.trim();
-        if line.is_empty() {
-            continue;
+    let meta = match std::fs::metadata(path) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // The documented idle state. CC prints `roster.json:
+            // absent` here and calls the daemon not running, so this
+            // is a clean zero and not an unknown — without that, a
+            // machine that has never started a bg session would show
+            // the rotation audit a `None` instead of 0.
+            return DaemonStatus {
+                bg_workers: Some(0),
+                ..base
+            };
         }
-
-        if !saw_status_line {
-            saw_status_line = true;
-            if line.eq_ignore_ascii_case("not running")
-                || line.to_ascii_lowercase().starts_with("not running")
-            {
-                out.running = false;
-            } else if let Some((pid, uptime)) = parse_running_line(line) {
-                out.running = true;
-                out.pid = pid;
-                out.uptime_secs = uptime;
-            } else if line.to_ascii_lowercase().contains("running") {
-                // Couldn't extract pid/uptime but the line claims
-                // running — record the high-order bit, leave the
-                // numeric fields None.
-                out.running = true;
-            }
-            continue;
+        Err(e) => {
+            return DaemonStatus {
+                parse_status: DaemonParseStatus::Failed {
+                    reason: format!("could not stat roster.json: {e}"),
+                },
+                ..base
+            };
         }
+    };
 
-        // Key-value lines. See the format block in `parse_status_output`'s
-        // doc comment for the authoritative shapes; every arm below
-        // refuses to invent a path out of prose.
-        if let Some((key, value)) = split_kv(line) {
-            match key {
-                "sock dir" => out.sock_dir = parse_path_value(value),
-                "control.sock" => out.control_sock = parse_control_sock(value),
-                "bg workers" => {
-                    saw_workers_line = true;
-                    out.bg_workers = parse_worker_count(value);
-                }
-                "roster.json" => out.roster_path = parse_roster_value(value),
-                "daemon.log" => out.log_path = parse_log_value(value),
-                // Running-daemon header block: `uptime:  <N>s`. The
-                // first-line branch above never sees it, because when
-                // the daemon runs the first line is `pid:     <N>`.
-                "uptime" => out.uptime_secs = out.uptime_secs.or_else(|| parse_uptime(value)),
-                _ => {}
-            }
-        }
+    if !meta.is_file() {
+        return DaemonStatus {
+            parse_status: DaemonParseStatus::Failed {
+                reason: "roster.json is not a regular file".into(),
+            },
+            ..base
+        };
+    }
+    if meta.len() > MAX_ROSTER_BYTES {
+        return DaemonStatus {
+            parse_status: DaemonParseStatus::Failed {
+                reason: format!(
+                    "roster.json is {} bytes, past the {MAX_ROSTER_BYTES}-byte bound \
+                     CC quarantines its own roster at",
+                    meta.len()
+                ),
+            },
+            ..base
+        };
     }
 
-    // The two load-bearing fields are `running` and `bg_workers`. If
-    // we couldn't pin either down, demote to Degraded so the UI keeps
-    // the previous snapshot. Anything else missing (paths) is
-    // optional.
-    if !saw_status_line {
-        out.parse_status = DaemonParseStatus::Failed {
-            reason: "empty status output".into(),
+    let raw = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            return DaemonStatus {
+                parse_status: DaemonParseStatus::Failed {
+                    reason: format!("could not read roster.json: {e}"),
+                },
+                ..base
+            };
+        }
+    };
+
+    interpret_roster(&raw, procs, base)
+}
+
+/// The whole judgement, with no I/O. Field extraction is per-field and
+/// tolerant, mirroring CC's `.catch(0)`: one unreadable scalar must
+/// not throw away a worker count that parsed fine.
+fn interpret_roster(raw: &str, procs: &dyn ProcessCheck, base: DaemonStatus) -> DaemonStatus {
+    let value: serde_json::Value = match serde_json::from_str(raw) {
+        Ok(v) => v,
+        Err(e) => {
+            return DaemonStatus {
+                parse_status: DaemonParseStatus::Failed {
+                    reason: format!("roster.json is not valid JSON: {e}"),
+                },
+                ..base
+            };
+        }
+    };
+
+    let Some(obj) = value.as_object() else {
+        return DaemonStatus {
+            parse_status: DaemonParseStatus::Failed {
+                reason: "roster.json is not a JSON object".into(),
+            },
+            ..base
         };
-    } else if !saw_workers_line {
-        if is_idle_with_no_section(text) {
-            // Clean idle without a "bg sessions:" block — the
-            // contract is that an idle daemon reports zero workers,
-            // not "unknown." Without this, an old CC version that
-            // ever ships a bare "not running" line would surface as
-            // Ok-but-None and the badge would correctly hide, but
-            // the rotation audit chip would read `None` instead of
-            // 0 workers.
-            out.bg_workers = Some(0);
-        } else {
-            out.parse_status = DaemonParseStatus::Degraded {
-                reason: "bg workers line missing".into(),
+    };
+
+    // `proto` gates everything below it. A roster that does not
+    // declare one is not a shape we recognise, and a roster newer than
+    // we understand is read by nobody here — both keep their counts to
+    // themselves rather than guessing.
+    match obj.get("proto").and_then(serde_json::Value::as_u64) {
+        Some(p) if (MIN_KNOWN_PROTO..=MAX_KNOWN_PROTO).contains(&p) => {}
+        Some(p) => {
+            return DaemonStatus {
+                parse_status: DaemonParseStatus::Degraded {
+                    reason: format!(
+                        "roster.json declares proto {p}; this build reads \
+                         {MIN_KNOWN_PROTO}..={MAX_KNOWN_PROTO}"
+                    ),
+                },
+                ..base
+            };
+        }
+        None => {
+            return DaemonStatus {
+                parse_status: DaemonParseStatus::Degraded {
+                    reason: "roster.json has no readable `proto` field".into(),
+                },
+                ..base
             };
         }
     }
 
-    out
-}
+    let Some(workers) = obj.get("workers").and_then(serde_json::Value::as_object) else {
+        return DaemonStatus {
+            parse_status: DaemonParseStatus::Degraded {
+                reason: "roster.json has no readable `workers` object".into(),
+            },
+            ..base
+        };
+    };
 
-/// "not running" + nothing else is the legitimate idle case — treat
-/// it as Ok with `bg_workers = Some(0)`. Without this check, idle
-/// status would be misreported as Degraded.
-fn is_idle_with_no_section(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    lower.contains("not running") && !lower.contains("bg workers")
-}
-
-fn parse_running_line(line: &str) -> Option<(Option<u32>, Option<u64>)> {
-    // Defensive: look for "pid <digits>" and "uptime <digits>" tokens
-    // anywhere on the line. Real format unknown; this matches the
-    // help text's promise of "pid, version, uptime" without
-    // hard-coding a shape.
-    let lower = line.to_ascii_lowercase();
-    if !lower.contains("pid") && !lower.contains("running") {
-        return None;
-    }
-    let pid = extract_number_after(&lower, "pid").and_then(|n| u32::try_from(n).ok());
-    let uptime = extract_number_after(&lower, "uptime");
-    Some((pid, uptime))
-}
-
-fn extract_number_after(haystack: &str, key: &str) -> Option<u64> {
-    let idx = haystack.find(key)?;
-    let rest = &haystack[idx + key.len()..];
-    let mut digits = String::new();
-    let mut started = false;
-    for c in rest.chars() {
-        if c.is_ascii_digit() {
-            digits.push(c);
-            started = true;
-        } else if started {
-            break;
-        } else if c.is_whitespace() || c == ':' || c == '=' {
-            continue;
-        } else {
-            // Non-digit non-separator before any digit — abandon.
-            return None;
-        }
-    }
-    digits.parse().ok()
-}
-
-fn split_kv(line: &str) -> Option<(&str, &str)> {
-    let (k, v) = line.split_once(':')?;
-    Some((k.trim(), v.trim()))
-}
-
-fn parse_path_value(value: &str) -> Option<PathBuf> {
-    let v = value.trim();
-    if v.is_empty() || v.eq_ignore_ascii_case("absent") {
-        return None;
-    }
-    Some(PathBuf::from(v))
-}
-
-/// `roster.json:  absent | updated <N>s ago | <path>`.
-///
-/// Current CC never prints a path here — the line reports *freshness*,
-/// not location. The old shape is still accepted so an older CC keeps
-/// working, but anything that is not an absolute path yields `None`
-/// rather than a `PathBuf` built out of the sentence "updated 765423s
-/// ago". The age itself is deliberately dropped: no surface renders
-/// it, and a field with no reader is worse than no field.
-fn parse_roster_value(value: &str) -> Option<PathBuf> {
-    parse_absolute_path_or_none(value)
-}
-
-/// `daemon.log:   absent | <size> at <path> | <path>`.
-///
-/// The size prefix is a formatted string (`18.3KB`), so it is read for
-/// its `" at "` separator only and then discarded — parsing it back to
-/// a byte count would be lossy. Split on the FIRST `" at "`: the size
-/// never contains one, and a path legitimately can.
-fn parse_log_value(value: &str) -> Option<PathBuf> {
-    let v = value.trim();
-    if let Some((_size, rest)) = v.split_once(" at ") {
-        return parse_absolute_path_or_none(rest);
-    }
-    parse_absolute_path_or_none(v)
-}
-
-/// The one gate that stops prose becoming a path. `absent`,
-/// `reachable`, `updated 765423s ago` and any future sentence all fall
-/// through to `None`; only something path-shaped survives.
-///
-/// `is_absolute_path_str` (not `starts_with('/')`, not
-/// `Path::is_absolute` — .claude/rules/paths.md) so Unix, drive-letter,
-/// UNC and named-pipe shapes are all recognized on every host.
-fn parse_absolute_path_or_none(value: &str) -> Option<PathBuf> {
-    let v = value.trim();
-    if v.is_empty() || !crate::path_utils::is_absolute_path_str(v) {
-        return None;
-    }
-    Some(PathBuf::from(v))
-}
-
-/// `uptime:  <N>s` from the running-daemon header block.
-fn parse_uptime(value: &str) -> Option<u64> {
-    let digits: String = value
-        .trim()
-        .chars()
-        .take_while(|c| c.is_ascii_digit())
-        .collect();
-    digits.parse().ok()
-}
-
-/// `control.sock: reachable | unreachable (<err>) | <path>`.
-///
-/// The `reachable` arm is why this cannot reuse the generic path
-/// parser: CC prints the word instead of the path when the socket
-/// answers, and treating it as a path produced a `control_sock` of
-/// literally `reachable` on every healthy daemon.
-fn parse_control_sock(value: &str) -> Option<PathBuf> {
-    let v = value.trim();
-    if v.eq_ignore_ascii_case("reachable") {
-        return None;
-    }
-    if v.to_ascii_lowercase().starts_with("unreachable") {
-        // Try to recover the sock path from the parenthesized hint:
-        //   "unreachable (connect ENOENT /tmp/.../control.sock)"
-        if let (Some(open), Some(close)) = (v.find('('), v.rfind(')')) {
-            if close > open {
-                let inner = &v[open + 1..close];
-                // Pull the last whitespace-separated token that looks
-                // like an absolute path. `is_absolute_path_str` (not a
-                // starts_with('/') check — .claude/rules/paths.md)
-                // covers Unix, drive-letter, UNC, and named-pipe
-                // (`\\.\pipe\...`) shapes.
-                if let Some(last) = inner
-                    .split_whitespace()
-                    .rev()
-                    .find(|tok| crate::path_utils::is_absolute_path_str(tok))
-                {
-                    return Some(PathBuf::from(last));
-                }
+    // `pid` and `startedAt` are both REQUIRED in CC's worker schema, so
+    // a record missing either is drift rather than an odd worker. That
+    // degrades the whole read: a count computed over the entries we
+    // happened to understand is exactly the number nobody computed.
+    let mut entries: Vec<Worker> = Vec::with_capacity(workers.len());
+    for (id, w) in workers {
+        let pid = w
+            .get("pid")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|n| u32::try_from(n).ok())
+            .filter(|pid| *pid != 0);
+        let started_at_ms = w.get("startedAt").and_then(serde_json::Value::as_i64);
+        match (pid, started_at_ms) {
+            (Some(pid), Some(started_at_ms)) => entries.push(Worker { pid, started_at_ms }),
+            _ => {
+                return DaemonStatus {
+                    parse_status: DaemonParseStatus::Degraded {
+                        reason: format!(
+                            "roster worker {id} has no readable `pid` + `startedAt` pair"
+                        ),
+                    },
+                    ..base
+                };
             }
         }
-        return None;
     }
-    parse_absolute_path_or_none(v)
+
+    // One process-table refresh for the whole roster rather than one
+    // per worker.
+    let pids: Vec<u32> = entries.iter().map(|w| w.pid).collect();
+    procs.prime(&pids);
+
+    let live = entries
+        .iter()
+        .filter(|w| procs.is_running(w.pid) && !procs.started_after(w.pid, w.started_at_ms))
+        .count();
+
+    DaemonStatus {
+        bg_workers: Some(u32::try_from(live).unwrap_or(u32::MAX)),
+        parse_status: DaemonParseStatus::Ok,
+        ..base
+    }
 }
 
-/// `bg workers:` has two shapes, and which number comes first differs
-/// between them:
-///
-/// ```text
-/// bg workers:   2 running (control.sock), 3 in roster.json   # control reachable
-/// bg workers:   3 in roster.json (control unreachable)       # control down
-/// ```
-///
-/// Taking the first digit run is correct for both, and deliberately so:
-/// it yields the live count when the control socket can supply one, and
-/// falls back to the roster count when it cannot. `bg_workers` is the
-/// load-bearing field (it drives the sidebar badge and the rotation
-/// audit's "N bg workers active" suffix), so both shapes are pinned by
-/// fixtures rather than left to luck.
-fn parse_worker_count(value: &str) -> Option<u32> {
-    let mut digits = String::new();
-    for c in value.chars() {
-        if c.is_ascii_digit() {
-            digits.push(c);
-        } else if !digits.is_empty() {
-            break;
-        }
-    }
-    digits.parse().ok()
+/// The two required fields of a roster worker record.
+struct Worker {
+    pid: u32,
+    /// Epoch **milliseconds**, as CC writes it. A process whose start
+    /// time is later than this is a recycled pid, not this worker —
+    /// see [`ProcessCheck::started_after`], whose "cannot tell" answer
+    /// is `false` so an unreadable start time preserves the
+    /// pid-exists verdict rather than inventing a recycle.
+    started_at_ms: i64,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+    use std::sync::Mutex;
 
-    // ── sock-path recovery shapes (.claude/rules/paths.md) ──────
-    // Pure string ops — run on every host OS. Verbatim `\\?\` is not
-    // covered: the hint text is daemon-written, never canonicalize
-    // output.
+    /// Process table under test control. `started_secs` lets a test
+    /// express the case the whole guard exists for: a pid that is
+    /// alive but began *after* the roster recorded the worker, i.e. a
+    /// recycled number wearing a dead worker's pid.
+    struct FakeProcs {
+        started_secs: Mutex<HashMap<u32, u64>>,
+        primed: Mutex<Vec<u32>>,
+    }
+
+    impl FakeProcs {
+        /// Every pid alive and started at epoch 0 — old enough that no
+        /// realistic `startedAt` makes it look recycled.
+        fn alive(pids: &[u32]) -> Self {
+            Self {
+                started_secs: Mutex::new(pids.iter().map(|p| (*p, 0)).collect()),
+                primed: Mutex::new(Vec::new()),
+            }
+        }
+        fn none() -> Self {
+            Self::alive(&[])
+        }
+        /// Alive, but started at `secs` — used to fake pid reuse.
+        fn started_at(pid: u32, secs: u64) -> Self {
+            Self {
+                started_secs: Mutex::new([(pid, secs)].into_iter().collect()),
+                primed: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl ProcessCheck for FakeProcs {
+        fn is_running(&self, pid: u32) -> bool {
+            self.started_secs.lock().unwrap().contains_key(&pid)
+        }
+        fn prime(&self, pids: &[u32]) {
+            self.primed.lock().unwrap().extend_from_slice(pids);
+        }
+        fn started_after(&self, pid: u32, since_ms: i64) -> bool {
+            match self.started_secs.lock().unwrap().get(&pid) {
+                // Same strict-seconds comparison the real impl uses.
+                Some(secs) => i64::try_from(*secs).is_ok_and(|s| s > since_ms / 1000),
+                None => false,
+            }
+        }
+    }
+
+    fn base() -> DaemonStatus {
+        DaemonStatus {
+            bg_workers: None,
+            roster_path: Some(PathBuf::from("/fake/roster.json")),
+            parse_status: DaemonParseStatus::Ok,
+        }
+    }
+
+    fn read(raw: &str, procs: &dyn ProcessCheck) -> DaemonStatus {
+        interpret_roster(raw, procs, base())
+    }
+
+    /// One worker, `startedAt` far in the future so a fake pid started
+    /// at epoch 0 always reads as legitimate.
+    fn roster(workers: &[(&str, u32)]) -> String {
+        let body: Vec<String> = workers
+            .iter()
+            .map(|(id, pid)| format!(r#""{id}":{{"pid":{pid},"startedAt":9000000000000}}"#))
+            .collect();
+        format!(
+            r#"{{"proto":1,"supervisorPid":4242,"updatedAt":1,"workers":{{{}}}}}"#,
+            body.join(",")
+        )
+    }
+
+    /// The exact bytes on the reference machine, whose `claude daemon
+    /// status` printed `not running` / `bg workers: 0 in roster.json`.
+    const REAL_IDLE_ROSTER: &str = r#"{
+  "proto": 1,
+  "supervisorPid": 22163,
+  "updatedAt": 1786816263045,
+  "workers": {}
+}"#;
 
     #[test]
-    fn test_daemon_sock_recovery_handles_unix_hint() {
-        let v = "unreachable (connect ENOENT /tmp/cc-daemon-501/abc/control.sock)";
-        assert_eq!(
-            parse_control_sock(v),
-            Some(PathBuf::from("/tmp/cc-daemon-501/abc/control.sock"))
+    fn reproduces_the_cli_verdict_on_a_real_idle_roster() {
+        let s = read(REAL_IDLE_ROSTER, &FakeProcs::none());
+        assert_eq!(s.bg_workers, Some(0));
+        assert_eq!(s.parse_status, DaemonParseStatus::Ok);
+    }
+
+    #[test]
+    fn counts_workers_whose_processes_are_alive() {
+        let s = read(
+            &roster(&[("aa", 11), ("bb", 22), ("cc", 33)]),
+            &FakeProcs::alive(&[11, 22, 33]),
         );
+        assert_eq!(s.bg_workers, Some(3));
+        assert_eq!(s.parse_status, DaemonParseStatus::Ok);
     }
 
     #[test]
-    fn test_daemon_sock_recovery_handles_windows_drive_hint() {
-        let v =
-            r"unreachable (connect ENOENT C:\Users\j\AppData\Local\Temp\cc-daemon\control.sock)";
-        assert_eq!(
-            parse_control_sock(v),
-            Some(PathBuf::from(
-                r"C:\Users\j\AppData\Local\Temp\cc-daemon\control.sock"
-            ))
-        );
-    }
-
-    #[test]
-    fn test_daemon_sock_recovery_handles_named_pipe_hint() {
-        let v = r"unreachable (connect ENOENT \\.\pipe\cc-daemon-control)";
-        assert_eq!(
-            parse_control_sock(v),
-            Some(PathBuf::from(r"\\.\pipe\cc-daemon-control"))
-        );
-    }
-
-    #[test]
-    fn test_daemon_sock_recovery_returns_none_without_path_token() {
-        assert_eq!(parse_control_sock("unreachable (connect refused)"), None);
-        assert_eq!(parse_control_sock("unreachable"), None);
-    }
-
-    // ── fixtures ────────────────────────────────────────────────
-    // Transcribed from CC 2.1.241's `formatBgDaemonStatus`, not
-    // invented. The pair below is the reason: `IDLE_FIXTURE` is the
-    // shape that shipped, `IDLE_FIXTURE_LEGACY` the shape this parser
-    // was written against, and only the second one has paths on the
-    // roster/log lines.
-
-    /// Live output, copied verbatim from `claude daemon status` on
-    /// CC 2.1.241 (2026-08-24) with the daemon idle.
-    const IDLE_FIXTURE: &str = "\
-not running
-
-bg sessions:
-  sock dir:     /tmp/cc-daemon-501/5efc884f
-  control.sock: unreachable (connect ENOENT /tmp/cc-daemon-501/5efc884f/control.sock)
-  bg workers:   0 in roster.json (control unreachable)
-  roster.json:  updated 765423s ago
-  daemon.log:   18.3KB at /Users/joker/.claude/daemon.log
-";
-
-    /// The older shape, where both lines carried a bare path. Kept so
-    /// the compatibility arm is exercised rather than assumed.
-    const IDLE_FIXTURE_LEGACY: &str = "\
-not running
-
-bg sessions:
-  sock dir:     /tmp/cc-daemon-501/5efc884f
-  control.sock: unreachable (connect ENOENT /tmp/cc-daemon-501/5efc884f/control.sock)
-  bg workers:   0 in roster.json (control unreachable)
-  roster.json:  absent
-  daemon.log:   absent
-";
-
-    /// Running daemon: header block first (leading with `pid:`, NOT a
-    /// "running" line), then the bg-sessions block with the control
-    /// socket up — which is the shape that prints `reachable` instead
-    /// of a path and two worker numbers instead of one.
-    const RUNNING_FIXTURE: &str = "\
-pid:     12345
-version: 2.1.241
-uptime:  3600s
-origin:  transient
-config:  /Users/me/.claude/daemon/daemon.json
-log:     /Users/me/.claude/daemon.log
-
-bg sessions:
-  sock dir:     /tmp/cc-daemon-501/abc
-  control.sock: reachable
-  bg workers:   2 running (control.sock), 3 in roster.json
-  roster.json:  updated 12s ago
-  daemon.log:   1.2MB at /Users/me/.claude/daemon.log
-";
-
-    // ── the reported defect: prose must never become a path ──────
-
-    #[test]
-    fn roster_age_line_does_not_become_a_path() {
-        // Regression for #84. `updated 765423s ago` is a sentence, and
-        // the parser used to hand it to `PathBuf::from` verbatim.
-        let s = parse_status_output(IDLE_FIXTURE);
-        assert_eq!(s.roster_path, None);
-    }
-
-    #[test]
-    fn log_line_yields_the_path_not_the_size_prefix() {
-        let s = parse_status_output(IDLE_FIXTURE);
-        assert_eq!(
-            s.log_path.as_deref(),
-            Some(std::path::Path::new("/Users/joker/.claude/daemon.log")),
-            "the size prefix must be stripped, not carried into the path"
-        );
-    }
-
-    #[test]
-    fn reachable_control_sock_does_not_become_a_path() {
-        // The second instance of the same defect, in the same
-        // function: CC prints the word `reachable` where it used to
-        // print the socket path, so every healthy daemon reported a
-        // `control_sock` of literally "reachable".
-        let s = parse_status_output(RUNNING_FIXTURE);
-        assert_eq!(s.control_sock, None);
-    }
-
-    #[test]
-    fn running_daemon_leads_with_pid_and_reports_uptime() {
-        let s = parse_status_output(RUNNING_FIXTURE);
-        assert!(s.running, "a `pid:` first line means the daemon is up");
-        assert_eq!(s.pid, Some(12345));
-        assert_eq!(
-            s.uptime_secs,
-            Some(3600),
-            "uptime is its own line, not part of the first one"
-        );
-    }
-
-    #[test]
-    fn reachable_control_reports_the_live_worker_count() {
-        // Two numbers on the line; the live one comes first and is the
-        // one that answers "how many workers are active".
-        let s = parse_status_output(RUNNING_FIXTURE);
-        assert_eq!(s.bg_workers, Some(2));
-        assert!(matches!(s.parse_status, DaemonParseStatus::Ok));
-    }
-
-    #[test]
-    fn legacy_path_shapes_still_parse() {
-        let fixture = IDLE_FIXTURE_LEGACY
-            .replace(
-                "roster.json:  absent",
-                "roster.json:  /Users/me/.claude/roster.json",
-            )
-            .replace(
-                "daemon.log:   absent",
-                "daemon.log:   /Users/me/.claude/daemon.log",
-            );
-        let s = parse_status_output(&fixture);
-        assert_eq!(
-            s.roster_path.as_deref(),
-            Some(std::path::Path::new("/Users/me/.claude/roster.json"))
-        );
-        assert_eq!(
-            s.log_path.as_deref(),
-            Some(std::path::Path::new("/Users/me/.claude/daemon.log"))
-        );
-    }
-
-    #[test]
-    fn absent_stays_none_on_both_lines() {
-        let s = parse_status_output(IDLE_FIXTURE_LEGACY);
-        assert_eq!(s.roster_path, None);
-        assert_eq!(s.log_path, None);
-    }
-
-    #[test]
-    fn optional_lines_do_not_derail_the_parse() {
-        // `bg sessions:  disabled`, the version-skew continuation (no
-        // colon at all) and the trailing `warning:` line are all
-        // things CC emits that this parser must step over without
-        // corrupting a field.
-        let fixture = "\
-not running
-
-bg sessions:
-  sock dir:     /tmp/cc-daemon-501/abc
-  control.sock: unreachable (connect ENOENT /tmp/cc-daemon-501/abc/control.sock)
-  bg sessions:  disabled (start failure — see daemon.log; restart the service after fixing)
-  bg workers:   1 running (control.sock), 4 in roster.json
-                2 from a different CLI version (most stay attachable)
-  roster.json:  updated 3s ago
-  daemon.log:   18.3KB at /Users/me/.claude/daemon.log
-  warning:      supervisor not running but 4 workers in roster
-";
-        let s = parse_status_output(fixture);
-        assert!(!s.running);
+    fn a_dead_worker_is_not_counted() {
+        // Two entries, one process. The roster length is 2 and the
+        // honest answer is 1 — the whole reason the count is not
+        // `workers.len()`.
+        let s = read(&roster(&[("aa", 11), ("bb", 22)]), &FakeProcs::alive(&[11]));
         assert_eq!(s.bg_workers, Some(1));
-        assert_eq!(s.roster_path, None);
+    }
+
+    /// The state that motivated this design: CC's roster outlives the
+    /// daemon by design — 13 days, measured — so every entry in a
+    /// stale roster is dead however healthy the file looks.
+    #[test]
+    fn a_stale_roster_contributes_nothing() {
+        let s = read(&roster(&[("aa", 11), ("bb", 22)]), &FakeProcs::none());
+        assert_eq!(s.bg_workers, Some(0));
+    }
+
+    /// The reuse guard itself. The pid is ALIVE — so a bare
+    /// `is_running` check would count it — but it began after the
+    /// roster recorded this worker, which makes it a different
+    /// process wearing a recycled number.
+    #[test]
+    fn a_recycled_pid_is_not_the_worker_that_owned_it() {
+        let raw = r#"{"proto":1,"supervisorPid":1,"updatedAt":1,
+                      "workers":{"aa":{"pid":77,"startedAt":1000000}}}"#;
+        let procs = FakeProcs::started_at(77, 9_000_000);
+        assert!(procs.is_running(77), "the fake must keep the pid alive");
         assert_eq!(
-            s.log_path.as_deref(),
-            Some(std::path::Path::new("/Users/me/.claude/daemon.log"))
+            read(raw, &procs).bg_workers,
+            Some(0),
+            "a pid that began after its roster entry is a recycled number"
         );
-        assert!(matches!(s.parse_status, DaemonParseStatus::Ok));
     }
 
     #[test]
-    fn windows_shapes_survive_both_lines() {
-        // .claude/rules/paths.md — the classifier is string-shape
-        // based, so drive-letter and UNC forms are recognized on every
-        // host, not just Windows.
+    fn a_process_started_before_its_roster_entry_is_the_real_worker() {
+        // CC records `startedAt` after spawning, so a legitimate
+        // worker's process always predates its entry. An off-by-one
+        // here would report every live worker as recycled.
+        let raw = r#"{"proto":1,"supervisorPid":1,"updatedAt":1,
+                      "workers":{"aa":{"pid":77,"startedAt":9000000}}}"#;
         assert_eq!(
-            parse_log_value(r"18.3KB at C:\Users\j\.claude\daemon.log"),
-            Some(PathBuf::from(r"C:\Users\j\.claude\daemon.log"))
-        );
-        assert_eq!(
-            parse_log_value(r"18.3KB at \\server\share\daemon.log"),
-            Some(PathBuf::from(r"\\server\share\daemon.log"))
-        );
-        assert_eq!(
-            parse_roster_value(r"C:\Users\j\.claude\roster.json"),
-            Some(PathBuf::from(r"C:\Users\j\.claude\roster.json"))
+            read(raw, &FakeProcs::started_at(77, 1_000)).bg_workers,
+            Some(1)
         );
     }
 
     #[test]
-    fn unrecognized_prose_never_yields_a_path() {
-        // The general guard, so a future CC sentence fails to None
-        // rather than fabricating a path nobody can open.
-        for prose in [
-            "absent",
-            "reachable",
-            "updated 42s ago",
-            "unknown",
-            "",
-            "some future phrasing",
+    fn primes_the_process_table_with_every_worker_pid() {
+        // SysinfoCheck answers `false` for any pid it was never primed
+        // with, so a missing prime reports every live worker as dead.
+        let procs = FakeProcs::alive(&[11, 22]);
+        read(&roster(&[("aa", 11), ("bb", 22)]), &procs);
+        let mut primed = procs.primed.lock().unwrap().clone();
+        primed.sort_unstable();
+        assert_eq!(primed, vec![11, 22]);
+    }
+
+    #[test]
+    fn a_worker_missing_its_required_fields_degrades() {
+        // `pid` and `startedAt` are both required in CC's schema, so a
+        // record without them is drift. Counting the rest would be a
+        // number computed over an arbitrary subset.
+        for raw in [
+            r#"{"proto":1,"updatedAt":1,"workers":{"aa":{"startedAt":1}}}"#,
+            r#"{"proto":1,"updatedAt":1,"workers":{"aa":{"pid":11}}}"#,
+            r#"{"proto":1,"updatedAt":1,"workers":{"aa":{"pid":0,"startedAt":1}}}"#,
         ] {
-            assert_eq!(parse_roster_value(prose), None, "roster: {prose:?}");
-            assert_eq!(parse_absolute_path_or_none(prose), None, "guard: {prose:?}");
+            let s = read(raw, &FakeProcs::alive(&[11]));
+            assert!(
+                matches!(s.parse_status, DaemonParseStatus::Degraded { .. }),
+                "expected Degraded for {raw}, got {:?}",
+                s.parse_status
+            );
+            assert_eq!(s.bg_workers, None, "a degraded read must yield no count");
         }
     }
 
     #[test]
-    fn idle_fixture_parses_to_zero_workers() {
-        let s = parse_status_output(IDLE_FIXTURE);
-        assert!(!s.running);
-        assert_eq!(s.bg_workers, Some(0));
-        assert_eq!(
-            s.sock_dir.as_deref(),
-            Some(std::path::Path::new("/tmp/cc-daemon-501/5efc884f"))
+    fn a_newer_proto_degrades_and_reports_no_numbers() {
+        let s = read(
+            r#"{"proto":2,"updatedAt":1,"workers":{"a":{"pid":11,"startedAt":1}}}"#,
+            &FakeProcs::alive(&[11]),
+        );
+        assert!(
+            matches!(s.parse_status, DaemonParseStatus::Degraded { .. }),
+            "got {:?}",
+            s.parse_status
         );
         assert_eq!(
-            s.control_sock.as_deref(),
-            Some(std::path::Path::new(
-                "/tmp/cc-daemon-501/5efc884f/control.sock"
-            ))
+            s.bg_workers, None,
+            "a proto we cannot read must not yield a count — that is how a \
+             fabricated number reaches the badge"
         );
-        assert_eq!(s.roster_path, None, "the age line advertises no path");
-        assert_eq!(
-            s.log_path.as_deref(),
-            Some(std::path::Path::new("/Users/joker/.claude/daemon.log"))
-        );
-        assert!(matches!(s.parse_status, DaemonParseStatus::Ok));
     }
 
     #[test]
-    fn running_with_workers_parses_count() {
-        // NOT CC's format — see RUNNING_FIXTURE for that. This pins the
-        // defensive one-line fallback in `parse_running_line`, which is
-        // what would catch a future CC that announces itself on a
-        // single line again. Believing this fixture WAS the format is
-        // how the real running shape went unmodelled.
-        let fixture = "\
-running pid 12345 uptime 3600
-
-bg sessions:
-  sock dir:     /tmp/cc-daemon-501/abc
-  control.sock: /tmp/cc-daemon-501/abc/control.sock
-  bg workers:   3 in roster.json
-  roster.json:  /Users/me/.claude/daemon/roster.json
-  daemon.log:   /Users/me/.claude/daemon.log
-";
-        let s = parse_status_output(fixture);
-        assert!(s.running);
-        assert_eq!(s.pid, Some(12345));
-        assert_eq!(s.uptime_secs, Some(3600));
-        assert_eq!(s.bg_workers, Some(3));
-        assert!(s.roster_path.is_some());
-        assert!(s.log_path.is_some());
-        assert!(matches!(s.parse_status, DaemonParseStatus::Ok));
+    fn proto_zero_degrades_even_though_it_is_below_the_ceiling() {
+        // `p <= MAX` alone accepted this. CC's own range is [1,1], so
+        // proto 0 is a schema nobody defined — reporting a count from
+        // it is the fabricated-number failure in a new costume.
+        let s = read(
+            r#"{"proto":0,"updatedAt":1,"workers":{"a":{"pid":11,"startedAt":1}}}"#,
+            &FakeProcs::alive(&[11]),
+        );
+        assert!(
+            matches!(s.parse_status, DaemonParseStatus::Degraded { .. }),
+            "got {:?}",
+            s.parse_status
+        );
+        assert_eq!(s.bg_workers, None);
     }
 
     #[test]
-    fn bare_not_running_no_section_parses_clean() {
-        // Some future CC version may drop the "bg sessions:" block
-        // entirely when idle. Contract: clean idle reports Some(0),
-        // not None — "we measured and it's zero" beats "we don't know".
-        let s = parse_status_output("not running\n");
-        assert!(!s.running);
-        assert_eq!(s.bg_workers, Some(0));
-        assert!(matches!(s.parse_status, DaemonParseStatus::Ok));
+    fn a_missing_proto_degrades() {
+        let s = read(r#"{"updatedAt":1,"workers":{}}"#, &FakeProcs::none());
+        assert!(matches!(s.parse_status, DaemonParseStatus::Degraded { .. }));
+        assert_eq!(s.bg_workers, None);
     }
 
     #[test]
-    fn empty_output_is_failed() {
-        let s = parse_status_output("");
+    fn a_missing_workers_object_degrades_rather_than_counting_zero() {
+        // "I could not find the workers" and "there are no workers"
+        // are different answers; collapsing them would report a
+        // healthy idle daemon over a roster we failed to read.
+        let s = read(
+            r#"{"proto":1,"supervisorPid":4242,"updatedAt":1}"#,
+            &FakeProcs::none(),
+        );
+        assert!(matches!(s.parse_status, DaemonParseStatus::Degraded { .. }));
+        assert_eq!(s.bg_workers, None);
+    }
+
+    #[test]
+    fn malformed_json_fails_rather_than_degrading() {
+        let s = read("{not json", &FakeProcs::none());
+        assert!(matches!(s.parse_status, DaemonParseStatus::Failed { .. }));
+        assert_eq!(s.bg_workers, None);
+    }
+
+    #[test]
+    fn a_json_scalar_is_not_a_roster() {
+        let s = read("42", &FakeProcs::none());
         assert!(matches!(s.parse_status, DaemonParseStatus::Failed { .. }));
     }
 
     #[test]
-    fn missing_workers_line_when_section_present_is_degraded() {
-        let fixture = "\
-running
-
-bg sessions:
-  sock dir:     /tmp/cc-daemon-501/abc
-";
-        let s = parse_status_output(fixture);
-        assert!(s.running);
-        assert!(matches!(s.parse_status, DaemonParseStatus::Degraded { .. }));
-    }
-
-    #[test]
-    fn unreachable_recovers_sock_path_from_parens() {
-        let s = parse_status_output(IDLE_FIXTURE);
-        // Even though control.sock said "unreachable", the embedded
-        // path is recovered from the parenthesized hint so the UI can
-        // still show "expected at <path>".
-        assert!(s.control_sock.is_some());
-    }
-
-    #[test]
-    fn worker_count_handles_extra_text() {
-        assert_eq!(parse_worker_count("5 in roster.json (whatever)"), Some(5));
-        assert_eq!(parse_worker_count("0"), Some(0));
-        assert_eq!(parse_worker_count("none"), None);
-    }
-
-    #[test]
-    fn extract_number_after_finds_uptime() {
+    fn an_absent_roster_is_the_idle_state_not_a_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = read_daemon_status_at(&dir.path().join("roster.json"), &FakeProcs::none());
+        assert_eq!(s.parse_status, DaemonParseStatus::Ok);
         assert_eq!(
-            extract_number_after("pid 123 uptime 9876 seconds", "uptime"),
-            Some(9876)
+            s.bg_workers,
+            Some(0),
+            "a machine that never started a bg session reports zero, not unknown"
         );
-        assert_eq!(extract_number_after("pid 123", "uptime"), None);
     }
 
     #[test]
-    fn log_value_returns_none_for_absent() {
-        assert_eq!(parse_log_value("absent"), None);
-        assert_eq!(parse_log_value("Absent"), None);
+    fn an_oversized_roster_is_refused_unread() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("roster.json");
+        std::fs::write(&p, vec![b'x'; (MAX_ROSTER_BYTES + 1) as usize]).unwrap();
+        let s = read_daemon_status_at(&p, &FakeProcs::none());
+        assert!(matches!(s.parse_status, DaemonParseStatus::Failed { .. }));
+    }
+
+    #[test]
+    fn a_directory_where_the_roster_should_be_is_a_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("roster.json");
+        std::fs::create_dir(&p).unwrap();
+        let s = read_daemon_status_at(&p, &FakeProcs::none());
+        assert!(matches!(s.parse_status, DaemonParseStatus::Failed { .. }));
+    }
+
+    #[test]
+    fn the_roster_path_is_always_reported() {
+        // "which file did you read" is the first debugging question,
+        // and it must be answerable in every branch — including the
+        // ones that read nothing.
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("roster.json");
         assert_eq!(
-            parse_log_value("/Users/me/.claude/daemon.log"),
-            Some(PathBuf::from("/Users/me/.claude/daemon.log"))
+            read_daemon_status_at(&p, &FakeProcs::none()).roster_path,
+            Some(p.clone())
+        );
+        std::fs::write(&p, "{bad").unwrap();
+        assert_eq!(
+            read_daemon_status_at(&p, &FakeProcs::none()).roster_path,
+            Some(p)
         );
     }
 
     #[test]
-    #[ignore = "live: spawns real `claude daemon status`, requires CC installed"]
-    fn live_scrape_against_real_claude() {
-        let s = scrape_daemon_status();
-        eprintln!(
-            "live: running={} pid={:?} workers={:?} parse_status={:?}",
-            s.running, s.pid, s.bg_workers, s.parse_status
-        );
-        // Print the path fields too: #84 was a *garbage value*, not a
-        // crash, so a live run that only prints the load-bearing pair
-        // shows green over exactly the defect being checked.
-        eprintln!(
-            "live: sock_dir={:?} control_sock={:?} roster_path={:?} log_path={:?}",
-            s.sock_dir, s.control_sock, s.roster_path, s.log_path
-        );
-        for (name, p) in [
-            ("sock_dir", &s.sock_dir),
-            ("control_sock", &s.control_sock),
-            ("roster_path", &s.roster_path),
-            ("log_path", &s.log_path),
-        ] {
-            if let Some(p) = p {
-                assert!(
-                    crate::path_utils::is_absolute_path_str(&p.to_string_lossy()),
-                    "{name} is not path-shaped: {p:?}"
-                );
-            }
+    fn roster_path_follows_the_cc_config_dir_override() {
+        // Hard-coding the `~/.claude` sibling is the bug
+        // `cc_tips::history` shipped. Guard it here rather than
+        // rediscover it.
+        let _lock = crate::testing::lock_data_dir();
+        let dir = tempfile::tempdir().unwrap();
+        // Restore rather than remove: a developer running the suite
+        // with a real CLAUDE_CONFIG_DIR set should not have it wiped
+        // for every test that follows.
+        let saved = std::env::var_os("CLAUDE_CONFIG_DIR");
+        std::env::set_var("CLAUDE_CONFIG_DIR", dir.path());
+        let got = roster_path();
+        match saved {
+            Some(v) => std::env::set_var("CLAUDE_CONFIG_DIR", v),
+            None => std::env::remove_var("CLAUDE_CONFIG_DIR"),
         }
-        // No hard assert on `running` — we don't know whether the
-        // user has a daemon up. Assert only that the parser didn't
-        // outright fail.
-        assert!(!matches!(s.parse_status, DaemonParseStatus::Failed { .. }));
+        assert_eq!(got, dir.path().join("daemon").join("roster.json"));
     }
 }

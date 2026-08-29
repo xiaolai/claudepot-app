@@ -380,6 +380,23 @@
       "message": "`claude auth login` exited with code 1"
     },
     {
+      "code": "onboard.auth_subcommand_too_old",
+      "owner": "core",
+      "params": [
+        "installed",
+        "since"
+      ],
+      "message": "This Claude Code build (2.1.39) is older than `claude auth login`, which arrived in 2.1.41. Update Claude Code and sign in again."
+    },
+    {
+      "code": "onboard.auth_version_unreadable",
+      "owner": "core",
+      "params": [
+        "since"
+      ],
+      "message": "Claudepot couldn't read your Claude Code version, so it won't run `claude auth login` — on a build older than 2.1.41, those words are sent to the model as a prompt instead of signing you in. Check that `claude --version` works."
+    },
+    {
       "code": "onboard.auth_login_cancelled",
       "owner": "core",
       "params": [],
