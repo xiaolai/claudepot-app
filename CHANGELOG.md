@@ -6,6 +6,48 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.5.9 — beta (unreleased)
+
+A readability and accessibility pass over the whole renderer, plus the
+checks that keep it that way.
+
+### Fixed
+
+- **Warning, success and informational text is readable in light mode.**
+  All four semantic colours were tuned for the dark surface and shared one
+  value across both themes, so on a light background they sat below the
+  WCAG AA floor while being used at 11px. Warning text measured 2.51:1
+  against a 4.5 requirement.
+- **White label text on filled buttons meets AA.** The primary action
+  measured 3.02:1 in light mode and 2.64:1 in dark. Filled controls now
+  paint a dedicated fill colour; the accent used for borders, focus rings
+  and tints is unchanged.
+- **Account initials are legible on every avatar colour.** White on the
+  derived fill measured 3.38:1 at its worst hue — roughly a third of the
+  colour wheel.
+- **Reduce Motion is respected everywhere.** Buttons, icon buttons,
+  sidebar items, filter chips and the settings toggles kept animating for
+  users who had asked the system for less motion.
+- **Eight controls that rendered with no styling now draw it.** Six text
+  and password fields showed the raw browser border; the Clean-orphans
+  dialog and two status badges rendered as unstyled text.
+- **Small print is actually small.** The `small` text style was applied in
+  58 places and had no effect anywhere.
+
+### Changed
+
+- De-emphasised metadata (timestamps, counts) is slightly darker so it
+  clears the same contrast floor as body text.
+- Roughly 1,460 lines of unreachable CSS removed — about a quarter of the
+  stylesheets, including three files nothing referenced.
+
+### Added
+
+- Three CI checks that hold the above: the palette is measured against
+  WCAG AA in both themes on every build, Reduce Motion coverage is
+  verified for inline styles and stylesheets alike, and a CSS rule whose
+  class nothing renders now fails the build.
+
 ## 0.5.8 — beta (released 2026-08-29)
 
 ### Changed
