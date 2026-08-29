@@ -84,6 +84,11 @@ export function Avatar({
         placeItems: "center",
         borderRadius: "var(--r-2)",
         background: color || "var(--bg-sunken)",
+        // White initials, so `color` must be dark enough to carry them.
+        // `avatarColorFor` guarantees that — `--avatar-derived-l` is held
+        // to AA at its WORST hue by `scripts/check-contrast.mjs`. A caller
+        // passing an arbitrary colour here is outside that guarantee and
+        // gets no check; pass a derived colour, or none.
         color: color ? "var(--on-color)" : "var(--fg-muted)",
         fontSize: fs,
         lineHeight: "var(--lh-flat)",

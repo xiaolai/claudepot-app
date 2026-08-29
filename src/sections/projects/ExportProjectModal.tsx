@@ -3,6 +3,7 @@ import { Trans, useTranslation } from "react-i18next";
 import { migrateApi, type ExportReceipt } from "../../api/migrate";
 import { renderError } from "../../lib/i18n-error";
 import { Button } from "../../components/primitives/Button";
+import { Input } from "../../components/primitives/Input";
 import {
   Modal,
   ModalBody,
@@ -91,13 +92,13 @@ export function ExportProjectModal({
         <label htmlFor={outId} style={{ display: "block", marginTop: "var(--sp-12)" }}>
           {t("export.outputLabel")}
         </label>
-        <input
+        <Input
           id={outId}
           type="text"
           value={output}
           onChange={(e) => setOutput(e.target.value)}
           placeholder="my-project.claudepot.tar.zst"
-          style={{ width: "100%", padding: "var(--sp-6) var(--sp-8)" }}
+          style={{ width: "100%" }}
         />
 
         <fieldset style={{ marginTop: "var(--sp-16)", border: 0, padding: 0 }}>
@@ -148,13 +149,13 @@ export function ExportProjectModal({
             >
               {t("export.passphraseLabel")}
             </label>
-            <input
+            <Input
               id={passId}
               type="password"
               value={passphrase}
               onChange={(e) => setPassphrase(e.target.value)}
               autoComplete="new-password"
-              style={{ width: "100%", padding: "var(--sp-6) var(--sp-8)" }}
+              style={{ width: "100%" }}
             />
           </>
         )}

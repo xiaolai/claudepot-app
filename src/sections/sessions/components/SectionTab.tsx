@@ -70,12 +70,15 @@ export function SectionTab({
                   width: "var(--sp-6)",
                   height: "var(--sp-6)",
                   borderRadius: "50%",
-                  background: active ? "var(--on-color)" : "var(--accent)",
+                  // --accent-ink, not --on-color: the active tab paints
+                  // --accent-soft, a pale wash, so a white dot on it was
+                  // invisible. This matches the tab's own active text.
+                  background: active ? "var(--accent-ink)" : "var(--accent)",
                   flexShrink: 0,
                 }
               : {
                   fontSize: "var(--fs-2xs)",
-                  color: active ? "var(--on-color)" : "var(--fg-faint)",
+                  color: active ? "var(--accent-ink)" : "var(--fg-faint)",
                   fontVariantNumeric: "tabular-nums",
                 }
           }

@@ -110,7 +110,7 @@ export function ReadToolViewer({ tool }: { tool: LinkedTool }) {
           {path}
         </span>
         {typeof input.offset === "number" && (
-          <span style={{ color: "var(--fg-ghost)" }}>
+          <span style={{ color: "var(--fg-faint)" }}>
             {t("viewer.read.fromOffset", { offset: input.offset })}
             {typeof input.limit === "number"
               ? ` · ${t("viewer.read.limitLines", { n: input.limit })}`
@@ -137,7 +137,7 @@ export function ReadToolViewer({ tool }: { tool: LinkedTool }) {
         <div
           style={{
             padding: "var(--sp-10)",
-            color: "var(--fg-ghost)",
+            color: "var(--fg-faint)",
             fontSize: "var(--fs-xs)",
             fontStyle: "italic",
           }}
@@ -162,7 +162,7 @@ export function ReadToolViewer({ tool }: { tool: LinkedTool }) {
                 gap: "var(--sp-6)",
               }}
             >
-              <span style={{ color: "var(--fg-ghost)" }}>{l.lineNumber}</span>
+              <span style={{ color: "var(--fg-faint)" }}>{l.lineNumber}</span>
               <span style={{ whiteSpace: "pre", overflowX: "auto" }}>
                 {l.text}
               </span>

@@ -943,7 +943,7 @@ function CardRow({ card, isNew, onClick }: CardRowProps) {
         display: "flex",
         gap: "var(--sp-12)",
         alignItems: "flex-start",
-        transition: "background 120ms",
+        transition: "background var(--dur-base) var(--ease-linear)",
         background: isNew ? "var(--bg-elev)" : "transparent",
       }}
       onMouseEnter={(e) => {

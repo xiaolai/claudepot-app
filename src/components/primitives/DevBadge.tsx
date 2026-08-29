@@ -20,7 +20,7 @@ export function DevBadge({
     <code
       style={{
         fontSize: "var(--fs-2xs)",
-        color: "var(--fg-ghost)",
+        color: "var(--fg-faint)",
         background: "var(--bg)",
         border: "var(--bw-hair) solid var(--line)",
         padding: "var(--sp-px) var(--sp-5)",

@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import type { JournalEntry, JournalStatus } from "../../types";
 import { Button } from "../../components/primitives/Button";
+import { Tag, type TagTone } from "../../components/primitives/Tag";
 import { NF } from "../../icons";
 
 /** Status → user-facing copy, resolved at render time. */
@@ -14,12 +15,15 @@ function statusCopy(t: TFunction<"projects">, s: JournalStatus): string {
   }
 }
 
-function statusClass(s: JournalStatus): string {
+// Was `statusClass`, returning bare class names for a `.tag` pill whose
+// class had no rule anywhere — so the badge rendered as plain text. The
+// Tag primitive already carries these tones.
+function statusTone(s: JournalStatus): TagTone {
   switch (s) {
     case "running": return "ok";
-    case "pending": return "";
+    case "pending": return "neutral";
     case "stale": return "warn";
-    case "abandoned": return "muted";
+    case "abandoned": return "ghost";
   }
 }
 
@@ -52,9 +56,7 @@ export function RepairEntry({
       })}
     >
       <div className="repair-entry-head">
-        <span className={`tag ${statusClass(e.status)}`}>
-          {statusCopy(t, e.status)}
-        </span>
+        <Tag tone={statusTone(e.status)}>{statusCopy(t, e.status)}</Tag>
         <span className="mono small muted">{e.id}</span>
       </div>
       <div className="repair-entry-paths">

@@ -247,13 +247,25 @@ buttons produced two cursors, and disabled produced a third.
 - Listboxes: `<ul role="listbox">` + `<li role="option" tabIndex={0}
   aria-selected>`.
 - Respect `prefers-reduced-motion`, `prefers-contrast: more`, and
-  `prefers-reduced-transparency`. All three are implemented in
-  `tokens.css`; `prefers-contrast: more` was the one this list
-  committed to and the stylesheets never delivered, until 2026-08-15.
-  Its overrides sit **after** the legacy alias block on purpose — a
-  media query adds no specificity, so an override written above
-  `--focus-ring`'s declaration loses on source order and silently does
-  nothing.
+  `prefers-reduced-transparency`. All three are implemented, in two
+  places rather than one: `tokens.css` carries `prefers-contrast: more`
+  and the `prefers-reduced-motion` duration override, `base.css` carries
+  `prefers-reduced-transparency`, and five shards carry their own
+  reduced-motion blocks for the animations they own. This list said all
+  three lived in `tokens.css`, which was never true of
+  reduced-transparency.
+  `prefers-contrast: more` was the one this list committed to and the
+  stylesheets never delivered, until 2026-08-15. Its overrides sit
+  **after** the legacy alias block on purpose — a media query adds no
+  specificity, so an override written above `--focus-ring`'s declaration
+  loses on source order and silently does nothing.
+  **Reduced motion had the subtler version of the same gap.** The shard
+  blocks were real and still could not reach the primitives, which
+  animate from inline styles — and an inline declaration beats any
+  stylesheet rule carrying no `!important`. Zeroing the duration tokens
+  is what reaches them, and it depends on the same source-order rule as
+  the contrast block above. `pnpm check:motion` and `pnpm check:contrast`
+  gate both halves of this bullet.
 - Never use `window.confirm / alert / prompt` — unreliable in Tauri
   webviews. Use the `Modal` + `ConfirmDialog` primitives.
 

@@ -2,109 +2,15 @@
    Sharded out of src/App.css to keep each file under the 350-LOC
    loc-guardian limit. Tokens still live in src/styles/tokens.css —
    nothing in this file may declare global custom properties.        */
-
 /* ---------- account detail (content pane) ---------- */
 
-.account-detail-pane {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-16);
-  flex: 1;
-}
-
-.detail-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-12);
-}
-
-.detail-email {
-  font-size: var(--fs-md);
-  font-weight: 600;
-  margin: 0;
-}
-
-.detail-meta {
-  font-size: var(--fs-xs);
-  color: var(--fg-muted);
-  margin-top: var(--sp-2);
-}
-
-.detail-badges {
-  display: flex;
-  gap: var(--sp-6);
-  align-items: center;
-}
-
-.detail-actions {
-  display: flex;
-  gap: var(--sp-8);
-}
 
 .detail-section {
   padding: var(--sp-12) 0;
   border-top: var(--bw-subhair) solid var(--line);
 }
-
-.detail-section-title {
-  font-size: var(--fs-xs);
-  font-weight: 500;
-  text-transform: none;
-  letter-spacing: 0;
-  color: var(--fg-muted);
-  margin: 0 0 var(--sp-8);
-}
-
 /* ---------- collapsible section (P1.3) ---------- */
 
-.collapsible-section {
-  padding: 0;
-  border-top: var(--bw-subhair) solid var(--line);
-}
-
-.collapsible-section-toggle {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-6);
-  width: 100%;
-  padding: var(--sp-8) 0;
-  background: transparent;
-  border: none;
-  color: var(--fg-muted);
-  font-size: var(--fs-xs);
-  font-weight: 500;
-  text-transform: none;
-  letter-spacing: 0;
-  height: auto;
-  box-shadow: none;
-  text-align: left;
-}
-
-.collapsible-section-toggle:hover {
-  color: var(--fg);
-  background: transparent;
-}
-
-.collapsible-chevron {
-  transition: transform var(--dur-base) var(--ease-out);
-}
-
-.collapsible-chevron.open {
-  transform: rotate(90deg);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .collapsible-chevron { transition: none; }
-}
-
-.collapsible-section-title {
-  flex: 1;
-}
-
-.collapsible-section-body {
-  padding: 0 0 var(--sp-8);
-}
 
 /* ---------- detail grid ---------- */
 
@@ -129,105 +35,11 @@
 .detail-grid dd {
   margin: 0;
 }
-
 /* ---------- slot badges ---------- */
-
-.slot-badge {
-  font-size: var(--fs-2xs);
-  padding: var(--sp-1) var(--sp-6);
-  border-radius: var(--r-pill);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.slot-badge.cli {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.slot-badge.desktop {
-  background: var(--ok-weak);
-  color: var(--ok);
-}
-
-/* Sidebar slot icons — three-state matrix per slot.
-   .active   = filled, full-color (account currently fills this slot)
-   .available = light, muted (account COULD fill this slot)
-   (no icon) = the slot can't be filled — no credentials/profile */
-.slot-icon {
-  flex-shrink: 0;
-}
-
-.slot-icon.cli.active {
-  color: var(--accent);
-}
-
-.slot-icon.desktop.active {
-  color: var(--ok);
-}
-
-.slot-icon.available {
-  color: var(--fg-muted);
-  opacity: 0.6;
-}
-
 /* ---------- token badge ---------- */
-
-.token-badge {
-  font-size: var(--fs-2xs);
-  padding: var(--sp-1) var(--sp-6);
-  border-radius: var(--r-pill);
-  font-weight: 600;
-}
-
-.token-badge.ok {
-  background: var(--ok-weak);
-  color: var(--ok);
-}
-
-.token-badge.bad {
-  background: var(--bad-weak);
-  color: var(--danger);
-}
-
-.token-badge.warn {
-  background: var(--warn-weak);
-  color: var(--warn);
-}
-
 /* ---------- status dot (sidebar) ---------- */
-
-.status-dot {
-  width: var(--sp-7);
-  height: var(--sp-7);
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.status-dot.ok   { background: var(--ok); }
-.status-dot.bad  { background: var(--danger); }
-.status-dot.warn { background: var(--warn); }
-
 /* ---------- verified identity row in AccountDetail ---------- */
 
-.verify-line {
-  display: inline;
-}
-.verify-line.ok {
-  color: var(--ok);
-}
-.verify-line.bad {
-  color: var(--danger);
-  font-weight: 500;
-}
-.verify-line.muted {
-  color: var(--fg-muted);
-}
-.verify-note {
-  font-size: var(--fs-2xs);
-  font-style: italic;
-}
 
 /* Per-card "verifying…" pulse in the HealthFooter verify cell during a
    "Verify all" run. Mirrors .statusbar-chip-pulse's shape + cadence,

@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { api } from "../../api";
 import { Button } from "../../components/primitives/Button";
+import { Input } from "../../components/primitives/Input";
 import {
   Modal,
   ModalBody,
@@ -79,7 +80,7 @@ export function ReplaceKeyModal({
         <p style={{ marginTop: 0, color: "var(--fg-muted)" }}>
           {t("replace.description")}
         </p>
-        <input
+        <Input
           type="password"
           autoFocus
           value={token}
@@ -89,7 +90,7 @@ export function ReplaceKeyModal({
           }}
           placeholder={kind === "api" ? "sk-ant-api03-…" : "sk-ant-oat01-…"}
           aria-label={t("replace.inputAria", { label })}
-          style={{ width: "100%", fontFamily: "var(--font-mono)" }}
+          style={{ width: "100%" }}
         />
         {/* Disabled buttons state their reason inline, per
             rules/design.md — never only in a tooltip. */}

@@ -309,7 +309,7 @@ export function AddAccountModal({
               alignItems: "center",
               gap: "var(--sp-10)",
               margin: "var(--sp-14) 0",
-              color: "var(--fg-ghost)",
+              color: "var(--fg-faint)",
               fontSize: "var(--fs-xs)",
             }}
             aria-hidden

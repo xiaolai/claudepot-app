@@ -18,65 +18,6 @@
   -webkit-backdrop-filter: none;
 }
 
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: var(--scrim);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: var(--z-modal);
-}
-
-.modal {
-  width: var(--modal-width-sm);
-  max-width: calc(100vw - var(--sp-48));
-  background: var(--bg-raised);
-  border: var(--bw-subhair) solid var(--line);
-  border-radius: var(--r-5);
-  padding: var(--sp-20);
-  box-shadow: var(--shadow-modal);
-}
-
-.modal h2 {
-  margin: 0 0 var(--sp-8);
-  font-size: var(--fs-sm);
-  font-weight: 700;
-}
-
-.modal-body {
-  font-size: var(--fs-sm);
-  color: var(--fg-muted);
-}
-
-.modal-body code {
-  font-family: var(--font-mono);
-  background: var(--bg);
-  padding: var(--sp-1) var(--sp-5);
-  border-radius: var(--r-1);
-  font-size: var(--fs-xs);
-}
-
-.modal-body p {
-  margin: 0 0 var(--sp-6);
-}
-
-.modal-body p:last-child {
-  margin-bottom: 0;
-}
-
-.modal-body p.small {
-  font-size: var(--fs-xs);
-  margin-top: var(--sp-6);
-}
-
-.modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--sp-8);
-  margin-top: var(--sp-20);
-}
-
 /* ---------- toasts (paper-mono, bottom-center, above status bar) ----------
    Single transient-notification surface across the app, anchored to
    `--toast-bottom` so it sits above the status bar
@@ -223,15 +164,8 @@
   color: var(--accent);
   background: none;
 }
-
 /* ---------- hint ---------- */
 
-.account-hint {
-  font-size: var(--fs-xs);
-  margin-top: var(--sp-4);
-  padding-left: 0;
-  color: var(--fg-muted);
-}
 
 /* ---------- loading skeleton ---------- */
 

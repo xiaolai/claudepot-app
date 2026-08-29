@@ -70,7 +70,7 @@ function GenericToolView({ tool }: { tool: LinkedTool }) {
         <Glyph g={NF.wrench} style={{ fontSize: "var(--fs-sm)" }} />
         <span style={{ flex: 1 }}>{tool.tool_name}</span>
         {tool.duration_ms != null && (
-          <span style={{ color: "var(--fg-ghost)" }}>
+          <span style={{ color: "var(--fg-faint)" }}>
             {formatDuration(tool.duration_ms)}
           </span>
         )}
@@ -110,11 +110,11 @@ function GenericToolView({ tool }: { tool: LinkedTool }) {
           color: "var(--fg-muted)",
         }}
       >
-        <div style={{ color: "var(--fg-ghost)" }}>{t("viewer.generic.input")}</div>
+        <div style={{ color: "var(--fg-faint)" }}>{t("viewer.generic.input")}</div>
         <ClampedPre text={redactSecrets(tool.input_preview)} />
         {tool.result_content != null && (
           <>
-            <div style={{ color: "var(--fg-ghost)", marginTop: "var(--sp-6)" }}>
+            <div style={{ color: "var(--fg-faint)", marginTop: "var(--sp-6)" }}>
               {t("viewer.generic.result")}
             </div>
             <ClampedPre text={redactSecrets(tool.result_content)} />

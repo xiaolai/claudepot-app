@@ -218,7 +218,11 @@
 }
 
 .envvar-badge[data-tone="set"] {
-  color: var(--on-color);
+  /* These badges are outline-only — see the `secret` and `unset` tones
+     below, which set a colour and a border and no background. This one
+     asked for `--on-color`, i.e. white text on the page, and rendered
+     invisible in light mode. `--accent-ink` is the readable accent. */
+  color: var(--accent-ink);
   border-color: var(--accent-border);
 }
 
@@ -228,7 +232,7 @@
 }
 
 .envvar-badge[data-tone="unset"] {
-  color: var(--fg-ghost);
+  color: var(--fg-faint);
 }
 
 /* ── choosers ───────────────────────────────────────────────────── */

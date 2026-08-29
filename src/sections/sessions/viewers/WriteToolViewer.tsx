@@ -57,7 +57,7 @@ export function WriteToolViewer({ tool }: { tool: LinkedTool }) {
         >
           {path}
         </span>
-        <span style={{ color: "var(--fg-ghost)" }}>
+        <span style={{ color: "var(--fg-faint)" }}>
           {t("viewer.write.chars", {
             chars: formatNumber(content.length),
           })}

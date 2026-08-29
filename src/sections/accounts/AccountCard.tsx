@@ -170,7 +170,7 @@ export function AccountCard({
                 className="mono-cap"
                 style={{
                   fontSize: "var(--fs-2xs)",
-                  color: "var(--fg-ghost)",
+                  color: "var(--fg-faint)",
                 }}
               >
                 {a.subscription_type}

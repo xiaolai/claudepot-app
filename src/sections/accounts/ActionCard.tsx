@@ -124,7 +124,7 @@ export function ActionCard({
                 height: "var(--btn-h-md)",
                 padding: "0 var(--sp-10)",
                 fontSize: "var(--fs-xs)",
-                color: "var(--fg-ghost)",
+                color: "var(--fg-faint)",
                 border: "var(--bw-hair) dashed var(--line-strong)",
                 borderRadius: "var(--r-1)",
                 cursor: disabledHint ? "help" : undefined,
@@ -167,7 +167,7 @@ export function ActionCard({
             g={NF.info}
             style={{
               marginTop: "var(--sp-px)",
-              color: "var(--fg-ghost)",
+              color: "var(--fg-faint)",
             }}
           />
           <span>{disabledHint}</span>

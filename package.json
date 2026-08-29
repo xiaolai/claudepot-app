@@ -22,6 +22,10 @@
     "check:classes:self-test": "node scripts/check-classes.mjs --self-test",
     "check:a11y": "node scripts/check-a11y-names.mjs",
     "check:a11y:self-test": "node scripts/check-a11y-names.mjs --self-test",
+    "check:motion": "node scripts/check-motion.mjs",
+    "check:motion:self-test": "node scripts/check-motion.mjs --self-test",
+    "check:contrast": "node scripts/check-contrast.mjs",
+    "check:contrast:self-test": "node scripts/check-contrast.mjs --self-test",
     "scan:untranslated": "node scripts/scan-untranslated.mjs",
     "screenshots": "node scripts/capture-screenshots.mjs"
   },

@@ -265,7 +265,7 @@ export function PreviewHeader({
                 alignItems: "center",
                 justifyContent: "center",
                 padding: "0 var(--sp-6)",
-                background: "var(--accent)",
+                background: "var(--accent-fill)",
                 color: "var(--on-color)",
                 border: "none",
                 borderLeft:

@@ -224,7 +224,7 @@ function SettingsNav({
               className="mono-cap"
               style={{
                 padding: "var(--sp-6) var(--sp-16)",
-                color: "var(--fg-ghost)",
+                color: "var(--fg-faint)",
               }}
             >
               {group.label}

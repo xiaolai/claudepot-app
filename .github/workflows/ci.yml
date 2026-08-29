@@ -247,6 +247,12 @@ jobs:
       - name: Check switch accessible names
         run: pnpm check:a11y:self-test && pnpm check:a11y
 
+      - name: Reduced motion reaches the inline-styled primitives
+        run: pnpm check:motion:self-test && pnpm check:motion
+
+      - name: Palette meets the contrast it promises
+        run: pnpm check:contrast:self-test && pnpm check:contrast
+
       # The production vite build catches failure classes tsc and
       # vitest don't (asset resolution, CSS shard syntax errors,
       # rollup-only module issues). Without this step the first

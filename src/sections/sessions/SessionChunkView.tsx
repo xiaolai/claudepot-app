@@ -323,7 +323,7 @@ function EventInlineView({
           style={{
             padding: "var(--sp-4) var(--sp-10)",
             fontSize: "var(--fs-3xs)",
-            color: "var(--fg-ghost)",
+            color: "var(--fg-faint)",
             letterSpacing: "var(--ls-wide)",
             textTransform: "uppercase",
           }}

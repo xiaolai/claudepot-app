@@ -7,6 +7,7 @@ import {
 } from "../../api/migrate";
 import { renderError } from "../../lib/i18n-error";
 import { Button } from "../../components/primitives/Button";
+import { Input } from "../../components/primitives/Input";
 import {
   Modal,
   ModalBody,
@@ -106,13 +107,13 @@ export function ImportBundleModal({
       <ModalHeader title={t("import.title")} id={headingId} onClose={onClose} />
       <ModalBody>
         <label htmlFor={bundleId}>{t("import.bundleLabel")}</label>
-        <input
+        <Input
           id={bundleId}
           type="text"
           value={bundlePath}
           onChange={(e) => setBundlePath(e.target.value)}
           placeholder="/path/to/file.claudepot.tar.zst[.age]"
-          style={{ width: "100%", padding: "var(--sp-6) var(--sp-8)" }}
+          style={{ width: "100%" }}
         />
 
         {isEncrypted && (
@@ -120,13 +121,13 @@ export function ImportBundleModal({
             <label htmlFor={passId} style={{ display: "block", marginTop: "var(--sp-8)" }}>
               {t("import.passphraseLabel")}
             </label>
-            <input
+            <Input
               id={passId}
               type="password"
               value={passphrase}
               onChange={(e) => setPassphrase(e.target.value)}
               autoComplete="off"
-              style={{ width: "100%", padding: "var(--sp-6) var(--sp-8)" }}
+              style={{ width: "100%" }}
             />
           </>
         )}

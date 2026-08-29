@@ -192,7 +192,7 @@ function InjectionList({ injections }: { injections: ContextInjection[] }) {
       <div
         style={{
           fontSize: "var(--fs-xs)",
-          color: "var(--fg-ghost)",
+          color: "var(--fg-faint)",
           fontStyle: "italic",
         }}
       >

@@ -148,9 +148,12 @@ function variantPaint(
   switch (variant) {
     case "solid":
       return {
-        bg: danger ? "var(--danger)" : "var(--accent)",
+        // The FILL tokens, not --accent/--danger: white text on the
+        // identity accent measures 3.02:1 light / 2.64:1 dark. See the
+        // fill-token note in tokens.css.
+        bg: danger ? "var(--danger-fill)" : "var(--accent-fill)",
         color: "var(--on-color)",
-        border: `var(--bw-hair) solid ${danger ? "var(--danger)" : "var(--accent)"}`,
+        border: `var(--bw-hair) solid ${danger ? "var(--danger-fill)" : "var(--accent-fill)"}`,
       };
     case "subtle":
       return {

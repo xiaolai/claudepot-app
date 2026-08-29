@@ -116,10 +116,10 @@ export function EditToolViewer({ tool }: { tool: LinkedTool }) {
               color: colorFor(line.kind),
             }}
           >
-            <span style={{ color: "var(--fg-ghost)" }}>
+            <span style={{ color: "var(--fg-faint)" }}>
               {line.oldLine ?? ""}
             </span>
-            <span style={{ color: "var(--fg-ghost)" }}>
+            <span style={{ color: "var(--fg-faint)" }}>
               {line.newLine ?? ""}
             </span>
             <span

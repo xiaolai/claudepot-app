@@ -93,7 +93,7 @@ export function SessionEventView({
                 gap: "var(--sp-6)",
               }}
             >
-              <span className="mono" style={{ color: "var(--fg-ghost)" }}>
+              <span className="mono" style={{ color: "var(--fg-faint)" }}>
                 {event.tool_use_id.slice(0, 8)}
               </span>
               <CopyButton text={copyText} ariaLabel={t("viewer.copyToolResult")} />
@@ -170,7 +170,7 @@ export function SessionEventView({
                 gap: "var(--sp-6)",
               }}
             >
-              <span className="mono" style={{ color: "var(--fg-ghost)" }}>
+              <span className="mono" style={{ color: "var(--fg-faint)" }}>
                 {event.tool_use_id.slice(0, 8)}
               </span>
               <CopyButton
@@ -373,7 +373,7 @@ function MiniLine({
       ? "var(--warn)"
       : tone === "muted"
         ? "var(--fg-muted)"
-        : "var(--fg-ghost)";
+        : "var(--fg-faint)";
   return (
     <div
       style={{

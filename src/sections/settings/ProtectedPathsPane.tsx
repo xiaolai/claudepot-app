@@ -3,6 +3,7 @@ import { Trans, useTranslation } from "react-i18next";
 import { CopyButton } from "../../components/CopyButton";
 import { i18n } from "../../lib/i18n";
 import { IconButton } from "../../components/primitives/IconButton";
+import { Tag } from "../../components/primitives/Tag";
 import { NF } from "../../icons";
 import { SkeletonRows } from "../../components/primitives/Skeleton";
 import { api } from "../../api";
@@ -196,10 +197,12 @@ export function ProtectedPathsPane({ pushToast }: Props) {
                 {p.path}
               </code>
               <CopyButton text={p.path} />
-              <span
-                className={`status-badge status-badge-${
-                  p.source === "default" ? "ok" : "warn"
-                }`}
+              {/* Was `status-badge status-badge-${ok|warn}` — none of
+                  those three class names had a rule anywhere, so this
+                  badge rendered as bare text. The Tag primitive is the
+                  shape it was imitating. */}
+              <Tag
+                tone={p.source === "default" ? "ok" : "warn"}
                 title={
                   p.source === "default"
                     ? t("protected.sourceDefaultTitle")
@@ -209,7 +212,7 @@ export function ProtectedPathsPane({ pushToast }: Props) {
                 {p.source === "default"
                   ? t("protected.sourceDefault")
                   : t("protected.sourceUser")}
-              </span>
+              </Tag>
               <IconButton
                 glyph={NF.x}
                 size="sm"

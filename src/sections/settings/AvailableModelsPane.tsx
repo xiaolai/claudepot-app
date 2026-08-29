@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import type { AvailableModelsState } from "../../api/availableModels";
 import { Button } from "../../components/primitives/Button";
+import { Input } from "../../components/primitives/Input";
 import { IconButton } from "../../components/primitives/IconButton";
 import { NF } from "../../icons";
 import { toastError } from "../../lib/i18n-error";
@@ -202,7 +203,7 @@ export function AvailableModelsPane({
           )}
 
           <div style={{ display: "flex", gap: "var(--sp-6)" }}>
-            <input
+            <Input
               id={inputId}
               type="text"
               value={draft}
@@ -216,7 +217,7 @@ export function AvailableModelsPane({
                   addDraft();
                 }
               }}
-              style={{ flex: 1, fontSize: "var(--fs-xs)" }}
+              style={{ flex: 1 }}
             />
             <Button
               variant="outline"

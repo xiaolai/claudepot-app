@@ -415,7 +415,7 @@ const ProjectRow = memo(function ProjectRow({
 
       <span
         style={{
-          color: p.session_count > 0 ? "var(--fg-muted)" : "var(--fg-ghost)",
+          color: p.session_count > 0 ? "var(--fg-muted)" : "var(--fg-faint)",
           fontVariantNumeric: "tabular-nums",
           display: "inline-flex",
           alignItems: "center",
@@ -429,7 +429,7 @@ const ProjectRow = memo(function ProjectRow({
       <span
         style={{
           color:
-            p.total_size_bytes > 0 ? "var(--fg-muted)" : "var(--fg-ghost)",
+            p.total_size_bytes > 0 ? "var(--fg-muted)" : "var(--fg-faint)",
           fontVariantNumeric: "tabular-nums",
         }}
       >

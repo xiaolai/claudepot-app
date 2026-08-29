@@ -222,9 +222,10 @@ function paintFor(state: TargetButtonState): {
   switch (state) {
     case "active":
       return {
-        bg: "var(--accent)",
+        // --accent-fill, not --accent: this cell carries white text.
+        bg: "var(--accent-fill)",
         color: "var(--on-color)",
-        border: "var(--bw-hair) solid var(--accent)",
+        border: "var(--bw-hair) solid var(--accent-fill)",
         divider: "color-mix(in oklch, var(--on-color) 30%, transparent)",
       };
     case "adopt":

@@ -30,44 +30,12 @@
   border-radius: var(--r-1);
   font-size: var(--fs-xs);
 }
-
-.banner-actions {
-  display: flex;
-  gap: var(--sp-8);
-  flex-shrink: 0;
-}
-
 /* ---------- orphan banner + adoption modal ---------- */
 
-/* Content wrapper that stacks the banner above the detail pane so the
- * banner is always visible without scrolling the detail. Drops in as
- * a direct replacement for `.content` when orphans are present. */
-.content-with-banner {
-  flex: 1 1 76%;
-  min-width: var(--content-min-width);
-  display: flex;
-  flex-direction: column;
-  background: var(--bg);
-  overflow: hidden;
-}
-.content-banner-slot {
-  flex: 0 0 auto;
-  padding: var(--sp-16) var(--sp-24) 0;
-}
-/* The inner ProjectDetail component renders its own <main class="content">,
- * which already handles scroll + padding. */
-.content-with-banner > .content {
-  flex: 1 1 auto;
-  min-width: 0;
-}
 
 .banner-warn {
   background: var(--warn-weak);
   border-color: var(--warn);
-}
-.banner-bad {
-  background: var(--bad-weak);
-  border-color: var(--danger);
 }
 .banner-body {
   flex: 1;
@@ -83,11 +51,6 @@
 .banner-hint {
   font-size: var(--fs-xs);
   color: var(--fg-muted);
-}
-
-.adopt-orphans-modal {
-  width: min(680px, calc(100vw - var(--sp-48)));
-  max-height: calc(var(--viewport-h-full) - var(--sp-80));
 }
 .adopt-orphans-list {
   list-style: none;
@@ -215,10 +178,6 @@
 .session-row-menu-btn:focus-visible {
   outline: var(--bw-focus) solid var(--accent);
   outline-offset: var(--focus-outline-offset-flush);
-}
-.session-row-more {
-  padding: var(--sp-6) var(--sp-10);
-  font-size: var(--fs-2xs);
 }
 .session-list-header {
   display: flex;

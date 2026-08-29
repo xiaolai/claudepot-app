@@ -63,7 +63,7 @@ export function IdentityPreview({
               className="mono-cap"
               style={{
                 fontSize: "var(--fs-2xs)",
-                color: "var(--fg-ghost)",
+                color: "var(--fg-faint)",
               }}
             >
               {subscription}

@@ -26,22 +26,59 @@
      theme-agnostic rgba literal. */
   --accent-divider-ink: oklch(100% 0 0 / 0.22);
 
-  /* ── Semantic (used sparingly) ──────────────────────────── */
-  --ok:     oklch(62% 0.10 150);
-  --warn:   oklch(72% 0.12 80);
-  --danger: oklch(60% 0.14 25);
-  --info:   oklch(60% 0.10 220);  /* informational chips, dashboard meta */
+  /* ── Semantic (used sparingly) ──────────────────────────────
+        These are the LIGHT values, because the base `:root` IS the
+        light default — `useTheme`'s follow-OS mode DELETES
+        `data-theme`, so `[data-theme="light"]` never matches on a
+        fresh install and only this block applies.
+
+        Every one is overridden in BOTH dark blocks below. That is
+        not belt-and-braces: at equal specificity source order
+        decides, so a value declared only here would be inherited by
+        a dark document and silently paint dark with light's
+        palette. `--info` was the one token that already had that
+        pair; the other three did not, which is why all four failed
+        AA on a light background — they were tuned for the dark
+        surface and there was nowhere else to put a light value.
+
+        Lightness clears 4.5:1 on `--bg-raised`, the harder (whiter)
+        light surface. Hue and chroma are untouched, so amber stays
+        amber. Locked by `scripts/check-contrast.mjs`. ─────────── */
+  --ok:     oklch(55% 0.10 150);  /* 4.63:1 on white */
+  --warn:   oklch(57% 0.12 80);   /* 4.53:1 — was 72%, 2.51:1 */
+  --danger: oklch(58% 0.14 25);   /* 4.59:1 — was 60%, 4.22:1 */
+  --info:   oklch(56% 0.10 220);  /* 4.50:1; informational chips, dashboard meta */
 
   /* ── "On color" text — white in both themes, for use as the
         foreground on filled accent / danger surfaces where the
         theme-sensitive --fg would fail contrast ─────────────── */
   --on-color: oklch(100% 0 0);
 
+  /* ── Fill tokens — the surface white text sits ON ──────────
+        `--accent` is the identity colour; it is not a text
+        background. White on it measures 3.02:1 light and 2.64:1
+        dark, both under AA, and darkening `--accent` itself to fix
+        that would move 124 `var(--accent)` sites — every border,
+        focus ring and tint.
+
+        So a filled control paints `--accent-fill` instead. Same
+        hue, same chroma, lower lightness: the identity is intact
+        and only the surfaces carrying white text move. `--danger`
+        needs its own for a sharper reason — dark wants danger
+        LIGHTER for text contrast and DARKER for white-on-fill, and
+        one token cannot be both.
+
+        Locked by `scripts/check-contrast.mjs`. ──────────────── */
+  --accent-fill: oklch(58% 0.13 45);  /* white on it: 4.51:1 */
+  --danger-fill: oklch(58% 0.14 25);  /* white on it: 4.59:1 */
+
   /* ── Avatar derivation — used by avatarColorFor(seed) to
         produce a deterministic per-user color. The L/C values
         sit close to the accent's chroma so the palette stays
         cohesive across many accounts. ────────────────────────── */
-  --avatar-derived-l: 62%;
+  --avatar-derived-l: 52%;  /* white on it: 4.96:1 at the worst hue
+        (190). 62% measured 3.38:1 — the initials were unreadable
+        on roughly a third of the wheel. */
   --avatar-derived-c: 0.12;
 
   /* ── Pixel scale (every raw px value the UI uses) ─────────
@@ -51,7 +88,6 @@
         intent is "one device pixel"); `--sp-1` is the same value
         on the numeric grid for callers that want positional
         consistency with `--sp-2`/`--sp-3`/etc. */
-  --sp-0:    0;
   --sp-px:   1px;
   --sp-1:    1px;
   --sp-2:    2px;
@@ -61,29 +97,21 @@
   --sp-6:    6px;
   --sp-7:    7px;
   --sp-8:    8px;
-  --sp-9:    9px;
   --sp-10:   10px;
   --sp-11:   11px;
   --sp-12:   12px;
-  --sp-13:   13px;
   --sp-14:   14px;
   --sp-16:   16px;
-  --sp-17:   17px;
   --sp-18:   18px;
   --sp-20:   20px;
   --sp-22:   22px;
   --sp-24:   24px;
   --sp-26:   26px;
   --sp-28:   28px;
-  --sp-30:   30px;
   --sp-32:   32px;
-  --sp-36:   36px;
   --sp-38:   38px;
   --sp-40:   40px;
-  --sp-44:   44px;
   --sp-48:   48px;
-  --sp-50:   50px;
-  --sp-56:   56px;
   --sp-60:   60px;
   --sp-64:   64px;
   --sp-72:   72px;
@@ -97,11 +125,18 @@
   --fs-4xs:  8px;   /* dot glyph, finest decoration */
   --fs-3xs:  9px;   /* badge glyphs, breadcrumb chevrons */
   --fs-2xs:  10px;  /* Kbd, mono-cap labels, statusbar counts */
-  --fs-xs:   11px;  /* meta, statusbar items */
+  --fs-xs:   11px;  /* THE de-facto body size — 343 uses, more than
+                       every other step combined. Named `xs` for
+                       historical reasons; renaming it would touch
+                       343 call sites to change nothing. */
   --fs-sm:   12px;  /* dense body, button text */
-  --fs-base: 13px;  /* body, list rows */
+  --fs-base: 13px;  /* 28 uses. Called `base` and is not the base —
+                       see --fs-xs. Kept because the sizes it does
+                       carry are right; the name is the lie, and the
+                       cheaper correction is this comment. */
   --fs-md:   14px;  /* emphasis, card glyphs, anomaly banner */
-  --fs-md-lg:15px;  /* screen sub-emphasis (reserved) */
+  --fs-md-lg:15px;  /* screen sub-emphasis. Was marked "(reserved)"
+                       while carrying 2 real uses. */
   --fs-lg:   18px;  /* section titles */
   --fs-xl:   22px;  /* screen titles */
   --fs-2xl:  28px;  /* hero */
@@ -245,8 +280,8 @@
   --content-min-width:        400px;  /* content/banner-wrapped floor */
   --sidebar-min-width:        200px;
   --sidebar-max-width:        280px;
-  --rail-min-width:            44px;
-  --rail-max-width:            52px;
+  --sidebar-collapsed-width:   52px;  /* collapsed sidebar; named
+        for a section rail that was deleted with rail.css */
   --list-max-height-sm:       280px;  /* clean-orphan modal list */
   --list-max-height-md:       320px;  /* settings protected-paths list */
   --popover-max-height:       400px;  /* palette body */
@@ -391,7 +426,7 @@
 
   --fg:          oklch(22% 0.008 60);
   --fg-muted:    oklch(50% 0.008 60);
-  --fg-faint:    oklch(65% 0.006 60);
+  --fg-faint:    oklch(56% 0.006 60);  /* 4.66:1 — was 65%, 3.24:1 */
   --fg-ghost:    oklch(78% 0.004 60);
 
   --line:        oklch(92% 0.005 60);
@@ -440,7 +475,7 @@
 
   --fg:          oklch(92% 0.006 60);
   --fg-muted:    oklch(70% 0.008 60);
-  --fg-faint:    oklch(55% 0.008 60);
+  --fg-faint:    oklch(60% 0.008 60);  /* 4.67:1 on dark --bg-raised */
   --fg-ghost:    oklch(40% 0.006 60);
 
   --line:        oklch(26% 0.008 60);
@@ -457,7 +492,19 @@
   --accent-soft:   oklch(72% 0.17 45 / 0.18);
   --accent-border: oklch(72% 0.17 45 / 0.38);
   --accent-ink:    oklch(82% 0.14 45);
+  /* Chroma tracks --accent's dark value (0.17); lightness stays at
+     58% because white must read on it in either theme. --danger-fill
+     is not re-declared — the base value already serves both. */
+  --accent-fill:   oklch(58% 0.17 45);
 
+  /* Semantic tokens, dark. Every one is declared here as well as in
+     the base `:root` — see the note there for why omitting one hands
+     dark the light value. Lightness clears 4.5:1 on dark
+     `--bg-raised`; `--danger` moves 60% → 61% because 60% measured
+     4.38:1, i.e. it was failing here too. */
+  --ok:          oklch(62% 0.10 150);
+  --warn:        oklch(72% 0.12 80);
+  --danger:      oklch(61% 0.14 25);
   --info:        oklch(72% 0.10 220);
 
   --shadow-sm: 0 1px 0 oklch(0% 0 0 / 0.2);
@@ -496,7 +543,7 @@
 
     --fg:          oklch(92% 0.006 60);
     --fg-muted:    oklch(70% 0.008 60);
-    --fg-faint:    oklch(55% 0.008 60);
+    --fg-faint:    oklch(60% 0.008 60);  /* 4.67:1 on dark --bg-raised */
     --fg-ghost:    oklch(40% 0.006 60);
 
     --line:        oklch(26% 0.008 60);
@@ -515,7 +562,16 @@
     --accent-soft:   oklch(72% 0.17 45 / 0.18);
     --accent-border: oklch(72% 0.17 45 / 0.38);
     --accent-ink:    oklch(82% 0.14 45);
+    /* Chroma tracks --accent's dark value (0.17); lightness stays at
+       58% because white must read on it in either theme. --danger-fill
+       is not re-declared — the base value already serves both. */
+    --accent-fill:   oklch(58% 0.17 45);
 
+    /* Mirror of the explicit-dark block above; the two must stay in
+       lockstep, exactly as the accent tokens do. */
+    --ok:          oklch(62% 0.10 150);
+    --warn:        oklch(72% 0.12 80);
+    --danger:      oklch(61% 0.14 25);
     --info:        oklch(72% 0.10 220);
 
     --shadow-sm: 0 1px 0 oklch(0% 0 0 / 0.2);
@@ -657,6 +713,39 @@
 }
 
 
+/* ─── Reduce Motion (prefers-reduced-motion: reduce) ──────────
+   The per-shard `@media (prefers-reduced-motion: reduce)` blocks
+   cover the surfaces styled from a stylesheet, and they cannot
+   cover the rest: the paper-mono primitives animate from INLINE
+   styles, and an inline declaration beats any stylesheet rule that
+   carries no `!important`. So `Button`, `IconButton`,
+   `SidebarItem`, `FilterChip`, `modalParts` and the six settings
+   toggles kept animating for every user, whatever the system
+   preference said — 23 inline declarations that no media query in
+   this repo could reach.
+
+   Zeroing the duration tokens reaches them, because a `var()` in an
+   inline style still resolves against the cascade. One block here
+   covers both surfaces; the alternative was `!important` scattered
+   through the primitives. Placed after the contrast block for the
+   same source-order reason recorded above — `--dur-*` is declared
+   in the base `:root` and never re-declared, so this wins on order.
+
+   `--dur-pulse` is deliberately left alone. It drives LOOPING
+   spin/pulse cadences, and the shards that own those already stop
+   them outright (`modals.css` sets `.skeleton { animation: none }`).
+   Zeroing a looping duration freezes a spinner mid-cycle instead of
+   removing the motion.
+   ──────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast:  0ms;
+    --dur-base:  0ms;
+    --dur-slow:  0ms;
+    --dur-hover: 0ms;
+  }
+}
+
 /* ─── Base reset ──────────────────────────────────────────── */
 *,
 *::before,
@@ -724,14 +813,6 @@ textarea {
   background: var(--fg-ghost);
 }
 
-/* Hide scrollbars for strips that should feel like chip rails, not
- * scrollable lists. Use on elements that set their own
- * `scrollbar-width: none` inline — the pair keeps Firefox and
- * WebKit in lock-step. */
-.scrollbar-none::-webkit-scrollbar {
-  display: none;
-}
-
 /* Suppress the native disclosure triangle on `<summary>` so paper-
  * mono modals can swap in a Lucide chevron. Changing `display` away
  * from `list-item` already does this in every current engine, but
@@ -750,12 +831,4 @@ summary::-webkit-details-marker {
   font-size: var(--fs-xs);
   font-weight: 500;
   color: var(--fg-muted);
-}
-.mono-faint  { color: var(--fg-faint); }
-.mono-muted  { color: var(--fg-muted); }
-.mono-accent { color: var(--accent-ink); }
-.nf {
-  font-family: var(--font);
-  font-feature-settings: normal;
-  display: inline-block;
 }

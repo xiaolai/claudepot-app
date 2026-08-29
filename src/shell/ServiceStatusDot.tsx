@@ -108,7 +108,7 @@ export function ServiceStatusDot() {
             background: color,
             // Pulse while a probe is in flight so the user knows the
             // dot is updating rather than stale.
-            animation: probing ? "service-status-pulse 1.2s ease-in-out infinite" : undefined,
+            animation: probing ? `service-status-pulse var(--dur-pulse) ease-in-out infinite` : undefined,
             boxShadow: `0 0 0 var(--bw-hair) color-mix(in oklch, ${color} 40%, transparent)`,
           }}
         />

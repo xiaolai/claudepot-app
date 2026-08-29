@@ -140,7 +140,7 @@ export function BashToolViewer({ tool }: { tool: LinkedTool }) {
         <div
           style={{
             padding: "var(--sp-10)",
-            color: "var(--fg-ghost)",
+            color: "var(--fg-faint)",
             fontSize: "var(--fs-xs)",
             fontStyle: "italic",
           }}

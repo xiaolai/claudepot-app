@@ -82,7 +82,7 @@ export function AppSidebar({
     <aside
       data-collapsed={collapsed || undefined}
       style={{
-        width: collapsed ? "var(--rail-max-width)" : "var(--sidebar-width)",
+        width: collapsed ? "var(--sidebar-collapsed-width)" : "var(--sidebar-width)",
         flexShrink: 0,
         borderRight: "var(--bw-hair) solid var(--line)",
         background: "var(--bg)",

@@ -8,8 +8,7 @@
    it needs no override. Translucent overlays (palette/toast/modal) do. */
 @media (prefers-reduced-transparency) {
   .palette,
-  .toast,
-  .modal {
+.toast {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
     background: var(--bg-raised);
@@ -71,34 +70,22 @@ pre {
 /* ---------- utilities ---------- */
 
 .muted  { color: var(--fg-muted); }
+/* `.small` is rendered at 58 call sites and had NO rule anywhere — its
+   only declaration was `.modal-body p.small`, and `.modal-body` is never
+   rendered (ModalBody is an inline-styled primitive), so the selector
+   could not match. A utility class that does nothing is worse than no
+   class: every one of those call sites reads as deliberate. Declared
+   here beside `.muted`, which is the same shape. The old rule's
+   `margin-top` is deliberately NOT carried over — that was modal-body
+   layout, and ModalBody owns its own spacing now. */
+.small  { font-size: var(--fs-xs); }
 .mono   {
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
 }
-
 /* ---------- app layout: sidebar + content ---------- */
-
-.app-layout {
-  display: flex;
-  height: var(--viewport-h-full);
-  overflow: hidden;
-  position: relative;
-  /* Hairline along the top of the webview — reads as the native title
-     bar's bottom border, anchoring the chrome visually below it. */
-  border-top: var(--bw-subhair) solid var(--line);
-}
-
 /* ---------- footer (content pane bottom) ---------- */
 
-.content-footer {
-  margin-top: auto;
-  padding-top: var(--sp-12);
-  border-top: var(--bw-subhair) solid var(--line);
-  display: flex;
-  align-items: center;
-  gap: var(--sp-8);
-  font-size: var(--fs-xs);
-}
 
 /* Reduced-motion guards live in the shard that declares the animation
    (e.g. modals.css for .toast/.skeleton) — a guard here loses the
@@ -107,9 +94,6 @@ pre {
 /* ---------- responsive ---------- */
 
 @media (max-width: 600px) {
-  .app-layout {
-    flex-direction: column;
-  }
   .sidebar {
     width: 100%;
     min-width: unset;
@@ -120,9 +104,6 @@ pre {
   }
   .content {
     padding-top: var(--sp-16);
-  }
-  .detail-actions {
-    flex-wrap: wrap;
   }
 }
 

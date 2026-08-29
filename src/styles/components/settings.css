@@ -2,26 +2,8 @@
    Sharded out of src/App.css to keep each file under the 350-LOC
    loc-guardian limit. Tokens still live in src/styles/tokens.css —
    nothing in this file may declare global custom properties.        */
-
 /* ---------- settings section (P3.1) ---------- */
 
-.settings-view {
-  /* No max-width on the flex child itself, otherwise the content pane
-     can't fill the window and the transparent body reveals the OS
-     chrome on wide displays. Reading width is capped on each inner
-     element instead — the pane's --bg reaches the window edge. */
-  padding: var(--sp-16) var(--sp-24) var(--sp-24);
-}
-
-.settings-view > * {
-  max-width: var(--modal-width-lg);
-}
-
-.settings-heading {
-  font-size: var(--fs-base);
-  font-weight: 600;
-  margin: 0 0 var(--sp-16);
-}
 
 .settings-group {
   padding: var(--sp-12) 0;
@@ -33,46 +15,9 @@
   padding-top: 0;
 }
 
-.settings-group-title {
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: var(--ls-wide);
-  color: var(--fg-muted);
-  margin: 0 0 var(--sp-8);
-  display: flex;
-  align-items: center;
-  gap: var(--sp-6);
-}
-
 .settings-desc {
   font-size: var(--fs-sm);
   margin: 0 0 var(--sp-10);
-}
-
-.settings-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-12);
-  font-size: var(--fs-sm);
-  padding: var(--sp-4) 0;
-}
-
-.settings-select {
-  font: inherit;
-  font-size: var(--fs-sm);
-  padding: var(--sp-4) var(--sp-8);
-  border: var(--bw-subhair) solid var(--line);
-  border-radius: var(--r-2);
-  background: var(--bg-raised);
-  color: var(--fg);
-}
-
-.settings-input-group {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-6);
 }
 
 .settings-input {
@@ -100,32 +45,6 @@
   display: flex;
   gap: var(--sp-8);
   margin-top: var(--sp-8);
-}
-
-.settings-result {
-  margin-top: var(--sp-8);
-  padding: var(--sp-6) var(--sp-10);
-  border-radius: var(--r-2);
-  background: var(--bg-raised);
-  border: var(--bw-subhair) solid var(--line);
-  font-size: var(--fs-sm);
-}
-
-.settings-about-grid {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: var(--sp-4) var(--sp-16);
-  font-size: var(--fs-sm);
-  margin: 0;
-}
-
-.settings-about-grid dt {
-  color: var(--fg-muted);
-  text-align: right;
-}
-
-.settings-about-grid dd {
-  margin: 0;
 }
 
 /* ---------- protected paths pane ---------- */
@@ -201,10 +120,6 @@
 .settings-inline-hint {
   margin: var(--sp-6) 0 0;
   font-size: var(--fs-xs);
-}
-
-.sidebar-segmented-slot {
-  padding: 0 var(--sp-8) var(--sp-8);
 }
 
 /* ---------- segmented control (P2.2) ---------- */
