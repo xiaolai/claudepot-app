@@ -6,6 +6,49 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.5.10 — beta (unreleased)
+
+One bug, reported from outside, that cost real money — and the two
+places the same mistake was waiting to happen again.
+
+### Fixed
+
+- **Claudepot no longer spends your tokens to draw a background-worker
+  badge.** On a Claude Code older than 2.1.139 — the release that added
+  the `daemon` subcommand — the once-a-minute `claude daemon status`
+  check was not an error. Claude Code's command line treats an
+  unrecognised word as a *prompt*, so every poll started a headless
+  session, called the model and billed for it, while the badge showed
+  nothing. The reporter measured **288 such sessions in a single day at
+  ~20K uncached input tokens each**. The worker count now comes from
+  reading Claude Code's own daemon roster file, and no subprocess runs
+  at all. Reported with a full diagnosis, and a self-correcting errata,
+  by [@wiltonwung](https://github.com/wiltonwung) ([#94]).
+- **Signing in on an older Claude Code now says so instead of silently
+  failing.** `claude auth login` arrived in 2.1.41, and below that the
+  same fall-through sent the words "auth login" to the model — billed,
+  and nobody signed in. Claudepot checks the version first and asks you
+  to update. If it cannot read the version, it refuses rather than
+  guesses.
+- **The background-worker count only counts workers that are really
+  running.** Claude Code's roster outlives the daemon that wrote it — by
+  13 days on the machine this was measured on — so a stale file could
+  report workers that had long since exited. Each entry is now checked
+  against its own recorded start time, which also means a reused process
+  id is not mistaken for the worker that used to hold it.
+
+### Changed
+
+- **The Health check gives up instead of retrying forever.** `claude
+  doctor` is the one remaining command Claudepot runs on a timer, and it
+  cannot be replaced by reading a file. If its output stops being
+  recognisable three times running, Claudepot stops re-running it until
+  the next restart — so the failure above can never cost more than three
+  attempts. A missing or broken Claude Code install is told apart from
+  unrecognised output, and does not count toward that limit.
+
+[#94]: https://github.com/xiaolai/claudepot-app/issues/94
+
 ## 0.5.9 — beta (unreleased)
 
 A readability and accessibility pass over the whole renderer, plus the
