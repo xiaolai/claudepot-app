@@ -64,9 +64,26 @@ step "workspace tests"
 # otherwise resolve the developer's real ~/.claudepot — which is how a
 # test once destroyed a live sessions.db. The runner is the one seam that
 # covers all of them at once. (repo-invariants.sh guard 5 asserts this.)
+#
+# CLAUDE_CONFIG_DIR isolates *Claude Code's* directory for the same
+# reason, and it is the one that bites on a developer machine rather
+# than in CI. `remote_serve_e2e` resolves it through
+# `panel::ListContext::live`, so with only the data root isolated the
+# suite pointed an EMPTY index at a REAL ~/.claude: `list_all_sessions`
+# then cold-built the index by parsing every transcript on the machine
+# — 3.87 GB here — while 24 concurrent tests contended on the fresh
+# database. Measured: 61.58 s and a spurious failure
+# (`a_transcript_for_an_unknown_session_is_not_found` got 500, because
+# a locked index surfaces as `internal`), against 7.62 s and a clean
+# pass once both are isolated. CI never saw it because a CI runner has
+# no transcripts to parse.
 CLAUDEPOT_TEST_DATA_DIR="$(mktemp -d)"
-trap 'rm -rf "$CLAUDEPOT_TEST_DATA_DIR"' EXIT
-CLAUDEPOT_DATA_DIR="$CLAUDEPOT_TEST_DATA_DIR" cargo test --workspace
+CLAUDEPOT_TEST_CC_DIR="$(mktemp -d)"
+mkdir -p "$CLAUDEPOT_TEST_CC_DIR/projects"
+trap 'rm -rf "$CLAUDEPOT_TEST_DATA_DIR" "$CLAUDEPOT_TEST_CC_DIR"' EXIT
+CLAUDEPOT_DATA_DIR="$CLAUDEPOT_TEST_DATA_DIR" \
+CLAUDE_CONFIG_DIR="$CLAUDEPOT_TEST_CC_DIR" \
+  cargo test --workspace
 ok "rust tests"
 
 if [ "$rust_only" -eq 0 ]; then

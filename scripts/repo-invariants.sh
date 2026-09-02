@@ -152,16 +152,27 @@ fi
 # right seam: exporting CLAUDEPOT_DATA_DIR around `cargo test` covers
 # EVERY test binary at once, with no ritual to forget. So we assert the
 # runners actually do it.
+#
+# CLAUDE_CONFIG_DIR is checked alongside it, and is the one that fails
+# ASYMMETRICALLY: a CI runner has no transcripts, so a missing isolation
+# passes there and only bites a developer. With just the data root
+# isolated, `remote_serve_e2e` pointed an empty index at the real
+# ~/.claude and cold-built it by parsing every transcript on the
+# machine — 61.58 s and a spurious 500 here, against 7.62 s clean once
+# both were set. A guard that only fires in the environment that does
+# not need it is not a guard.
 for runner in scripts/preflight.sh .github/workflows/ci.yml; do
   [ -f "$runner" ] || continue
-  if ! grep -q 'CLAUDEPOT_DATA_DIR' "$runner"; then
-    echo "::error::$runner runs cargo test without isolating CLAUDEPOT_DATA_DIR."
-    echo "  paths.rs's cfg(test) guard does NOT reach integration tests or"
-    echo "  other crates' tests — they would use the real ~/.claudepot."
-    echo "  Export CLAUDEPOT_DATA_DIR to a tempdir around the test step."
-    echo
-    fail=1
-  fi
+  for var in CLAUDEPOT_DATA_DIR CLAUDE_CONFIG_DIR; do
+    if ! grep -q "$var" "$runner"; then
+      echo "::error::$runner runs cargo test without isolating $var."
+      echo "  paths.rs's cfg(test) guard does NOT reach integration tests or"
+      echo "  other crates' tests — they would use the real home directory."
+      echo "  Export $var to a tempdir around the test step."
+      echo
+      fail=1
+    fi
+  done
 done
 
 # ── 6. MCP reads stay inside the project confinement ─────────────────
