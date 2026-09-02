@@ -6,7 +6,71 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.5.10 — beta (unreleased)
+## 0.6.0 — beta (unreleased)
+
+Three read paths were doing far more work than reading requires. All
+three were found by measuring against a real machine — 2,585
+transcripts, 3.87 GB of them, a 1.5 GB session index — rather than
+against a fixture.
+
+### Fixed
+
+- **Reading the session index no longer waits on the write lock.**
+  Every surface that lists sessions refreshes the index first, and in
+  the steady state that refresh has nothing to do — but it opened a
+  write transaction regardless, because a cleanup step sat inside it.
+  So a *read* queued behind any other writer, and once the five-second
+  wait ran out it gave up with "database is locked" while having
+  nothing to write. Measured against the old code: **5.30 seconds, then
+  failure.** The cleanup now runs on its own daily schedule, and a
+  refresh with nothing to apply takes no lock at all.
+- **Opening a project no longer scans every transcript on the
+  machine.** The Sessions pane in a project asked about one directory
+  and the index answered by stat-ing all 2,585 transcripts on the
+  install. It now refreshes just that project.
+- **A stale entry could not be reported as deleted.** Scoping the
+  per-project refresh required scoping both halves of the comparison;
+  doing only one would have pruned the rest of the index. Locked by a
+  test in both directions.
+
+### Changed
+
+- **Opening a transcript reads it once instead of four times.** The
+  viewer asked for the events and the chunked view as two separate
+  requests, and each of those parsed the file twice internally. The
+  code justified the second request on the grounds that "typical
+  sessions are <1 MB" — on the machine this was measured on, 375
+  transcripts are over 1 MB, 100 are over 10 MB, and the largest is
+  **181 MB**. One request now, one parse, and the chunked view is
+  derived from the same pass. On that 181 MB transcript, with a warm
+  cache: **0.37s → 0.19s**, byte-for-byte the same output.
+- **A repeat project listing skips about 90% of its filesystem work.**
+  The listing recursed through every per-session folder to total up one
+  size column — 29,810 directory entries across 11 GB. Only that nested
+  portion is cached now, and only in memory; the top level is measured
+  fresh every time, so session counts, transcript sizes and every check
+  that decides whether a project is offered for cleanup stay exact. A
+  repeat listing touches **2,974 entries instead of 29,810**. The
+  listing also runs in parallel now.
+- **A project directory holding a leftover session folder is no longer
+  called empty.** The "is this safe to remove" check used a recursive
+  byte total, which counted an empty subtree as nothing. It now looks
+  for the subdirectory directly — stricter, and it never reads a cached
+  number.
+
+### Internal
+
+- Test runners isolate Claude Code's own directory, not just
+  Claudepot's. Without it the suite pointed an empty index at a real
+  `~/.claude` and rebuilt it from every transcript on the machine
+  mid-test: 61.58s and a spurious failure, against 7.62s clean. The
+  gap failed asymmetrically — a CI runner has no transcripts, so it
+  only ever bit on a developer machine. `repo-invariants.sh` now
+  asserts both.
+- The changelog entries for 0.5.9 and 0.5.10 were still marked
+  unreleased; both shipped on 2026-08-29.
+
+## 0.5.10 — beta (released 2026-08-29)
 
 One bug, reported from outside, that cost real money — and the two
 places the same mistake was waiting to happen again.
@@ -49,7 +113,7 @@ places the same mistake was waiting to happen again.
 
 [#94]: https://github.com/xiaolai/claudepot-app/issues/94
 
-## 0.5.9 — beta (unreleased)
+## 0.5.9 — beta (released 2026-08-29)
 
 A readability and accessibility pass over the whole renderer, plus the
 checks that keep it that way.

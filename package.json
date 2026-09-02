@@ -1,7 +1,7 @@
 {
   "name": "claudepot",
   "private": true,
-  "version": "0.5.10",
+  "version": "0.6.0",
   "license": "ISC",
   "type": "module",
   "engines": {
