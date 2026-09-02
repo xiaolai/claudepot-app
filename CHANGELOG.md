@@ -69,6 +69,10 @@ against a fixture.
   asserts both.
 - The changelog entries for 0.5.9 and 0.5.10 were still marked
   unreleased; both shipped on 2026-08-29.
+- A test that asks a stub binary for its version no longer races the
+  three-second cap that protects a real sign-in from a hung `claude`.
+  The cap is unchanged in shipped builds; only test builds get slack.
+  It had failed one Linux CI run and flaked twice locally.
 
 ## 0.5.10 — beta (released 2026-08-29)
 

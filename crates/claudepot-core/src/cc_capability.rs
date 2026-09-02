@@ -70,6 +70,45 @@ use std::time::Duration;
 /// a stdin read cannot stall a sign-in.
 const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
+/// Slack a **test build** gets over the production cap, as a multiple
+/// of it. Expressed as a multiplier rather than its own duration so the
+/// two cannot drift apart, and so `VERSION_PROBE_TIMEOUT` stays
+/// referenced in both builds — gating it behind `#[cfg(not(test))]`
+/// orphans the constant under `--all-targets`, which CI compiles with
+/// `-D warnings`.
+const TEST_PROBE_TIMEOUT_FACTOR: u32 = 40;
+
+/// The cap actually applied. Production uses [`VERSION_PROBE_TIMEOUT`]
+/// unchanged; a test build multiplies it.
+///
+/// This is not a loosened product bound. The 3 s cap protects an
+/// *interactive sign-in* from a wedged binary, and nothing about that
+/// concern is under test when a stub shell script is asked its version.
+/// What the cap can do in a test build is turn a scheduling hiccup on a
+/// shared CI runner into a false failure of an assertion about gate
+/// LOGIC — which is what it did: `a_current_build_is_spawned_with_auth_
+/// login` failed one Linux run with `AuthVersionUnreadable`, having lost
+/// a race against three seconds, while the same commit passed on macOS,
+/// on Windows, and on a re-run of that same job.
+///
+/// The one test that asserts the deadline —
+/// `a_hanging_binary_is_refused_at_the_deadline` — runs under
+/// `#[tokio::test(start_paused = true)]`, so it advances a VIRTUAL clock
+/// to whatever the cap is and is indifferent to its value. Verified by
+/// stretching the cap to a day: that test still passes instantly, and
+/// still fails if the deadline is removed altogether. It pins that a
+/// deadline EXISTS and that the child is reaped, not what the number is.
+///
+/// `cfg!` rather than `#[cfg]`: both arms must compile so neither the
+/// constant nor the factor can become dead code in either build.
+fn probe_timeout() -> Duration {
+    if cfg!(test) {
+        VERSION_PROBE_TIMEOUT * TEST_PROBE_TIMEOUT_FACTOR
+    } else {
+        VERSION_PROBE_TIMEOUT
+    }
+}
+
 /// A parsed `major.minor.patch`. Ordering is tuple ordering, which is
 /// what makes `>=` against a floor mean what it looks like.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -264,7 +303,7 @@ async fn probe_version(binary: &Path) -> Option<CcVersion> {
         .no_window()
         .output();
 
-    let output = tokio::time::timeout(VERSION_PROBE_TIMEOUT, output)
+    let output = tokio::time::timeout(probe_timeout(), output)
         .await
         .ok()?
         .ok()?;
