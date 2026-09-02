@@ -38,6 +38,7 @@ pub(crate) fn claudepot_home_dirs() -> (std::path::PathBuf, std::path::PathBuf, 
 pub async fn project_list(
     pr_orch: tauri::State<'_, std::sync::Arc<crate::pr_orchestrator::PrOrchestrator>>,
     index: tauri::State<'_, crate::commands::shared_memory::SharedMemoryIndex>,
+    sizes: tauri::State<'_, crate::project_size_cache::ProjectSizeCache>,
 ) -> Result<Vec<ProjectInfoDto>, ErrorDto> {
     // `list_projects` fans out over every project slug, running a
     // recursive size+mtime walk, `classify_reachability` (stat +
@@ -53,23 +54,57 @@ pub async fn project_list(
     let pr_orch: std::sync::Arc<crate::pr_orchestrator::PrOrchestrator> =
         std::sync::Arc::clone(&pr_orch);
     let index = index.0.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let cfg = paths::claude_config_dir();
-        let cwds = index.as_ref().and_then(|idx| idx.project_cwds().ok());
-        let projects =
-            project::list_projects_with_cwds(&cfg, cwds.as_ref()).map_err(ErrorDto::from)?;
-        let mut out: Vec<ProjectInfoDto> = projects.iter().map(ProjectInfoDto::from).collect();
-        // Synchronous cache-only enrichment — never blocks on
-        // subprocesses. Misses (nothing cached, expired, or no PR
-        // found) leave `pr = None`, which serializes as absent.
-        for (dto, info) in out.iter_mut().zip(projects.iter()) {
-            let pr = pr_orch.cached_for(std::path::Path::new(&info.original_path));
-            dto.pr = pr.as_ref().map(crate::dto::PrInfoDto::from);
+    let sizes = sizes.inner().clone();
+    let projects = tauri::async_runtime::spawn_blocking({
+        let sizes = sizes.clone();
+        move || -> Result<Vec<project::ProjectInfo>, ErrorDto> {
+            let cfg = paths::claude_config_dir();
+            let cwds = index.as_ref().and_then(|idx| idx.project_cwds().ok());
+            // First listing of the process has nothing cached, so the
+            // nested walk runs here — the same work the command always
+            // did. Every later listing reads the cache and skips ~90% of
+            // the stat calls; the background refresh below is what keeps
+            // it current.
+            let mut nested = sizes.snapshot();
+            if nested.is_empty() {
+                sizes.refresh_blocking(&cfg);
+                nested = sizes.snapshot();
+            }
+            project::list_projects_cached(
+                &cfg,
+                &project::ListProjectsCache {
+                    cwds: cwds.as_ref(),
+                    nested: Some(&nested),
+                },
+            )
+            .map_err(ErrorDto::from)
         }
-        Ok(out)
     })
     .await
-    .map_err(ErrorDto::task_join)?
+    .map_err(ErrorDto::task_join)??;
+
+    // Re-measure off the critical path so the next listing is current.
+    // Detached on purpose: nothing waits on it, and a listing that
+    // raced it simply serves the previous generation.
+    tauri::async_runtime::spawn_blocking(move || {
+        // `refresh_if_idle`, not `refresh_blocking`: this fires on every
+        // listing, and holding ⌘R would otherwise queue one redundant
+        // full walk per press onto the blocking pool.
+        sizes.refresh_if_idle(&paths::claude_config_dir());
+    });
+
+    let mut out: Vec<ProjectInfoDto> = projects.iter().map(ProjectInfoDto::from).collect();
+    // Synchronous cache-only enrichment — never blocks on
+    // subprocesses. Misses (nothing cached, expired, or no PR
+    // found) leave `pr = None`, which serializes as absent. In-line
+    // rather than on the blocking pool: it is a map lookup per project
+    // over a list that is already in memory, and the disk work it used
+    // to share a task with now lives above.
+    for (dto, info) in out.iter_mut().zip(projects.iter()) {
+        let pr = pr_orch.cached_for(std::path::Path::new(&info.original_path));
+        dto.pr = pr.as_ref().map(crate::dto::PrInfoDto::from);
+    }
+    Ok(out)
 }
 
 #[tauri::command]

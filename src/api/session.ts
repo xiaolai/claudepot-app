@@ -12,7 +12,6 @@ import type {
   ContextStats,
   RepositoryGroup,
   SearchHit,
-  SessionChunk,
   SessionDetail,
   SessionRow,
   TargetProbe,
@@ -143,9 +142,6 @@ export const sessionApi = {
     invoke<SessionDetail>("session_read_path", { filePath }),
 
   // ---------- Session debugger (Tier 1-3 port from claude-devtools) ----------
-  /** Chunked event stream (User/Ai/System/Compact) with per-chunk linked tools. */
-  sessionChunks: (filePath: string) =>
-    invoke<SessionChunk[]>("session_chunks", { filePath }),
   /** Visible-context token attribution across six categories. */
   sessionContextAttribution: (filePath: string) =>
     invoke<ContextStats>("session_context_attribution", { filePath }),

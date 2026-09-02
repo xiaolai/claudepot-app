@@ -289,3 +289,74 @@ fn fallback_project_path_from_slug_when_cwd_missing() {
     // unsanitize_path turns "-Users-joker-repo" back into an absolute path
     assert!(rows[0].project_path.contains("Users") && rows[0].project_path.contains("joker"));
 }
+
+/// The single-pass fold must be byte-for-byte what the two separate
+/// passes produced. This is the lock on the refactor that took opening
+/// a transcript from four parses of the file to one: if the combined
+/// loop ever drifts from `scan_session` + `parse_events`, the GUI's
+/// transcript quietly changes shape.
+///
+/// The fixture deliberately includes a blank line and a malformed line,
+/// because those are where the two loops differed — `scan_session`
+/// counted a bad line toward `event_count` and moved on, while
+/// `parse_events` emitted a `Malformed` carrying the 1-based number of
+/// the line *including* blanks.
+#[test]
+fn scan_with_events_matches_the_two_separate_passes() {
+    let tmp = TempDir::new().unwrap();
+    let user1 = r#"{"type":"user","message":{"role":"user","content":"Fix the build"},"timestamp":"2026-04-10T10:00:00Z","cwd":"/repo/foo","gitBranch":"main","version":"2.1.97","sessionId":"AAA","uuid":"u-1"}"#;
+    let blank = "";
+    let broken = r#"{"type":"user","message":{"role":"user",,,}"#;
+    let asst1 = r#"{"type":"assistant","message":{"role":"assistant","model":"claude-opus-4-7","content":[{"type":"text","text":"OK"}],"usage":{"input_tokens":100,"output_tokens":50}},"timestamp":"2026-04-10T10:00:05Z","cwd":"/repo/foo","sessionId":"AAA","uuid":"u-2"}"#;
+    let summary =
+        r#"{"type":"summary","summary":"did a thing","timestamp":"2026-04-10T10:00:06Z"}"#;
+    let tool = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"done","is_error":true}]},"timestamp":"2026-04-10T10:00:10Z","cwd":"/repo/foo","sessionId":"AAA"}"#;
+
+    let path = write_session(
+        tmp.path(),
+        "-repo-foo",
+        "AAA",
+        &[user1, blank, broken, asst1, summary, tool],
+    );
+
+    let separate_scan = scan_session("-repo-foo", &path).unwrap();
+    let separate_events = parse_events(&path).unwrap();
+    let (combined_scan, combined_events) = scan_session_with_events("-repo-foo", &path).unwrap();
+
+    assert_eq!(
+        format!("{:?}", combined_scan.row),
+        format!("{:?}", separate_scan.row),
+        "row diverged between the one-pass and two-pass folds"
+    );
+    assert_eq!(combined_scan.turns.len(), separate_scan.turns.len());
+    assert_eq!(combined_scan.usage.len(), separate_scan.usage.len());
+    assert_eq!(
+        format!("{combined_events:?}"),
+        format!("{separate_events:?}"),
+        "event stream diverged between the one-pass and two-pass folds"
+    );
+
+    // The fixture has to actually exercise the interesting cases, or
+    // the equality above is satisfied by two empty vectors.
+    assert!(
+        combined_events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Malformed { line_number: 3, .. })),
+        "fixture must produce a Malformed event at line 3: {combined_events:?}"
+    );
+    assert!(combined_events.len() >= 5, "fixture too thin");
+    assert!(
+        combined_scan.row.has_error,
+        "tool_result is_error must fold"
+    );
+}
+
+/// The row-only path must not pay for events it was not asked for.
+#[test]
+fn scan_session_alone_collects_no_events() {
+    let tmp = TempDir::new().unwrap();
+    let user1 = r#"{"type":"user","message":{"role":"user","content":"hi"},"timestamp":"2026-04-10T10:00:00Z","cwd":"/repo/foo","sessionId":"AAA"}"#;
+    let path = write_session(tmp.path(), "-repo-foo", "AAA", &[user1]);
+    let (_, events) = scan_session_inner("-repo-foo", &path, false).unwrap();
+    assert!(events.is_empty());
+}

@@ -1,10 +1,19 @@
 //! Tauri commands for the Sessions tab and the session debugger.
 //!
-//! Read-only surface: list, transcript, chunks, context, export,
+//! Read-only surface: list, transcript (events + chunks), context,
+//! export,
 //! search, worktree grouping. No state; each call hits disk via
 //! `claudepot_core::session*`. Handlers are `async fn` so Tauri
 //! dispatches them off the main thread — a sync handler that scans
 //! thousands of JSONL files would freeze the webview for seconds.
+//!
+//! Index-backed handlers take the **shared** `SessionIndex` rather
+//! than opening their own. `SessionIndex::open` is not free: it
+//! applies the schema and runs a `BEGIN IMMEDIATE` touch
+//! transaction to materialize the WAL sidecars, so opening one per
+//! command took the database's write lock on every list call. The
+//! `None` arm is the startup-open-failed case and keeps the old
+//! open-per-call behaviour rather than failing the command.
 
 use crate::commands::shared_memory::SharedMemoryIndex;
 use crate::dto_error::{codes, ErrorDto};
@@ -26,10 +35,16 @@ use tauri::State;
 /// async command — letting a multi-second scan park there serializes
 /// everything else (audit B8 commands_session_index.rs:28).
 #[tauri::command]
-pub async fn session_list_all() -> Result<Vec<crate::dto::SessionRowDto>, ErrorDto> {
-    tokio::task::spawn_blocking(|| {
+pub async fn session_list_all(
+    index: State<'_, SharedMemoryIndex>,
+) -> Result<Vec<crate::dto::SessionRowDto>, ErrorDto> {
+    let index = index.0.clone();
+    tokio::task::spawn_blocking(move || {
         let cfg = paths::claude_config_dir();
-        let rows = claudepot_core::session::list_all_sessions(&cfg).map_err(ErrorDto::from)?;
+        let rows = match &index {
+            Some(idx) => idx.list_all(&cfg).map_err(ErrorDto::from)?,
+            None => claudepot_core::session::list_all_sessions(&cfg).map_err(ErrorDto::from)?,
+        };
         Ok::<_, ErrorDto>(rows.iter().map(crate::dto::SessionRowDto::from).collect())
     })
     .await
@@ -46,11 +61,16 @@ pub async fn session_list_all() -> Result<Vec<crate::dto::SessionRowDto>, ErrorD
 #[tauri::command]
 pub async fn session_list_by_slug(
     slug: String,
+    index: State<'_, SharedMemoryIndex>,
 ) -> Result<Vec<crate::dto::SessionRowDto>, ErrorDto> {
+    let index = index.0.clone();
     tokio::task::spawn_blocking(move || {
         let cfg = paths::claude_config_dir();
-        let rows =
-            claudepot_core::session::list_sessions_by_slug(&cfg, &slug).map_err(ErrorDto::from)?;
+        let rows = match &index {
+            Some(idx) => idx.list_by_slug(&cfg, &slug).map_err(ErrorDto::from)?,
+            None => claudepot_core::session::list_sessions_by_slug(&cfg, &slug)
+                .map_err(ErrorDto::from)?,
+        };
         Ok::<_, ErrorDto>(rows.iter().map(crate::dto::SessionRowDto::from).collect())
     })
     .await
@@ -127,32 +147,10 @@ pub async fn session_index_rebuild() -> Result<(), ErrorDto> {
 // export, search, worktree grouping. All read-only.
 // ---------------------------------------------------------------------------
 
-/// Chunked event stream plus per-chunk linked tools — the shape the
-/// Sessions transcript renders from.
-///
-/// Wrapped in `spawn_blocking` — `load_detail_by_path` parses the full
-/// JSONL synchronously.
-#[tauri::command]
-pub async fn session_chunks(
-    file_path: String,
-) -> Result<Vec<crate::dto::SessionChunkDto>, ErrorDto> {
-    tokio::task::spawn_blocking(move || {
-        let detail = load_detail_by_path(&file_path)?;
-        let chunks = claudepot_core::session_chunks::build_chunks(&detail.events);
-        Ok::<_, ErrorDto>(
-            chunks
-                .iter()
-                .map(crate::dto::SessionChunkDto::from)
-                .collect(),
-        )
-    })
-    .await
-    .map_err(ErrorDto::task_join)?
-}
-
 /// Visible-context token attribution across six categories.
 ///
-/// Wrapped in `spawn_blocking` — same reason as `session_chunks`.
+/// Wrapped in `spawn_blocking` — `load_detail_by_path` parses the
+/// full JSONL synchronously.
 #[tauri::command]
 pub async fn session_context_attribution(
     file_path: String,

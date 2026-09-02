@@ -126,7 +126,7 @@ pub(crate) fn compute_project_info(
     dir: &Path,
     sanitized_name: &str,
 ) -> Result<ProjectInfo, ProjectError> {
-    compute_project_info_with_cwd(dir, sanitized_name, None)
+    compute_project_info_with_cwd(dir, sanitized_name, None, None)
 }
 
 /// `compute_project_info` with the transcript `cwd` supplied by the
@@ -147,10 +147,20 @@ pub(crate) fn compute_project_info(
 /// orphan classification below, which trusts a recovered cwd over the
 /// lossy `unsanitize_path` round-trip. Pass `None` to fall back to
 /// reading it off disk.
+///
+/// `nested` short-circuits the recursive half of the directory scan.
+/// When supplied, the top level is still measured fresh — so
+/// `session_count`, `memory_file_count`, `is_empty` and the transcript
+/// bytes are all exact — and only the below-top-level share of size and
+/// mtime comes from the caller. That share is what costs 90% of the
+/// stat calls in a listing, and it is the slowest-moving number on the
+/// surface. Pass `None` to measure it synchronously, which is what the
+/// CLI and every single-project caller do.
 pub(crate) fn compute_project_info_with_cwd(
     dir: &Path,
     sanitized_name: &str,
     cwd: Option<&str>,
+    nested: Option<NestedScan>,
 ) -> Result<ProjectInfo, ProjectError> {
     // Prefer the authoritative `cwd` field from any session.jsonl — from
     // the caller's index when supplied, else read off disk. Fall back to
@@ -163,17 +173,35 @@ pub(crate) fn compute_project_info_with_cwd(
         .clone()
         .unwrap_or_else(|| unsanitize_path(sanitized_name));
     // One traversal for session_count + memory_file_count + size + mtime.
-    let scan = scan_project_dir(dir);
+    // With a cached nested share the top level is still measured here;
+    // without one this is the same full walk it always was.
+    let scan = match nested {
+        Some(n) => merge_nested(scan_project_dir_shallow(dir), n),
+        None => scan_project_dir(dir),
+    };
+
+    // Empty-dir heuristic: no sessions, no memory, no subdirectory, and
+    // below one filesystem block (directory entries themselves take
+    // space, but a truly abandoned CC project dir stays under ~4 KiB).
+    // Empty dirs are always safe to remove regardless of path
+    // reachability.
+    //
+    // The subdirectory test replaces what the recursive byte total used
+    // to do here, and the byte test now reads the top-level-only sum.
+    // Both are decided from the shallow pass, so this flag — the one
+    // that can put a project in front of a delete button — answers the
+    // same whether or not a nested cache was supplied. It is also
+    // strictly *safer* than the old test: a directory holding an empty
+    // subtree summed to under 4 KiB and read as empty, and now does not.
+    let is_empty = scan.session_count == 0
+        && scan.memory_file_count == 0
+        && !scan.has_subdirs
+        && scan.shallow_size_bytes < 4096;
+
     let session_count = scan.session_count;
     let memory_file_count = scan.memory_file_count;
     let total_size_bytes = scan.total_size_bytes;
     let last_modified = scan.last_modified;
-
-    // Empty-dir heuristic: no sessions, no memory, and below one
-    // filesystem block (directory entries themselves take space, but
-    // a truly abandoned CC project dir stays under ~4 KiB). Empty dirs
-    // are always safe to remove regardless of path reachability.
-    let is_empty = session_count == 0 && memory_file_count == 0 && total_size_bytes < 4096;
 
     // Reachability — can we definitively stat the source? `try_exists()`
     // distinguishes NotFound (reachable, absent) from other I/O errors
@@ -436,8 +464,34 @@ pub(crate) struct DirScan {
     pub memory_file_count: usize,
     /// Recursive sum of every file's length — matches `dir_size`.
     pub total_size_bytes: u64,
+    /// The top-level-only share of `total_size_bytes`. Never has the
+    /// nested share added to it, so a value derived from it means the
+    /// same thing whether or not the caller supplied a nested cache.
+    pub shallow_size_bytes: u64,
     /// Recursive max mtime over every entry, files AND directories —
     /// matches `most_recent_mtime`.
+    pub last_modified: Option<SystemTime>,
+    /// The subset of `total_size_bytes` / `last_modified` contributed by
+    /// everything BELOW the top level — the per-session folders CC
+    /// writes beside each transcript (`subagents/`, `workflows/`, …).
+    ///
+    /// Split out because that subtree is where the cost is: on the
+    /// reference machine the top level holds 2,585 transcripts and the
+    /// nesting below it holds 10,977 more files, so ~90% of the stat
+    /// calls in a project listing buy the nested share of one size
+    /// column. Keeping it separate lets a caller supply it from a cache
+    /// while the top-level half stays exact and freshly measured.
+    pub nested: NestedScan,
+    /// Does the top level contain any subdirectory at all? Cheap, and
+    /// unlike a recursive byte count it is available from the shallow
+    /// pass — see `is_empty` in `compute_project_info_with_cwd`.
+    pub has_subdirs: bool,
+}
+
+/// The below-top-level share of a project directory's size and mtime.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct NestedScan {
+    pub size_bytes: u64,
     pub last_modified: Option<SystemTime>,
 }
 
@@ -453,11 +507,60 @@ pub(crate) struct DirScan {
 /// note `session_count` stays top-level-only while size and mtime stay
 /// recursive.
 pub(crate) fn scan_project_dir(dir: &Path) -> DirScan {
+    merge_nested(scan_project_dir_shallow(dir), scan_nested_dir(dir))
+}
+
+/// Fold a nested share into a shallow scan. The single definition of
+/// how the two halves combine, so the cached and uncached paths cannot
+/// answer differently.
+fn merge_nested(mut scan: DirScan, nested: NestedScan) -> DirScan {
+    scan.nested = nested;
+    scan.total_size_bytes += nested.size_bytes;
+    if nested.last_modified > scan.last_modified {
+        scan.last_modified = nested.last_modified;
+    }
+    scan
+}
+
+/// The top level of a project directory only — no recursion.
+///
+/// Everything that gates *behaviour* is decided from this pass:
+/// `session_count` was always top-level-only, `memory_file_count` is a
+/// shallow count inside `memory/`, and `has_subdirs` replaces the
+/// recursive byte total in the empty-directory test. What the deep pass
+/// adds is the nested share of two *display* values.
+pub(crate) fn scan_project_dir_shallow(dir: &Path) -> DirScan {
     let mut scan = DirScan::default();
-    walk_project_dir(dir, &mut scan, true);
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let Ok(meta) = entry.metadata() else {
+                continue;
+            };
+            let mtime = meta.modified().ok();
+            if meta.is_file() {
+                scan.total_size_bytes += meta.len();
+                scan.shallow_size_bytes += meta.len();
+                if entry
+                    .path()
+                    .extension()
+                    .map(|x| x == "jsonl")
+                    .unwrap_or(false)
+                {
+                    scan.session_count += 1;
+                }
+            } else if meta.is_dir() {
+                scan.has_subdirs = true;
+            }
+            // `most_recent_mtime` compared the mtime of every entry it
+            // saw, directories included — keep that.
+            if mtime > scan.last_modified {
+                scan.last_modified = mtime;
+            }
+        }
+    }
     // `memory/*.md` is a shallow count inside the memory subdir. The
-    // recursive pass above already folded those bytes into
-    // `total_size_bytes`; this only needs the count.
+    // nested pass folds those bytes into `nested.size_bytes`; this only
+    // needs the count.
     let memory_dir = dir.join("memory");
     if memory_dir.is_dir() {
         scan.memory_file_count = count_files_with_ext(&memory_dir, "md");
@@ -465,7 +568,28 @@ pub(crate) fn scan_project_dir(dir: &Path) -> DirScan {
     scan
 }
 
-fn walk_project_dir(dir: &Path, scan: &mut DirScan, top_level: bool) {
+/// Recursive size + mtime of everything BELOW `dir`'s top level.
+///
+/// Public so a caller that caches this value across listings
+/// (`project_list` in the GUI) computes it with exactly the same code
+/// the synchronous path uses.
+pub fn scan_nested_dir(dir: &Path) -> NestedScan {
+    let mut out = NestedScan::default();
+    let Ok(entries) = fs::read_dir(dir) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        if meta.is_dir() {
+            walk_nested(&entry.path(), &mut out);
+        }
+    }
+    out
+}
+
+fn walk_nested(dir: &Path, out: &mut NestedScan) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
@@ -475,23 +599,12 @@ fn walk_project_dir(dir: &Path, scan: &mut DirScan, top_level: bool) {
         };
         let mtime = meta.modified().ok();
         if meta.is_file() {
-            scan.total_size_bytes += meta.len();
-            if top_level
-                && entry
-                    .path()
-                    .extension()
-                    .map(|x| x == "jsonl")
-                    .unwrap_or(false)
-            {
-                scan.session_count += 1;
-            }
+            out.size_bytes += meta.len();
         } else if meta.is_dir() {
-            walk_project_dir(&entry.path(), scan, false);
+            walk_nested(&entry.path(), out);
         }
-        // `most_recent_mtime` compared the mtime of every entry it saw,
-        // directories included — keep that.
-        if mtime > scan.last_modified {
-            scan.last_modified = mtime;
+        if mtime > out.last_modified {
+            out.last_modified = mtime;
         }
     }
 }

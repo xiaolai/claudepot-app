@@ -1,3 +1,4 @@
+use rayon::prelude::*;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -91,6 +92,33 @@ pub fn list_projects(config_dir: &Path) -> Result<Vec<ProjectInfo>, ProjectError
     list_projects_with_cwds(config_dir, None)
 }
 
+/// Recursive size + mtime of the below-top-level subtree of every
+/// project slug, keyed by slug.
+///
+/// This is the expensive half of a project listing hoisted into its own
+/// function so a caller can run it off the critical path and feed the
+/// result back through `ListProjectsCache::nested`. It is a pure
+/// function of the filesystem — safe to run concurrently with anything,
+/// and safe to discard.
+pub fn scan_nested_by_slug(
+    config_dir: &Path,
+) -> Result<std::collections::HashMap<String, NestedScan>, ProjectError> {
+    let projects_dir = config_dir.join("projects");
+    if !projects_dir.exists() {
+        return Ok(std::collections::HashMap::new());
+    }
+    let dirs: Vec<(String, PathBuf)> = fs::read_dir(&projects_dir)
+        .map_err(ProjectError::Io)?
+        .flatten()
+        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+        .map(|e| (e.file_name().to_string_lossy().to_string(), e.path()))
+        .collect();
+    Ok(dirs
+        .par_iter()
+        .map(|(slug, path)| (slug.clone(), scan_nested_dir(path)))
+        .collect())
+}
+
 /// `list_projects` with the per-slug transcript `cwd` supplied by the
 /// caller — see `SessionIndex::project_cwds`.
 ///
@@ -105,28 +133,61 @@ pub fn list_projects_with_cwds(
     config_dir: &Path,
     cwds: Option<&std::collections::HashMap<String, String>>,
 ) -> Result<Vec<ProjectInfo>, ProjectError> {
+    list_projects_cached(config_dir, &ListProjectsCache { cwds, nested: None })
+}
+
+/// Values a caller may already hold, so `list_projects` does not have
+/// to re-derive them from disk. Both are optional and a miss on either
+/// falls back to measuring, so a cold or partial cache degrades to the
+/// original behaviour rather than to a wrong answer.
+#[derive(Default)]
+pub struct ListProjectsCache<'a> {
+    /// Slug → authoritative transcript `cwd`, from
+    /// `SessionIndex::project_cwds`.
+    pub cwds: Option<&'a std::collections::HashMap<String, String>>,
+    /// Slug → below-top-level size + mtime, from `scan_nested_by_slug`.
+    pub nested: Option<&'a std::collections::HashMap<String, NestedScan>>,
+}
+
+/// `list_projects` with both caches wired in.
+///
+/// The per-slug work is run on rayon. The slugs are independent and the
+/// work is stat-bound, so the walk overlaps its own I/O latency; the
+/// error contract is unchanged because a per-slug failure still aborts
+/// the whole listing.
+pub fn list_projects_cached(
+    config_dir: &Path,
+    cache: &ListProjectsCache<'_>,
+) -> Result<Vec<ProjectInfo>, ProjectError> {
     let projects_dir = config_dir.join("projects");
     if !projects_dir.exists() {
         return Ok(vec![]);
     }
 
-    let mut projects = Vec::new();
+    let mut slugs: Vec<(String, PathBuf)> = Vec::new();
     for entry in fs::read_dir(&projects_dir).map_err(ProjectError::Io)? {
         let entry = entry.map_err(ProjectError::Io)?;
         let ft = entry.file_type().map_err(ProjectError::Io)?;
         if !ft.is_dir() {
             continue;
         }
-        let sanitized_name = entry.file_name().to_string_lossy().to_string();
-        let cwd = cwds
-            .and_then(|m| m.get(&sanitized_name))
-            .map(|s| s.as_str());
-        projects.push(compute_project_info_with_cwd(
-            &entry.path(),
-            &sanitized_name,
-            cwd,
-        )?);
+        slugs.push((
+            entry.file_name().to_string_lossy().to_string(),
+            entry.path(),
+        ));
     }
+
+    let mut projects: Vec<ProjectInfo> = slugs
+        .par_iter()
+        .map(|(sanitized_name, path)| {
+            let cwd = cache
+                .cwds
+                .and_then(|m| m.get(sanitized_name))
+                .map(|s| s.as_str());
+            let nested = cache.nested.and_then(|m| m.get(sanitized_name)).copied();
+            compute_project_info_with_cwd(path, sanitized_name, cwd, nested)
+        })
+        .collect::<Result<Vec<_>, ProjectError>>()?;
 
     projects.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
     Ok(projects)

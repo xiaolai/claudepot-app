@@ -47,23 +47,6 @@ export function normalizeDetailQuery(raw: string): string | null {
   return q.length >= DETAIL_QUERY_MIN_LEN ? q : null;
 }
 
-/**
- * Tauri emits command-not-found errors in a small set of shapes. We
- * match only those exact shapes — specifically, a "not found" wording
- * scoped to a command context — so genuine I/O errors that happen to
- * contain the substring "not found" (e.g. "file not found at <path>")
- * do NOT get classified as a compatibility miss. Unknown real errors
- * must surface to the user, not silently collapse the debugger into
- * raw-event mode.
- */
-export function isUnknownCommandError(e: unknown): boolean {
-  const msg = String(e ?? "");
-  return (
-    /unknown command\b/i.test(msg) ||
-    /\bcommand\s+[`"']?session_chunks[`"']?\s+not\s+found/i.test(msg) ||
-    /not a registered command/i.test(msg)
-  );
-}
 
 /**
  * True if any event under this chunk matches `q`. `events` is the

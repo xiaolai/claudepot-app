@@ -245,6 +245,57 @@ version lock-step check (tag vs `Cargo.toml`, `package.json`,
   `notification`, `activity`, etc., merged in `index.ts`) + `src/types/`
   (sliced by domain, merged in `index.ts`) — React UI, plain CSS.
 - `AccountStore.db` is `Mutex<Connection>` so stores can cross `await` points in Tauri commands.
+
+**Opening a transcript parses it once.** It used to parse it four
+times: `read_session_detail_at_path` called `scan_session` (the row
+fold) *and* `parse_events` (the event fold), and the viewer issued
+`session_read_path` and `session_chunks` in a `Promise.all`, each of
+which ran that same pair. The comment defending the double fetch said
+"typical sessions are <1 MB"; measured on this machine, 375 transcripts
+are over 1 MB, 100 over 10 MB, and the largest is **181 MB**. The two
+folds now share one `serde_json::from_str` per line
+(`scan_session_with_events`), and chunks — a pure function of the
+events — ride back on `SessionDetailDto` instead of being their own
+command. `session_chunks` was deleted rather than left unread.
+
+`core_tests::scan_with_events_matches_the_two_separate_passes` pins the
+one-pass fold against the two-pass one, over a fixture with a blank
+line and a malformed line, because those are exactly where the two
+loops differed.
+
+**What is NOT worth doing here: windowing the transcript at the IPC
+boundary.** It looks like the obvious next step and it is not — the
+181 MB file yields **0.9 MB** of event text, because base64 image
+payloads are dropped during parse (`tool_result` keeps only `text`
+parts). The cost was never the payload; it was the parse. Measure
+before adding a paging protocol the search box would then have to work
+around.
+
+**`project_list` caches only the nested half of its directory walk.**
+The recursive size+mtime walk is 29,810 `stat` calls over 11 GB here —
+1.1–1.3 s in release, paid on every mount of the Projects tab and every
+⌘R — and ~90% of it is below the top level, in the per-session folders
+CC writes beside each transcript. `src-tauri/src/project_size_cache.rs`
+holds that share in memory (not persisted: it is a pure function of the
+filesystem, so a file in the data dir would be a thing to migrate and
+invalidate for a number rebuilt in under a second). The top level is
+measured fresh every listing, so counts, transcript bytes and every
+flag that gates behaviour are exact; what lags by at most one listing
+is the nested contribution to one size column and a sort key.
+
+Two details are load-bearing:
+
+- **`is_empty` may not read a cached number.** It is the flag that can
+  put a project in front of a delete button. It now tests
+  `!has_subdirs` and the *top-level-only* byte sum, both from the
+  shallow pass, so it answers identically with or without a cache. That
+  is also strictly safer than the recursive test it replaces: a
+  directory holding an empty subtree summed to under 4 KiB and read as
+  "empty".
+- **Parallelising instead was measured and is not enough** — 1.25 s →
+  0.72 s, because the work is stat-bound and one slug dominates. The
+  listing runs on rayon *as well*, but the cache is what makes a repeat
+  listing cheap.
 - Eight SQLite files live in `~/.claudepot/` (override with
   `CLAUDEPOT_DATA_DIR`; the authoritative list is whatever joins onto
   `claudepot_core::paths::claudepot_data_dir()`, and
@@ -279,6 +330,49 @@ version lock-step check (tag vs `Cargo.toml`, `package.json`,
     `.jsonl` transcript, keyed by file_path; `(size, mtime_ns)` is the
     re-parse guard. Owned by `claudepot-core::session_index`. Rebuild
     via Settings → Cleanup or `claudepot session rebuild-index`.
+
+    **A refresh with nothing to apply must take no write lock.** Every
+    read entry point (`list_all`, `list_by_slug`) refreshes first, and
+    the steady state has an empty plan — so for most of this file's life
+    a *read* of the index opened a write transaction anyway, because an
+    unconditional `gc_events_older_than` sat inside it. `busy_timeout`
+    is 5 s, so a reader could block for five seconds behind any other
+    writer and then fail with "database is locked" while having nothing
+    to write. Measured: a no-op refresh against a held `BEGIN IMMEDIATE`
+    waited **5.30 s** and failed. The GC now runs on its own daily
+    stamp (`meta.last_usage_gc_ms`), which is what allows the empty
+    plan to return before the transaction. Note a DEFERRED transaction
+    with no statements in it acquires nothing — so a test for this must
+    reproduce the *write*, not just the transaction.
+
+    **A per-project read refreshes only that project.** `list_by_slug`
+    used the full refresh, stat-ing every transcript on the install
+    (2,585 here) to answer a question about one directory. `refresh_slug`
+    scopes **both** sides of the diff — `walk_fs_slug` and
+    `load_db_tuples_for_slug`. Scoping only the walk would make every
+    unwalked cached row look deleted and cascade the rest of the index
+    away; there is a test on that in both directions.
+
+    **Index-backed Tauri commands take the shared `SessionIndex`**, not
+    their own. `SessionIndex::open` is not free and cannot be made free:
+    `apply_schema` begins `IMMEDIATE` on **every** open, deliberately —
+    it honours the `_pending_rescan` marker Settings → Cleanup writes,
+    drops a redundant legacy index, and runs post-write validation, none
+    of which are gated on the version changing. A "skip it when the
+    version already matches" fast path was written, measured, and
+    **reverted**: it silently ignored a user's rebuild request, and
+    `test_schema_open_drops_redundant_turns_file_path_index` caught it.
+    So the fix is not to make open cheap but to do it **once** — the GUI
+    opens the index at startup and every command borrows that handle.
+    A cold open (the CLI, or GUI startup) can still wait on the 5 s
+    `busy_timeout` behind another writer; that wait is correct, and it
+    is no longer on the interactive path.
+
+    The one part of open that *was* safe to skip is the WAL-sidecar
+    touch: it is a write whose only job is to create `-wal` / `-shm` so
+    the chmod in `open()` can narrow them to 0600, and in the contended
+    case they already exist (in WAL mode they live as long as any
+    connection does). It now runs only when they are actually missing.
   - `env-vault.db` — the local named-secret vault (`env_secrets`
     table, secret in a 0600 column). Owned by
     `claudepot-core::env_vault::store`. Mirrors `keys.db`'s at-rest

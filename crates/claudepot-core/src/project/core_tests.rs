@@ -3090,3 +3090,94 @@ fn test_move_project_post_move_failure_becomes_warning() {
     assert!(src.exists(), "disk dir untouched on preflight failure");
     assert!(!dst.exists(), "target not created on preflight failure");
 }
+
+// -- nested-scan cache -------------------------------------------------
+//
+// The listing may take the below-top-level share of size and mtime from
+// a caller-supplied cache instead of measuring it. These pin the two
+// properties that makes that safe: the composition is identical to the
+// full walk, and nothing that gates behaviour reads the cached half.
+
+#[test]
+fn shallow_plus_nested_equals_the_full_walk() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(tmp.path().join("a.jsonl"), "aa").unwrap();
+    fs::write(tmp.path().join("notes.txt"), "x").unwrap();
+    let sub = tmp.path().join("deadbeef").join("subagents");
+    fs::create_dir_all(&sub).unwrap();
+    fs::write(sub.join("c.jsonl"), "ccc").unwrap();
+    let mem = tmp.path().join("memory");
+    fs::create_dir_all(&mem).unwrap();
+    fs::write(mem.join("one.md"), "1").unwrap();
+
+    let full = scan_project_dir(tmp.path());
+    let shallow = scan_project_dir_shallow(tmp.path());
+    let nested = scan_nested_dir(tmp.path());
+
+    assert_eq!(
+        shallow.total_size_bytes + nested.size_bytes,
+        full.total_size_bytes
+    );
+    assert_eq!(full.total_size_bytes, 2 + 1 + 3 + 1);
+    assert_eq!(shallow.shallow_size_bytes, 2 + 1);
+    assert_eq!(shallow.session_count, full.session_count);
+    assert_eq!(shallow.memory_file_count, full.memory_file_count);
+    assert!(shallow.has_subdirs);
+}
+
+#[test]
+fn listing_with_a_nested_cache_matches_listing_without_one() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg = tmp.path();
+    for slug in ["-repo-one", "-repo-two"] {
+        let dir = cfg.join("projects").join(slug);
+        fs::create_dir_all(dir.join("abc").join("subagents")).unwrap();
+        fs::write(dir.join("s1.jsonl"), "hello").unwrap();
+        fs::write(dir.join("abc").join("subagents").join("n.jsonl"), "nested!").unwrap();
+    }
+
+    let uncached = list_projects(cfg).unwrap();
+    let nested = scan_nested_by_slug(cfg).unwrap();
+    let cached = list_projects_cached(
+        cfg,
+        &ListProjectsCache {
+            cwds: None,
+            nested: Some(&nested),
+        },
+    )
+    .unwrap();
+
+    assert_eq!(uncached.len(), 2);
+    assert_eq!(format!("{uncached:?}"), format!("{cached:?}"));
+    assert!(
+        uncached[0].total_size_bytes >= 5 + 6,
+        "nested bytes must be included: {:?}",
+        uncached[0]
+    );
+}
+
+#[test]
+fn a_project_holding_only_a_subdirectory_is_not_empty() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("projects").join("-repo-one");
+    // No transcripts, no memory files — just a leftover session folder.
+    // The old test summed the subtree's bytes and called a dir with an
+    // empty subtree "empty", which offers it to project cleanup.
+    fs::create_dir_all(dir.join("abc").join("subagents")).unwrap();
+
+    let projects = list_projects(tmp.path()).unwrap();
+    assert_eq!(projects.len(), 1);
+    assert!(
+        !projects[0].is_empty,
+        "a dir with a leftover session folder must not be offered as empty"
+    );
+}
+
+#[test]
+fn a_genuinely_bare_project_dir_is_still_empty() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(tmp.path().join("projects").join("-repo-one")).unwrap();
+    let projects = list_projects(tmp.path()).unwrap();
+    assert_eq!(projects.len(), 1);
+    assert!(projects[0].is_empty, "nothing in it at all is still empty");
+}

@@ -288,17 +288,32 @@ impl From<&claudepot_core::session::SessionEvent> for SessionEventDto {
     }
 }
 
+/// One transcript, as the Sessions viewer needs it.
+///
+/// **`chunks` rides along with `events` on purpose.** They are two
+/// views of one parse, and shipping them as two commands meant the
+/// renderer opened the same `.jsonl` twice — each open costing a full
+/// parse of the file, on top of the second parse each command paid
+/// internally. Four parses of a 181 MB transcript to draw one
+/// conversation. Chunking is a pure function of `events`, so the only
+/// thing the second command bought was the extra I/O.
 #[derive(Serialize)]
 pub struct SessionDetailDto {
     pub row: SessionRowDto,
     pub events: Vec<SessionEventDto>,
+    pub chunks: Vec<crate::dto::SessionChunkDto>,
 }
 
 impl From<&claudepot_core::session::SessionDetail> for SessionDetailDto {
     fn from(d: &claudepot_core::session::SessionDetail) -> Self {
+        let chunks = claudepot_core::session_chunks::build_chunks(&d.events);
         Self {
             row: SessionRowDto::from(&d.row),
             events: d.events.iter().map(SessionEventDto::from).collect(),
+            chunks: chunks
+                .iter()
+                .map(crate::dto::SessionChunkDto::from)
+                .collect(),
         }
     }
 }

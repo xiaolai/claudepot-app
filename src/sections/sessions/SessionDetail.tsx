@@ -28,7 +28,6 @@ import {
   chunkMatchesSearch,
   classifyMetaMatch,
   eventMatchesSearch,
-  isUnknownCommandError,
   normalizeDetailQuery,
 } from "./sessionDetail.search";
 
@@ -100,27 +99,24 @@ export function SessionDetail({
     const myToken = ++tokenRef.current;
     setLoading(true);
     setError(null);
-    // Fetch detail + chunks in parallel. Both open the same JSONL, so
-    // this doubles IO; the cheapest shared-state fix is to do both here
-    // rather than chain them, and to rely on the OS page cache for the
-    // second open — typical sessions are <1 MB.
+    // ONE call. This used to be a `Promise.all` of `sessionReadPath`
+    // and `sessionChunks`, whose comment argued the second open was
+    // cheap because "typical sessions are <1 MB" — on a real machine
+    // 375 transcripts here are over 1 MB, 100 over 10 MB and the
+    // largest is 181 MB. Each command opened and parsed the whole file,
+    // and each parsed it twice internally, so drawing one conversation
+    // cost four full parses. Chunks are a pure function of the events,
+    // so they now ride back on the same response.
     //
-    // Chunks may legitimately fail on an older Tauri binary that
-    // doesn't ship the `session_chunks` command. We distinguish that
-    // compatibility case (the invoke error mentions an unknown command
-    // or missing handler) from real failures. Everything else is
-    // surfaced so we don't silently hide debugger breakage.
-    Promise.all([
-      api.sessionReadPath(filePath),
-      api.sessionChunks(filePath).catch((e: unknown) => {
-        if (isUnknownCommandError(e)) return null;
-        throw e;
-      }),
-    ])
-      .then(([d, c]) => {
+    // A Tauri binary older than the `chunks` field omits it; `?? null`
+    // then puts the viewer in raw-event mode, which is exactly what the
+    // old unknown-command fallback did.
+    api
+      .sessionReadPath(filePath)
+      .then((d) => {
         if (myToken !== tokenRef.current) return;
         setDetail(d);
-        setChunks(c);
+        setChunks(d.chunks ?? null);
         setLoading(false);
       })
       .catch((e) => {

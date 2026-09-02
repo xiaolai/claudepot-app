@@ -272,6 +272,7 @@ fn relative_when(unix_secs: u64) -> String {
 pub async fn local_usage_aggregate(
     spec: WindowSpec,
     prefs: State<'_, PreferencesState>,
+    index: State<'_, crate::commands::shared_memory::SharedMemoryIndex>,
 ) -> Result<LocalUsageReportDto, ErrorDto> {
     let now_ms = chrono::Utc::now().timestamp_millis();
     let window = spec.into_time_window(now_ms)?;
@@ -281,9 +282,20 @@ pub async fn local_usage_aggregate(
     };
     let tier_str = tier.as_str().to_string();
 
+    // Shared index handle — see the module header on
+    // `commands::session_index` for why this must not open its own.
+    // The Projects tab fires this on every mount alongside
+    // `project_list`, so an open-per-call here took the write lock in
+    // parallel with everything else touching `sessions.db`.
+    let index = index.0.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let config_dir = claudepot_core::paths::claude_config_dir();
-        let sessions = list_all_sessions(&config_dir)?;
+        let sessions = match &index {
+            Some(idx) => idx.list_all(&config_dir).map_err(|e| {
+                ErrorDto::from(claudepot_core::session::SessionError::Index(e.to_string()))
+            })?,
+            None => list_all_sessions(&config_dir)?,
+        };
         let bundled = pricing::load();
         let table = bundled.with_tier(tier);
         let pricing_source = format_pricing_source(&table);

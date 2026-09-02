@@ -31,6 +31,33 @@ pub(super) struct WalkOutcome {
 /// IndexTuple)` triples. The triple layout lets the refresh path feed the
 /// pure diff fn without re-walking to recover the slug later.
 pub(super) fn walk_fs(config_dir: &Path) -> Result<WalkOutcome, SessionIndexError> {
+    walk_fs_scoped(config_dir, None)
+}
+
+/// `walk_fs` restricted to a single project slug.
+///
+/// A per-project consumer (`SessionIndex::list_by_slug`) needs the
+/// tuples of one directory, and walking the whole corpus to get them
+/// costs a `stat` per transcript on the install — 2,585 of them on the
+/// reference machine, for a directory holding a handful. The scoped
+/// walk is paired with `load_db_tuples_for_slug` so both sides of the
+/// diff cover exactly the same set: scoping only one side would make
+/// every unwalked row look deleted.
+///
+/// A slug that does not exist on disk yields an empty entry list rather
+/// than an error — that is the correct input to the diff, which then
+/// deletes whatever the cache still holds for it.
+pub(super) fn walk_fs_slug(
+    config_dir: &Path,
+    slug: &str,
+) -> Result<WalkOutcome, SessionIndexError> {
+    walk_fs_scoped(config_dir, Some(slug))
+}
+
+fn walk_fs_scoped(
+    config_dir: &Path,
+    only_slug: Option<&str>,
+) -> Result<WalkOutcome, SessionIndexError> {
     let projects_dir = config_dir.join("projects");
     if !projects_dir.exists() {
         return Ok(WalkOutcome {
@@ -46,6 +73,9 @@ pub(super) fn walk_fs(config_dir: &Path) -> Result<WalkOutcome, SessionIndexErro
             continue;
         }
         let slug = slug_entry.file_name().to_string_lossy().into_owned();
+        if only_slug.is_some_and(|want| want != slug) {
+            continue;
+        }
         for session_entry in fs::read_dir(slug_entry.path())? {
             let session_entry = session_entry?;
             let name = session_entry.file_name().to_string_lossy().into_owned();
@@ -110,15 +140,32 @@ pub(super) fn load_db_tuples(db: &Connection) -> Result<Vec<IndexTuple>, Session
         "SELECT file_path, file_size_bytes, file_mtime_ns, file_inode \
          FROM sessions WHERE source_kind = 'claude_code'",
     )?;
-    let rows = stmt.query_map([], |r| {
-        Ok(IndexTuple {
-            file_path: r.get::<_, String>(0)?,
-            size: u64::try_from(r.get::<_, i64>(1)?).unwrap_or(0),
-            mtime_ns: r.get::<_, i64>(2)?,
-            inode: u64::try_from(r.get::<_, i64>(3)?).unwrap_or(0),
-        })
-    })?;
+    let rows = stmt.query_map([], tuple_from_row)?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+/// `load_db_tuples` restricted to one slug — the cache-side companion
+/// to `walk_fs_slug`. The `source_kind` filter carries the same
+/// load-bearing meaning documented above.
+pub(super) fn load_db_tuples_for_slug(
+    db: &Connection,
+    slug: &str,
+) -> Result<Vec<IndexTuple>, SessionIndexError> {
+    let mut stmt = db.prepare(
+        "SELECT file_path, file_size_bytes, file_mtime_ns, file_inode \
+         FROM sessions WHERE source_kind = 'claude_code' AND slug = ?1",
+    )?;
+    let rows = stmt.query_map([slug], tuple_from_row)?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+fn tuple_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<IndexTuple> {
+    Ok(IndexTuple {
+        file_path: r.get::<_, String>(0)?,
+        size: u64::try_from(r.get::<_, i64>(1)?).unwrap_or(0),
+        mtime_ns: r.get::<_, i64>(2)?,
+        inode: u64::try_from(r.get::<_, i64>(3)?).unwrap_or(0),
+    })
 }
 
 /// Full UPSERT. `indexed_at_ms` is passed in so a single refresh pass

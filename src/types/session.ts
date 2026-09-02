@@ -191,6 +191,14 @@ export type SessionEvent =
 export interface SessionDetail {
   row: SessionRow;
   events: SessionEvent[];
+  /**
+   * Chunked view of `events`, built server-side from the same parse.
+   *
+   * Optional because a Tauri binary older than this field simply omits
+   * it — the viewer then falls back to raw-event mode, exactly as it
+   * did when chunks were a separate command that could be missing.
+   */
+  chunks?: SessionChunk[];
 }
 
 // ---------------------------------------------------------------------------

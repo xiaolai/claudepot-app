@@ -41,6 +41,15 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use crate::artifact_usage::{model::UsageEvent, store as usage_store};
+
+/// How long a raw `usage_event` row is kept before the GC evicts it.
+/// The per-day rollup in `usage_daily` is unaffected and survives.
+const USAGE_EVENT_TTL_MS: i64 = 30 * 86_400_000;
+
+/// Minimum gap between two runs of the raw-`usage_event` GC. See the
+/// call site in `refresh_scoped` for why this is rate-limited rather
+/// than run every pass.
+const USAGE_GC_INTERVAL_MS: i64 = 86_400_000;
 use crate::db_pragmas::apply_standard_pragmas;
 use crate::session::{scan_session, SessionRow, TurnRecord};
 
@@ -150,11 +159,38 @@ impl SessionIndex {
         // sidecars don't exist yet and later writes create them with
         // the process umask (typically 0644) — leaking prompt text
         // and token totals to other local users.
-        db.execute_batch(
-            "BEGIN IMMEDIATE; INSERT OR IGNORE INTO meta (k, v) VALUES ('_touch','1'); \
-             DELETE FROM meta WHERE k='_touch'; COMMIT;",
-        )?;
+        //
+        // **Only when they are actually missing.** This is a write
+        // transaction, and running it unconditionally meant *opening*
+        // the index took the database's write lock — so any read, from
+        // any process, could sit on the 5 s `busy_timeout` behind an
+        // unrelated writer and then fail with "database is locked"
+        // before it had read anything. Measured against the live
+        // 1.5 GB database with a writer holding `BEGIN IMMEDIATE`: 6.30 s,
+        // then failure, from `claudepot usage report`.
+        //
+        // The skip is safe precisely in the contended case. In WAL mode
+        // the sidecars exist for as long as any connection is open, so
+        // "another process holds the lock" implies "the sidecars are
+        // already there" — nothing to materialize. When they are
+        // genuinely absent no one has the database open, so the touch
+        // takes an uncontended lock and the chmod that follows still
+        // runs on freshly created files.
+        if !Self::sidecars_present(path) {
+            db.execute_batch(
+                "BEGIN IMMEDIATE; INSERT OR IGNORE INTO meta (k, v) VALUES ('_touch','1'); \
+                 DELETE FROM meta WHERE k='_touch'; COMMIT;",
+            )?;
+        }
         Ok(db)
+    }
+
+    /// Do both WAL sidecars already exist beside `path`?
+    ///
+    /// Mirrors the pair the `open()` chmod loop narrows, so the two
+    /// cannot disagree about which files are meant.
+    fn sidecars_present(path: &Path) -> bool {
+        path.with_extension("db-wal").exists() && path.with_extension("db-shm").exists()
     }
 
     /// Internal accessor. Kept `pub(crate)` so sibling helpers (the
@@ -168,6 +204,27 @@ impl SessionIndex {
     /// make the previous `.expect(...)` a hard violation.
     pub(crate) fn db(&self) -> MutexGuard<'_, Connection> {
         crate::sync::recover_lock(&self.db, "session_index")
+    }
+
+    /// Has the raw-`usage_event` GC gone longer than
+    /// `USAGE_GC_INTERVAL_MS` without running?
+    ///
+    /// A read-only `meta` probe — deliberately cheap, because it sits
+    /// on the path of every refresh including the ones that would
+    /// otherwise take no lock at all. A missing or unparseable mark
+    /// reads as "due", so the first refresh after an upgrade runs the
+    /// GC once and records the stamp.
+    fn usage_gc_due(&self, now_ms: i64) -> Result<bool, SessionIndexError> {
+        let db = self.db();
+        let last: Option<String> = db
+            .query_row("SELECT v FROM meta WHERE k = 'last_usage_gc_ms'", [], |r| {
+                r.get(0)
+            })
+            .ok();
+        Ok(match last.as_deref().and_then(|v| v.parse::<i64>().ok()) {
+            Some(prev) => now_ms.saturating_sub(prev) >= USAGE_GC_INTERVAL_MS,
+            None => true,
+        })
     }
 
     /// Return the stored `meta.schema_version`. Primarily a test hook
@@ -260,14 +317,47 @@ impl SessionIndex {
     /// string so callers can surface partial degradation instead of
     /// masquerading a broken transcript as a clean refresh.
     pub fn refresh(&self, config_dir: &Path) -> Result<RefreshStats, SessionIndexError> {
+        self.refresh_scoped(config_dir, None)
+    }
+
+    /// `refresh` restricted to one project slug.
+    ///
+    /// `list_by_slug`'s consumer — ProjectDetail's session pane — asks
+    /// about one directory, and the full refresh it used to run cost a
+    /// `stat` per transcript on the whole install (2,585 on the
+    /// reference machine) to answer it. Both sides of the diff are
+    /// scoped together, so the delete half stays correct: rows outside
+    /// the slug are neither walked nor considered missing.
+    ///
+    /// `total_on_disk` in the returned stats is therefore this slug's
+    /// count, not the install's.
+    pub fn refresh_slug(
+        &self,
+        config_dir: &Path,
+        slug: &str,
+    ) -> Result<RefreshStats, SessionIndexError> {
+        self.refresh_scoped(config_dir, Some(slug))
+    }
+
+    fn refresh_scoped(
+        &self,
+        config_dir: &Path,
+        only_slug: Option<&str>,
+    ) -> Result<RefreshStats, SessionIndexError> {
         let started_at = std::time::Instant::now();
-        let walk = codec::walk_fs(config_dir)?;
+        let walk = match only_slug {
+            Some(slug) => codec::walk_fs_slug(config_dir, slug)?,
+            None => codec::walk_fs(config_dir)?,
+        };
 
         // Snapshot the DB side of the diff under a short-lived lock
         // so the rayon scan that follows runs without holding it.
         let db_tuples = {
             let db = self.db();
-            codec::load_db_tuples(&db)?
+            match only_slug {
+                Some(slug) => codec::load_db_tuples_for_slug(&db, slug)?,
+                None => codec::load_db_tuples(&db)?,
+            }
         };
 
         let fs_tuples: Vec<diff::IndexTuple> =
@@ -324,13 +414,37 @@ impl SessionIndex {
 
         // Single write transaction: upserts + deletes (sessions table)
         // plus usage_event delete-and-reinsert (per re-scanned file).
-        // GC of stale raw events runs in the same transaction so a
-        // single refresh leaves the cache fully consistent.
+        //
+        // **A refresh with nothing to apply opens no transaction at
+        // all.** Every read entry point (`list_all`, `list_by_slug`)
+        // calls refresh first, and the steady state — the common case,
+        // since the guard is `(size, mtime_ns, inode)` — has an empty
+        // plan. Taking the write lock anyway made a *read* of the index
+        // contend with every other writer: `busy_timeout` is 5 s, so a
+        // reader could block for five seconds and then fail with
+        // "database is locked" while having nothing to write. The GC
+        // below was what made the transaction unconditional, which is
+        // why it now runs on its own schedule.
         let indexed_at_ms = Utc::now().timestamp_millis();
-        let usage_cutoff_ms = indexed_at_ms - 30 * 86_400_000;
         let scanned_count = scanned.len();
         let deleted_count = plan.to_delete.len();
         let mut usage_events_written = 0usize;
+        let gc_due = self.usage_gc_due(indexed_at_ms)?;
+        if scanned_count == 0 && deleted_count == 0 && !gc_due {
+            let elapsed = started_at.elapsed();
+            tracing::debug!(
+                total_on_disk = walk.entries.len(),
+                elapsed_ms = elapsed.as_millis() as u64,
+                "session_index: refresh no-op (no write lock taken)"
+            );
+            return Ok(RefreshStats {
+                scanned: 0,
+                deleted: 0,
+                total_on_disk: walk.entries.len(),
+                failed,
+                elapsed,
+            });
+        }
         {
             let mut db = self.db();
             let tx = db.transaction()?;
@@ -361,7 +475,21 @@ impl SessionIndex {
             }
             // GC raw events older than 30 days. The daily rollup is
             // unaffected; counters survive eviction.
-            usage_store::gc_events_older_than(&tx, usage_cutoff_ms)?;
+            //
+            // Rate-limited to once per `USAGE_GC_INTERVAL_MS` rather
+            // than run on every pass. The bound it enforces is a
+            // retention floor, not a precise horizon, so running it
+            // daily keeps at most one extra day of raw events — and in
+            // exchange a refresh that has nothing else to do needs no
+            // write transaction at all.
+            if gc_due {
+                usage_store::gc_events_older_than(&tx, indexed_at_ms - USAGE_EVENT_TTL_MS)?;
+                tx.execute(
+                    "INSERT INTO meta (k, v) VALUES ('last_usage_gc_ms', ?1) \
+                     ON CONFLICT(k) DO UPDATE SET v = excluded.v",
+                    params![indexed_at_ms.to_string()],
+                )?;
+            }
             tx.commit()?;
         }
 
@@ -433,17 +561,20 @@ impl SessionIndex {
         Ok(out)
     }
 
-    /// Refresh the cache against `config_dir` and return only the rows
-    /// whose `slug` matches, newest-first. Same freshness contract as
-    /// `list_all`, but the read is a single indexed `WHERE slug = ?`
+    /// Refresh this slug's transcripts and return only its rows,
+    /// newest-first. The read is a single indexed `WHERE slug = ?`
     /// query — per-project consumers (ProjectDetail's session pane)
     /// avoid deserializing the whole cross-project index.
+    ///
+    /// The refresh is scoped to the same slug (`refresh_slug`), so
+    /// opening a project no longer stats every transcript on the
+    /// install to answer a question about one directory.
     pub fn list_by_slug(
         &self,
         config_dir: &Path,
         slug: &str,
     ) -> Result<Vec<SessionRow>, SessionIndexError> {
-        self.refresh(config_dir)?;
+        self.refresh_slug(config_dir, slug)?;
         let db = self.db();
         codec::load_rows_by_slug(&db, slug)
     }
@@ -986,6 +1117,192 @@ mod tests {
     fn turns_for(idx: &SessionIndex, file_path: &str) -> Vec<TurnRecord> {
         let db = idx.db();
         turns::load_turns(&db, file_path).unwrap()
+    }
+
+    /// Opening the index must not re-materialize the WAL sidecars when
+    /// they are already there.
+    ///
+    /// `init_connection`'s touch is a `BEGIN IMMEDIATE` write whose only
+    /// job is to create `-wal` / `-shm` so `open()` can chmod them to
+    /// 0600. Running it unconditionally meant every open took the write
+    /// lock for a pair of files that, in the contended case, already
+    /// exist — in WAL mode the sidecars live for as long as any
+    /// connection is open, so "someone else holds the lock" implies
+    /// "the sidecars are there".
+    ///
+    /// Note this does NOT make a cold open lock-free: `apply_schema`
+    /// still begins `IMMEDIATE`, deliberately, because it honours the
+    /// `_pending_rescan` marker and runs post-write validation on every
+    /// open. The GUI pays that once at startup via the shared handle
+    /// rather than per command.
+    #[test]
+    fn open_does_not_retouch_existing_wal_sidecars() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("sessions.db");
+        let first = SessionIndex::open(&path).unwrap();
+
+        assert!(
+            SessionIndex::sidecars_present(&path),
+            "an open connection must have materialized both sidecars"
+        );
+
+        // With the sidecars present the touch is skipped, so a second
+        // open performs no write of its own beyond `apply_schema`.
+        let second = SessionIndex::open(&path).expect("second open");
+        assert_eq!(
+            second.schema_version().unwrap().as_deref(),
+            Some(crate::artifact_usage::schema::SCHEMA_VERSION)
+        );
+        drop(first);
+        drop(second);
+
+        // Once every connection is closed SQLite removes them, and the
+        // next open must materialize them again — otherwise the chmod
+        // in `open()` would have nothing to narrow.
+        assert!(
+            !SessionIndex::sidecars_present(&path),
+            "sidecars should be gone after the last connection closes"
+        );
+        let third = SessionIndex::open(&path).unwrap();
+        assert!(
+            SessionIndex::sidecars_present(&path),
+            "a cold open must still create the sidecars"
+        );
+        drop(third);
+    }
+
+    /// The regression this whole change exists for: a refresh with
+    /// nothing to apply must not need the write lock.
+    ///
+    /// A second connection holds `BEGIN IMMEDIATE` — the shape of any
+    /// concurrent writer (the GUI's 5-minute tick, the activity metrics
+    /// store, a second Claudepot surface). Before the fix the no-op
+    /// refresh opened a transaction anyway, blocked for the full 5 s
+    /// `busy_timeout`, and then failed with "database is locked" while
+    /// having nothing whatsoever to write.
+    #[test]
+    fn noop_refresh_does_not_need_the_write_lock() {
+        let (idx, tmp) = open_index();
+        let cfg = tmp.path().join("cc");
+        write_session(&cfg, "slug-a", "s1", &sample_lines("/tmp/a", "s1"));
+
+        // First pass does real work and records the GC stamp.
+        idx.refresh(&cfg).unwrap();
+
+        let blocker = Connection::open(tmp.path().join("sessions.db")).unwrap();
+        crate::db_pragmas::apply_standard_pragmas(&blocker).unwrap();
+        blocker.execute_batch("BEGIN IMMEDIATE;").unwrap();
+
+        let started = std::time::Instant::now();
+        let stats = idx
+            .refresh(&cfg)
+            .expect("no-op refresh must not touch the write lock");
+        let waited = started.elapsed();
+
+        blocker.execute_batch("ROLLBACK;").unwrap();
+
+        assert_eq!(stats.scanned, 0);
+        assert_eq!(stats.deleted, 0);
+        assert_eq!(stats.total_on_disk, 1);
+        assert!(
+            waited < std::time::Duration::from_secs(1),
+            "no-op refresh waited {waited:?} — it took the write lock"
+        );
+    }
+
+    /// The other half: a refresh that *does* have work still applies it.
+    /// Without this the test above would pass against a `refresh` that
+    /// had been broken into doing nothing at all.
+    #[test]
+    fn refresh_with_work_still_writes() {
+        let (idx, tmp) = open_index();
+        let cfg = tmp.path().join("cc");
+        write_session(&cfg, "slug-a", "s1", &sample_lines("/tmp/a", "s1"));
+        assert_eq!(idx.refresh(&cfg).unwrap().scanned, 1);
+        assert_eq!(idx.row_count().unwrap(), 1);
+
+        write_session(&cfg, "slug-a", "s2", &sample_lines("/tmp/a", "s2"));
+        assert_eq!(idx.refresh(&cfg).unwrap().scanned, 1);
+        assert_eq!(idx.row_count().unwrap(), 2);
+    }
+
+    /// A slug-scoped refresh must scope BOTH sides of the diff. Scoping
+    /// only the walk would make every unwalked cached row look deleted
+    /// and cascade the rest of the index away.
+    #[test]
+    fn refresh_slug_leaves_other_slugs_alone() {
+        let (idx, tmp) = open_index();
+        let cfg = tmp.path().join("cc");
+        let a = write_session(&cfg, "slug-a", "s1", &sample_lines("/tmp/a", "s1"));
+        write_session(&cfg, "slug-b", "s2", &sample_lines("/tmp/b", "s2"));
+        idx.refresh(&cfg).unwrap();
+        assert_eq!(idx.row_count().unwrap(), 2);
+
+        // Delete slug-a's transcript, then refresh only slug-b.
+        std::fs::remove_file(&a).unwrap();
+        let stats = idx.refresh_slug(&cfg, "slug-b").unwrap();
+        assert_eq!(stats.deleted, 0, "slug-b refresh must not prune slug-a");
+        assert_eq!(stats.total_on_disk, 1, "scoped walk sees only its own slug");
+        assert_eq!(idx.row_count().unwrap(), 2);
+
+        // Refreshing slug-a itself does prune it.
+        let stats = idx.refresh_slug(&cfg, "slug-a").unwrap();
+        assert_eq!(stats.deleted, 1);
+        assert_eq!(idx.row_count().unwrap(), 1);
+    }
+
+    /// A scoped refresh still picks up new files in its own slug.
+    #[test]
+    fn refresh_slug_indexes_its_own_new_files() {
+        let (idx, tmp) = open_index();
+        let cfg = tmp.path().join("cc");
+        write_session(&cfg, "slug-a", "s1", &sample_lines("/tmp/a", "s1"));
+        write_session(&cfg, "slug-b", "s2", &sample_lines("/tmp/b", "s2"));
+
+        let stats = idx.refresh_slug(&cfg, "slug-a").unwrap();
+        assert_eq!(stats.scanned, 1);
+        assert_eq!(idx.row_count().unwrap(), 1, "only slug-a was indexed");
+
+        let rows = idx.list_by_slug(&cfg, "slug-b").unwrap();
+        assert_eq!(rows.len(), 1, "list_by_slug refreshes its own slug");
+    }
+
+    /// The GC stamp is what lets a no-op refresh skip the transaction,
+    /// so it must actually be recorded and then respected.
+    #[test]
+    fn usage_gc_runs_once_per_interval() {
+        let (idx, tmp) = open_index();
+        let cfg = tmp.path().join("cc");
+        write_session(&cfg, "slug-a", "s1", &sample_lines("/tmp/a", "s1"));
+
+        assert!(
+            idx.usage_gc_due(Utc::now().timestamp_millis()).unwrap(),
+            "no stamp yet => due"
+        );
+        idx.refresh(&cfg).unwrap();
+
+        // Read the stamp the refresh actually wrote rather than
+        // assuming it equals a `now` captured beforehand — the refresh
+        // takes milliseconds, so comparing against the earlier instant
+        // made this assertion depend on how fast the machine was.
+        let stamp: i64 = {
+            let db = idx.db();
+            db.query_row("SELECT v FROM meta WHERE k = 'last_usage_gc_ms'", [], |r| {
+                r.get::<_, String>(0)
+            })
+            .unwrap()
+            .parse()
+            .unwrap()
+        };
+        assert!(!idx.usage_gc_due(stamp).unwrap(), "just ran => not due");
+        assert!(
+            !idx.usage_gc_due(stamp + USAGE_GC_INTERVAL_MS - 1).unwrap(),
+            "one ms short of the interval => still not due"
+        );
+        assert!(
+            idx.usage_gc_due(stamp + USAGE_GC_INTERVAL_MS).unwrap(),
+            "due again exactly at the interval"
+        );
     }
 
     #[test]

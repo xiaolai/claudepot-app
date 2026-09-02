@@ -385,9 +385,15 @@ pub fn read_session_detail(
     session_id: &str,
 ) -> Result<SessionDetail, SessionError> {
     let (slug, path) = locate_session(config_dir, session_id)?;
-    let row = scan_session(&slug, &path)?.row;
-    let events = parse_events(&path)?;
-    Ok(SessionDetail { row, events })
+    // One pass — same reason as `read_session_detail_at_path`. Both
+    // entry points build the same `SessionDetail`, so fixing only the
+    // one the GUI happens to prefer would leave the other reading every
+    // transcript twice.
+    let (scan, events) = scan_session_with_events(&slug, &path)?;
+    Ok(SessionDetail {
+        row: scan.row,
+        events,
+    })
 }
 
 /// Read a specific transcript file by absolute path. Used by the GUI
@@ -426,9 +432,14 @@ pub fn read_session_detail_at_path(
         .and_then(|p| p.file_name())
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
-    let row = scan_session(&slug, &canonical_file)?.row;
-    let events = parse_events(&canonical_file)?;
-    Ok(SessionDetail { row, events })
+    // One pass: the row fold and the event fold share a single parse
+    // of each line. Reading the file twice here was half the cost of
+    // opening a transcript in the GUI.
+    let (scan, events) = scan_session_with_events(&slug, &canonical_file)?;
+    Ok(SessionDetail {
+        row: scan.row,
+        events,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -542,6 +553,28 @@ fn content_has_tool_error(line: &Value) -> bool {
 /// Exposed to `session_index` so the persistent cache can reuse the
 /// same JSONL-folding logic without copy-pasting the match tree.
 pub(crate) fn scan_session(slug: &str, path: &Path) -> Result<SessionScan, SessionError> {
+    scan_session_inner(slug, path, false).map(|(scan, _)| scan)
+}
+
+/// `scan_session` plus the full event list, folded in the SAME pass.
+///
+/// The row and the event stream are two folds over the same lines, and
+/// running them separately meant parsing every line twice. This drives
+/// both from one `serde_json::from_str`, so a caller that needs both —
+/// `read_session_detail_at_path`, and therefore every transcript the
+/// GUI opens — pays for one parse instead of two.
+pub(crate) fn scan_session_with_events(
+    slug: &str,
+    path: &Path,
+) -> Result<(SessionScan, Vec<SessionEvent>), SessionError> {
+    scan_session_inner(slug, path, true)
+}
+
+fn scan_session_inner(
+    slug: &str,
+    path: &Path,
+    collect_events: bool,
+) -> Result<(SessionScan, Vec<SessionEvent>), SessionError> {
     let meta = fs::metadata(path)?;
     let file = fs::File::open(path)?;
     let reader = BufReader::new(file);
@@ -583,19 +616,48 @@ pub(crate) fn scan_session(slug: &str, path: &Path) -> Result<SessionScan, Sessi
     let mut last_user_prompt: Option<String> = None;
     let mut assistant_ordinal: usize = 0;
 
-    for line in reader.lines() {
+    // `events` stays empty unless the caller asked for it, so the
+    // row-only path (the session index's refresh) allocates nothing
+    // extra. Line numbering is 1-based over ALL lines including blanks,
+    // matching what the standalone `parse_events` produced.
+    let mut events: Vec<SessionEvent> = Vec::new();
+
+    for (idx, line) in reader.lines().enumerate() {
+        let line_number = idx + 1;
         let line = match line {
             Ok(l) => l,
-            Err(_) => continue,
+            Err(e) => {
+                if collect_events {
+                    events.push(SessionEvent::Malformed {
+                        line_number,
+                        error: e.to_string(),
+                        preview: String::new(),
+                    });
+                }
+                continue;
+            }
         };
         if line.trim().is_empty() {
             continue;
         }
         event_count += 1;
 
-        let Ok(v) = serde_json::from_str::<Value>(&line) else {
-            continue;
+        let v = match serde_json::from_str::<Value>(&line) {
+            Ok(v) => v,
+            Err(e) => {
+                if collect_events {
+                    events.push(SessionEvent::Malformed {
+                        line_number,
+                        error: e.to_string(),
+                        preview: truncate_prompt(&line),
+                    });
+                }
+                continue;
+            }
         };
+        if collect_events {
+            emit_events_from_value(&mut events, &v);
+        }
 
         // Extract usage events from this line. Agent events come
         // through a paired API so we capture each tool_use.id at
@@ -783,11 +845,14 @@ pub(crate) fn scan_session(slug: &str, path: &Path) -> Result<SessionScan, Sessi
         has_error,
         is_sidechain: any_sidechain,
     };
-    Ok(SessionScan {
-        row,
-        usage: usage_events,
-        turns,
-    })
+    Ok((
+        SessionScan {
+            row,
+            usage: usage_events,
+            turns,
+        },
+        events,
+    ))
 }
 
 /// Parse a line's timestamp into ms-since-epoch for the usage
@@ -933,7 +998,20 @@ pub(crate) fn parse_line_into(out: &mut Vec<SessionEvent>, line: &str, line_numb
             return;
         }
     };
+    emit_events_from_value(out, &v);
+}
 
+/// The event-emitting half of `parse_line_into`, taking a line that has
+/// already been parsed to a `Value`.
+///
+/// Split out so `scan_session` can drive both folds from ONE
+/// `serde_json::from_str` per line. Before this, opening a transcript
+/// in the GUI parsed the file four times — `read_session_detail_at_path`
+/// called `scan_session` (parse 1) and `parse_events` (parse 2), and
+/// `session_chunks` called the same function again (parses 3 and 4).
+/// On a 181 MB transcript that is ~720 MB of JSON parsing to show one
+/// conversation.
+pub(crate) fn emit_events_from_value(out: &mut Vec<SessionEvent>, v: &Value) {
     let ts = v
         .get("timestamp")
         .and_then(Value::as_str)
@@ -943,8 +1021,8 @@ pub(crate) fn parse_line_into(out: &mut Vec<SessionEvent>, line: &str, line_numb
 
     let event_type = v.get("type").and_then(Value::as_str).unwrap_or("");
     match event_type {
-        "user" => emit_user_events(out, &v, ts, uuid),
-        "assistant" => emit_assistant_events(out, &v, ts, uuid),
+        "user" => emit_user_events(out, v, ts, uuid),
+        "assistant" => emit_assistant_events(out, v, ts, uuid),
         "summary" => {
             let text = v
                 .get("summary")

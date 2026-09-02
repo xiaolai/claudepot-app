@@ -56,6 +56,7 @@ mod permission_orchestrator;
 mod poller;
 mod pr_orchestrator;
 mod preferences;
+mod project_size_cache;
 mod remote_server;
 mod retention_boot_check;
 mod rotation_orchestrator;
@@ -1049,6 +1050,11 @@ pub fn run() {
         shared_memory_index,
     ));
 
+    // Nested-directory size cache behind `project_list`. Starts empty;
+    // the first listing fills it. See `project_size_cache` for why this
+    // is in memory and why only the nested half is cached.
+    builder = builder.manage(crate::project_size_cache::ProjectSizeCache::new());
+
     // Memory change-log state. Always managed — `memory_log` is now
     // unconditionally `Arc<MemoryLog>` per audit 2026-05 #2.
     builder = builder.manage(commands::memory::MemoryLogState::new(memory_log.clone()));
@@ -1155,7 +1161,6 @@ pub fn run() {
             commands::session_index::session_read,
             commands::session_index::session_read_path,
             commands::session_index::session_index_rebuild,
-            commands::session_index::session_chunks,
             commands::session_index::session_context_attribution,
             commands::session_index::session_export_to_file,
             commands::session_index::session_search,
