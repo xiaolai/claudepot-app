@@ -76,10 +76,13 @@ describe("UpdatesPanel channel row", () => {
   it("names an untracked channel instead of lighting a button for it", async () => {
     updatesStatusGetSpy.mockResolvedValue(status("rc", null));
     render(<UpdatesPanel />);
-    await waitFor(() => expect(updatesStatusGetSpy).toHaveBeenCalled());
 
-    // The value CC actually holds is on screen.
-    expect(screen.getByText("rc")).toBeInTheDocument();
+    // Wait for the RENDER, not for the fetch: the spy resolving does
+    // not mean React has committed the state it resolved to. Asserting
+    // synchronously after `waitFor(spy called)` passed alone and failed
+    // once in the full parallel run, where the commit landed a tick
+    // later. `findByText` waits for the thing the assertion is about.
+    expect(await screen.findByText("rc")).toBeInTheDocument();
 
     // And neither switchable channel claims to be the active one —
     // this is the assertion that fails against the old coercion.
@@ -92,11 +95,13 @@ describe("UpdatesPanel channel row", () => {
   it("still marks the active channel when it is one we track", async () => {
     updatesStatusGetSpy.mockResolvedValue(status("stable", "2.1.231"));
     render(<UpdatesPanel />);
-    await waitFor(() => expect(updatesStatusGetSpy).toHaveBeenCalled());
 
-    expect(
-      screen.getByRole("button", { name: "stable" }).getAttribute("aria-pressed"),
-    ).toBe("true");
+    // Same race as above: wait for the pressed state itself.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "stable" }).getAttribute("aria-pressed"),
+      ).toBe("true"),
+    );
     expect(
       screen.getByRole("button", { name: "latest" }).getAttribute("aria-pressed"),
     ).not.toBe("true");
