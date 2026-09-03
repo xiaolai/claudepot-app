@@ -61,11 +61,18 @@ const SHOTS = [
   { file: "keys.png", nav: "Keys", settle: "KEYS" },
   { file: "third-parties.png", nav: "Providers", settle: "PROVIDERS" },
   { file: "automations.png", nav: "Agents", settle: "AGENTS" },
-  // settle on "Config home" (tab CONTENT), never "Config" (the tab
-  // BUTTON): the button is present whichever tab is active, so the
-  // weaker string matched instantly and captured whatever sub-tab the
-  // app happened to remember — the exact race settling exists to stop.
-  { file: "global.png", nav: "Global", tab: "Config", settle: "Config home" },
+  // The section is labelled "Config" in the sidebar and its first
+  // sub-tab "Files" (`shell:sections.config`, `global:tabs.config`);
+  // this row said "Global" / "Config" from before both were renamed
+  // and never settled again, so the shot silently stayed at its
+  // 2026-08-15 capture. Under the fixture the Files tab opens on the
+  // Env variables pane, whose body reads "N of N documented variables";
+  // settle on that CONTENT (count-free), never on a tab BUTTON label —
+  // a button is present whichever tab is active, so the weaker string
+  // matched instantly and captured whatever sub-tab the app happened to
+  // remember, the exact race settling exists to stop. "Config home" is
+  // the preview shown only when the config-dir node is selected.
+  { file: "global.png", nav: "Config", tab: "Files", settle: "documented variables" },
   { file: "settings.png", nav: "Settings", tab: "Retention", settle: "TRANSCRIPT RETENTION" },
 ];
 

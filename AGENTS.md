@@ -2527,6 +2527,14 @@ HOME=/tmp/claudepot-demo-home \
 pnpm screenshots                                # capture all 9
 ```
 
+**Quit the installed Claudepot first.** The debug binary carries the
+same `tauri-plugin-single-instance` identifier as the release app, so
+launched beside a running `/Applications/Claudepot.app` it hands off to
+that instance and exits 0 with nothing in its log but the startup line
+— and `pnpm screenshots` then reports "no MCP bridge on 9223", which
+reads as a bridge fault. `osascript -e 'tell application "Claudepot" to
+quit'`, capture, then `open -a Claudepot`.
+
 The fixture is a **fake `HOME`**, not a pair of env overrides.
 `CLAUDE_CONFIG_DIR` + `CLAUDEPOT_DATA_DIR` cover only two of the three
 places the app reads — Claude Desktop's directory resolves through
