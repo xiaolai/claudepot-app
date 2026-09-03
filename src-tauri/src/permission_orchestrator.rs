@@ -59,13 +59,17 @@ pub fn grants_file_guard() -> MutexGuard<'static, ()> {
 }
 
 /// Make Claude Code's `PreToolUse` entry agree with `file` at `now`,
-/// pointing at this binary. Returns whether it is now installed.
+/// pointing at the `claudepot` CLI. Returns whether it is now
+/// installed.
 ///
-/// `current_exe` and not a looked-up path: this binary is the one
-/// carrying the verb, so the hook cannot point at a Claudepot that is
-/// not this one. Callers hold [`grants_file_guard`].
+/// **Not `current_exe`.** This process is the Tauri app, which has no
+/// `hook` verb; the verb lives in the CLI bundled beside it.
+/// `hook::hook_binary` resolves that, and refuses rather than falling
+/// back to the GUI — an entry aimed at the GUI would have CC launch
+/// the desktop app on every tool call and block the call at the
+/// timeout. Callers hold [`grants_file_guard`].
 pub fn reconcile_hook(file: &GrantsFile, now: DateTime<Utc>) -> Result<bool, String> {
-    let binary = std::env::current_exe().map_err(|e| format!("cannot locate this binary: {e}"))?;
+    let binary = hook::hook_binary().map_err(|e| e.to_string())?;
     hook::reconcile(file, now, &binary).map_err(|e| e.to_string())
 }
 
@@ -198,6 +202,10 @@ pub async fn tick(app: &AppHandle) {
         }
     };
     let mut file = loaded.value;
+    // What the hook reads until a save lands. If the save below fails,
+    // the entry is reconciled against THIS, not against the in-memory
+    // changes that never reached disk.
+    let on_disk = file.clone();
 
     // Corruption is loud for this store: the file just got recovered
     // to empty, which withdrew every grant and dropped any legacy
@@ -212,33 +220,48 @@ pub async fn tick(app: &AppHandle) {
     }
 
     let now = Utc::now();
-    let mut changed = false;
 
     let migration = migrate_legacy(&mut file, now, revert_legacy);
-    changed |= migration.changed_file();
-    if migration.worth_a_notice() {
-        notify_migration(app, &migration);
+    let expired: Vec<String> = eval::expired_grants(&file, now)
+        .iter()
+        .map(|g| g.project_path.clone())
+        .collect();
+    for path in &expired {
+        file.remove(path);
     }
 
-    for grant in eval::expired_grants(&file, now)
-        .into_iter()
-        .cloned()
-        .collect::<Vec<_>>()
-    {
-        file.remove(&grant.project_path);
-        changed = true;
-        emit_reverted(app, &grant.project_path);
-    }
-
-    if changed {
-        if let Err(e) = permission_store::save(&file) {
-            tracing::warn!(error = %e, "permission_orchestrator: grants save failed");
+    // Persist BEFORE saying anything. A notice that a project was
+    // migrated, or an event that a grant lapsed, describes the file on
+    // disk — if the save fails, the hook still reads the old file and
+    // both claims would be false. On failure the next tick redoes the
+    // work: the settings reverts already landed, so a legacy record
+    // then reads as `SkippedUserChanged` and is promoted the same way.
+    let persisted: &GrantsFile = if migration.changed_file() || !expired.is_empty() {
+        match permission_store::save(&file) {
+            Ok(()) => {
+                if migration.worth_a_notice() {
+                    notify_migration(app, &migration);
+                }
+                for path in &expired {
+                    emit_reverted(app, path);
+                }
+                &file
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "permission_orchestrator: grants save failed; nothing announced");
+                &on_disk
+            }
         }
-    }
+    } else {
+        &file
+    };
 
-    // Last, and unconditionally: the entry follows the file. A grant
-    // that outlived an app upgrade gets its `command` re-pointed here.
-    if let Err(e) = reconcile_hook(&file, now) {
+    // Last, and unconditionally, against whatever is actually on disk:
+    // the entry follows the file. A grant that outlived an app upgrade
+    // gets its `command` re-pointed here, and a failed save must not
+    // skip that — the persisted grants are still live and still need
+    // an entry that points at a binary which exists.
+    if let Err(e) = reconcile_hook(persisted, now) {
         tracing::warn!(error = %e, "permission_orchestrator: hook reconcile failed");
     }
 }

@@ -63,6 +63,63 @@ fn user_settings_path() -> PathBuf {
     claude_config_dir().join("settings.json")
 }
 
+/// The CLI binary's `[[bin]] name` — the one executable that carries
+/// the `hook …` verbs. The GUI is `claudepot-tauri` (or `Claudepot`
+/// inside a bundle) and has no clap parser at all.
+const CLI_STEM: &str = "claudepot";
+
+#[derive(Debug, thiserror::Error)]
+pub enum HookBinaryError {
+    #[error("cannot locate this binary: {0}")]
+    CurrentExe(std::io::Error),
+    #[error("{0}")]
+    Sibling(#[from] crate::mcp_probe::McpProbeError),
+}
+
+/// Is `path` the CLI itself, judged by its file stem?
+fn is_cli_binary(path: &Path) -> bool {
+    path.file_stem().and_then(|s| s.to_str()) == Some(CLI_STEM)
+}
+
+/// The executable a hook entry must point at: the `claudepot` CLI.
+///
+/// `std::env::current_exe()` is right only when the caller **is** the
+/// CLI (`claudepot remote serve` from a terminal). From the GUI it is
+/// the Tauri app, which has no `hook` verb — and CC does not report a
+/// hook that prints nothing as an error, so an entry aimed at the GUI
+/// would have CC launch the desktop app on every tool call, wait out
+/// the timeout, and for a `PreToolUse` hook block the call. Both
+/// Claudepot hooks were installed that way from the GUI before this
+/// resolver existed; the remote approval one shipped like it.
+///
+/// Order: `CLAUDEPOT_CLI_PATH` (explicit override, same as the agent
+/// shim honours), then `current_exe` if it is the CLI, then the CLI
+/// bundled beside the GUI (`mcp_probe::cli_candidates` — the sidecar
+/// name differs between a dev tree and a release bundle). There is no
+/// last-resort fallback to `current_exe`: an entry pointing at the
+/// wrong binary is worse than no entry, so this fails instead.
+pub fn hook_binary() -> Result<PathBuf, HookBinaryError> {
+    if let Some(p) = std::env::var_os("CLAUDEPOT_CLI_PATH") {
+        let p = PathBuf::from(p);
+        if p.is_file() {
+            return Ok(p);
+        }
+    }
+    let current = std::env::current_exe().map_err(HookBinaryError::CurrentExe)?;
+    resolve_hook_binary(&current, cfg!(debug_assertions))
+}
+
+/// The judgement behind [`hook_binary`], with the running executable
+/// injected so it can be tested against paths that are not this test
+/// binary.
+fn resolve_hook_binary(current: &Path, debug: bool) -> Result<PathBuf, HookBinaryError> {
+    if is_cli_binary(current) {
+        return Ok(current.to_path_buf());
+    }
+    let dir = current.parent().unwrap_or(current);
+    Ok(crate::mcp_probe::resolve_sibling_cli(dir, debug)?)
+}
+
 /// Our hook entry for `spec`, pointing at `binary`.
 pub fn entry(spec: &HookSpec, binary: &Path) -> JsonValue {
     json!({
@@ -128,25 +185,45 @@ pub fn remove_ours(spec: &HookSpec, root: &mut Map<String, JsonValue>) -> bool {
     changed
 }
 
+/// Every entry of ours for `spec` under the event, in file order.
+fn owned<'a>(spec: &HookSpec, root: &'a JsonValue) -> Vec<&'a JsonValue> {
+    root.get("hooks")
+        .and_then(|h| h.get(spec.event))
+        .and_then(|g| g.as_array())
+        .map(|groups| {
+            groups
+                .iter()
+                .filter_map(|g| g.get("hooks").and_then(|l| l.as_array()))
+                .flatten()
+                .filter(|h| is_ours(spec, h))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Healthy means **exactly one** entry of ours, and it is `want`. Two
+/// owned entries — one current, one left by an older Claudepot or a
+/// hand-edit — are not healthy: CC runs every entry under the event,
+/// so the stale one still fires, points at a binary that may be gone,
+/// and for a `PreToolUse` hook a missing binary is a failed hook.
+fn is_healthy(ours: &[&JsonValue], want: &JsonValue) -> bool {
+    matches!(ours, [only] if *only == want)
+}
+
 /// Is an entry of ours for `spec` present, and does it point at
-/// `binary`? `Some(true)` = installed and current, `Some(false)` =
-/// installed but pointing elsewhere (a moved binary), `None` = absent
-/// or unreadable.
+/// `binary`? `Some(true)` = installed and current (exactly one owned
+/// entry, equal to what `install` would write), `Some(false)` =
+/// present but wrong (pointing elsewhere, or duplicated), `None` =
+/// absent or unreadable.
 pub fn installed_state(spec: &HookSpec, binary: &Path) -> Option<bool> {
     let want = entry(spec, binary);
     let bytes = std::fs::read(user_settings_path()).ok()?;
     let root: JsonValue = serde_json::from_slice(&bytes).ok()?;
-    let groups = root.get("hooks")?.get(spec.event)?.as_array()?;
-    let ours: Vec<&JsonValue> = groups
-        .iter()
-        .filter_map(|g| g.get("hooks").and_then(|l| l.as_array()))
-        .flatten()
-        .filter(|h| is_ours(spec, h))
-        .collect();
+    let ours = owned(spec, &root);
     if ours.is_empty() {
         return None;
     }
-    Some(ours.iter().any(|h| **h == want))
+    Some(is_healthy(&ours, &want))
 }
 
 /// Add the hook, replacing any earlier copy of ours.
@@ -157,21 +234,14 @@ pub fn installed_state(spec: &HookSpec, binary: &Path) -> Option<bool> {
 pub fn install(spec: &HookSpec, binary: &Path) -> Result<Mutation<()>, InstallError> {
     let want = entry(spec, binary);
     settings_mutex::mutate_settings_file(&user_settings_path(), |root, _was| {
-        // Already exactly right? Then write nothing — an unchanged file
-        // keeps its mtime, and a reconcile that runs every tick must
-        // not look like someone edited the user's settings.
-        let already = root
-            .get("hooks")
-            .and_then(|h| h.get(spec.event))
-            .and_then(|g| g.as_array())
-            .is_some_and(|groups| {
-                groups.iter().any(|g| {
-                    g.get("hooks")
-                        .and_then(|l| l.as_array())
-                        .is_some_and(|l| l.iter().any(|h| is_ours(spec, h) && *h == want))
-                })
-            });
-        if already {
+        // Already exactly right — one entry of ours, and it is `want`?
+        // Then write nothing: an unchanged file keeps its mtime, and a
+        // reconcile that runs every tick must not look like someone
+        // edited the user's settings. Anything else, including a
+        // current entry with a stale duplicate beside it, is rewritten
+        // to exactly one.
+        let snapshot = JsonValue::Object(root.clone());
+        if is_healthy(&owned(spec, &snapshot), &want) {
             return Ok::<_, InstallError>(Change::Skip(()));
         }
 
@@ -337,6 +407,61 @@ mod tests {
         );
     }
 
+    mod binary {
+        use super::*;
+
+        #[test]
+        fn the_cli_itself_is_used_as_is() {
+            let d = tempfile::tempdir().unwrap();
+            let cli = d.path().join("claudepot");
+            std::fs::write(&cli, b"").unwrap();
+            assert_eq!(resolve_hook_binary(&cli, true).unwrap(), cli);
+            let exe = d.path().join("claudepot.exe");
+            std::fs::write(&exe, b"").unwrap();
+            assert_eq!(resolve_hook_binary(&exe, false).unwrap(), exe);
+        }
+
+        #[test]
+        fn the_gui_resolves_to_the_cli_beside_it_and_never_to_itself() {
+            // The bug this exists for: from the GUI, `current_exe` is
+            // the Tauri app. In a dev tree the CLI sits beside it as
+            // `claudepot`; in a bundle as `claudepot-cli`.
+            let d = tempfile::tempdir().unwrap();
+            let gui = d.path().join("claudepot-tauri");
+            std::fs::write(&gui, b"").unwrap();
+            assert!(
+                resolve_hook_binary(&gui, true).is_err(),
+                "no CLI beside the GUI must be an error, not the GUI"
+            );
+            let cli = d.path().join("claudepot");
+            std::fs::write(&cli, b"").unwrap();
+            assert_eq!(resolve_hook_binary(&gui, true).unwrap(), cli);
+
+            let bundle = tempfile::tempdir().unwrap();
+            let app = bundle.path().join("Claudepot");
+            std::fs::write(&app, b"").unwrap();
+            let sidecar = bundle.path().join("claudepot-cli");
+            std::fs::write(&sidecar, b"").unwrap();
+            assert_eq!(resolve_hook_binary(&app, false).unwrap(), sidecar);
+        }
+
+        #[test]
+        fn the_stem_test_is_exact() {
+            assert!(is_cli_binary(Path::new("/x/claudepot")));
+            // `Path::file_stem` is host-specific: a backslash is a
+            // separator only on Windows, so the drive-letter form is a
+            // Windows-only assertion (rules/paths.md — OS-specific
+            // behaviour is cfg-gated, pure string ops are not).
+            #[cfg(windows)]
+            assert!(is_cli_binary(Path::new(r"C:\x\claudepot.exe")));
+            assert!(!is_cli_binary(Path::new("/x/claudepot-tauri")));
+            assert!(!is_cli_binary(Path::new("/x/claudepot-cli")));
+            assert!(!is_cli_binary(Path::new(
+                "/Applications/Claudepot.app/Contents/MacOS/Claudepot"
+            )));
+        }
+    }
+
     /// The file-level behaviour, on a real settings file under an
     /// isolated `CLAUDE_CONFIG_DIR`.
     mod on_disk {
@@ -381,6 +506,43 @@ mod tests {
                 .flat_map(|g| g["hooks"].as_array().unwrap())
                 .collect();
             assert_eq!(entries.len(), 1);
+        }
+
+        #[test]
+        fn a_stale_duplicate_beside_a_current_entry_is_collapsed_to_one() {
+            // An older Claudepot, or a hand-edit, can leave two entries
+            // of ours under one event. CC runs both; the stale one
+            // points at a binary that may be gone. `install` used to
+            // see the current one and skip, leaving the stale one to
+            // fire on every call.
+            let (_t, _l) = isolated();
+            let mut root: Map<String, JsonValue> = Map::new();
+            root.insert(
+                "hooks".into(),
+                json!({ SPEC.event: [
+                    {"hooks": [entry(&SPEC, Path::new("/stale/claudepot"))]},
+                    {"hooks": [entry(&SPEC, Path::new("/current/claudepot"))]},
+                ]}),
+            );
+            std::fs::write(
+                user_settings_path(),
+                serde_json::to_vec(&JsonValue::Object(root)).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                installed_state(&SPEC, Path::new("/current/claudepot")),
+                Some(false),
+                "two owned entries are not a healthy install"
+            );
+
+            install(&SPEC, Path::new("/current/claudepot")).unwrap();
+            assert_eq!(
+                installed_state(&SPEC, Path::new("/current/claudepot")),
+                Some(true)
+            );
+            let root: JsonValue =
+                serde_json::from_slice(&std::fs::read(user_settings_path()).unwrap()).unwrap();
+            assert_eq!(owned(&SPEC, &root).len(), 1);
         }
 
         #[test]

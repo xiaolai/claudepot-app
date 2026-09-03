@@ -739,6 +739,18 @@ Five properties hold it together:
   prompt" would drift with CC. The entry's timeout is 10 s, a ceiling on
   a wedged disk, and a killed `PreToolUse` hook blocks the call, so
   the verb does no waiting at all.
+- **The entry points at the CLI, never at `current_exe()` blindly.**
+  From the GUI, `current_exe()` is the Tauri app, which has no clap
+  parser and no `hook` verb; an entry aimed at it would have CC launch
+  the desktop app on every tool call and block the call at the
+  timeout. The remote-approval hook was installed exactly that way from
+  the GUI before `cc_hook_entry::hook_binary` existed — found by the
+  audit-fix pass, not by a test, because every end-to-end probe ran the
+  CLI binary directly. The resolver returns `current_exe()` only when
+  that *is* the CLI, otherwise the sidecar beside the GUI
+  (`mcp_probe::cli_candidates`, whose name differs between a dev tree
+  and a bundle), and errors rather than falling back to the GUI. Both
+  hook installers go through it.
 
 The schema-1 migration runs in the orchestrator: each legacy record's
 settings key is put back (only if the layer still holds exactly the

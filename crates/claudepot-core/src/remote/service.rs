@@ -379,10 +379,11 @@ pub fn reconcile_approval_hook(enabled: bool) -> (bool, Vec<String>) {
         let _ = approval::install::uninstall();
         return (false, warnings);
     }
-    // `current_exe` and not a looked-up path: this binary is the one
-    // carrying the verb, so the hook cannot point at a Claudepot that is
-    // not this one.
-    let installed = match std::env::current_exe() {
+    // The CLI binary, never `current_exe` blindly: from the GUI that is
+    // the Tauri app, which has no `hook` verb, and an entry aimed at it
+    // would have CC launch the desktop app on every permission prompt
+    // and wait out the timeout. See `cc_hook_entry::hook_binary`.
+    let installed = match crate::cc_hook_entry::hook_binary() {
         Ok(binary) => match approval::install::install(&binary) {
             Ok(_) => true,
             Err(e) => {

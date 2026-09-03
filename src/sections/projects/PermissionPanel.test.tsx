@@ -82,8 +82,14 @@ describe("PermissionPanel", () => {
       ),
     );
     render(<PermissionPanel projectPath={PROJECT} />);
-    expect(await screen.findByRole("alert")).toHaveTextContent(/hook .* not installed/i);
-    expect(screen.getByRole("status")).toHaveTextContent(/stays until you revoke/i);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/not answering/i);
+    expect(alert).toHaveTextContent(/hook .* not installed/i);
+    // The active copy is absent, not merely accompanied by a warning.
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.queryByText(/auto-approval active/i)).not.toBeInTheDocument();
+    // Revoke is still offered — it is the way out of the inert state.
+    expect(screen.getByRole("button", { name: /revoke now/i })).toBeInTheDocument();
   });
 
   it("renders a stale local bypassPermissions as ignored, not elevated, and can remove it", async () => {

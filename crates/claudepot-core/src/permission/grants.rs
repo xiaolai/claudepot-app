@@ -1,12 +1,12 @@
 //! Permission-grant schema. Pure data + serde + validation.
 //!
-//! A [`Grant`] records that, until `expires_at`, Claudepot answers
-//! Claude Code's permission prompts for sessions whose working
-//! directory is inside `project_path`. It is read by the
-//! `PermissionRequest` hook on every prompt (`permission::hook`), so
-//! the record on disk **is** the capability: delete the row and the
-//! next prompt is drawn at the keyboard. Nothing in CC's settings is
-//! written for a grant.
+//! A [`Grant`] records that, until `expires_at`, Claudepot approves
+//! Claude Code's tool calls for sessions whose working directory is
+//! inside `project_path`. It is read by the `PreToolUse` hook on every
+//! tool call (`permission::hook`), so the record on disk **is** the
+//! capability: delete the row and the next call goes through CC's
+//! normal permission flow. Nothing in CC's settings is written for a
+//! grant beyond the hook entry itself.
 //!
 //! **Schema 1 wrote CC settings instead**, and Claude Code stopped
 //! honouring that write in 2.1.257 (`settings::PROJECT_SCOPE_IGNORES_SINCE`).

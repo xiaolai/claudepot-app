@@ -250,28 +250,33 @@ export function PermissionPanel({
       )}
 
       {g ? (
-        <div className="permission-grant-active" role="status">
-          <span>
-            {isSticky ? (
-              <Trans
-                ns="projects"
-                i18nKey="permission.activeSticky"
-                components={{ hold: <strong /> }}
-              />
-            ) : (
-              <Trans
-                ns="projects"
-                i18nKey="permission.activeTimed"
-                components={{
-                  time: <strong>{formatRemaining(remainingMs)}</strong>,
-                }}
-              />
-            )}
-          </span>
-          {!perm.hookInstalled && (
-            <p className="small permission-hook-missing" role="alert">
+        <div className="permission-grant-active" role={perm.hookInstalled ? "status" : "alert"}>
+          {perm.hookInstalled ? (
+            <span>
+              {isSticky ? (
+                <Trans
+                  ns="projects"
+                  i18nKey="permission.activeSticky"
+                  components={{ hold: <strong /> }}
+                />
+              ) : (
+                <Trans
+                  ns="projects"
+                  i18nKey="permission.activeTimed"
+                  components={{
+                    time: <strong>{formatRemaining(remainingMs)}</strong>,
+                  }}
+                />
+              )}
+            </span>
+          ) : (
+            // A grant CC will never be asked about. This is the one
+            // state that must not read as "active": the block is the
+            // alert, and the active copy is not rendered at all.
+            <span className="permission-hook-missing">
+              <strong>{t("permission.hookMissingTitle")}</strong>{" "}
               {t("permission.hookMissing")}
-            </p>
+            </span>
           )}
           <div style={{ display: "flex", gap: "var(--sp-8)", alignItems: "center" }}>
             <DurationSelect

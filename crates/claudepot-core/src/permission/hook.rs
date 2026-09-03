@@ -62,7 +62,10 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
 use crate::cc_hook_entry::{self, HookSpec, InstallError};
-use crate::path_utils::{canonicalize_simplified, is_absolute_path_str, simplify_windows_path};
+pub use crate::cc_hook_entry::{hook_binary, HookBinaryError};
+use crate::path_utils::{
+    canonicalize_simplified, is_absolute_path_str, is_windows_absolute, simplify_windows_path,
+};
 use crate::permission::grants::{Grant, GrantsFile};
 
 /// What we write into CC's settings as the entry's `timeout`. The
@@ -182,14 +185,19 @@ pub fn installed_state(binary: &Path) -> Option<bool> {
 /// Is `child` equal to `parent` or a descendant of it, by path
 /// components?
 ///
-/// Both must be absolute. Separators are compared per platform: a
-/// backslash is a separator on Windows and an ordinary filename byte on
-/// Unix. Windows comparisons are case-insensitive, matching the
-/// filesystem; a `\\?\` verbatim prefix is stripped first because CC
-/// never writes one and `canonicalize` on Windows always does. A
-/// trailing separator is not a component, so `/p/a/` and `/p/a` are
-/// the same root — and `/p/a-evil` is not under `/p/a`, which a string
-/// prefix test would have said it was.
+/// Both must be absolute, and both must be the same **shape**: a
+/// Windows path (drive letter or UNC) or a Unix path. The shape, not
+/// the host, decides how a path is read — `rules/paths.md` requires
+/// pure string path ops to lock the Windows forms on every host OS, and
+/// a `cfg!(windows)` switch here made the Windows tests unreachable on
+/// the macOS and Linux runners. For a Windows-shaped path a backslash
+/// is a separator and comparison is case-insensitive, matching NTFS; a
+/// `\\?\` verbatim prefix is stripped first because CC never writes
+/// one and `canonicalize` on Windows always does. For a Unix-shaped
+/// path a backslash is an ordinary filename byte and comparison is
+/// exact. A trailing separator is not a component, so `/p/a/` and
+/// `/p/a` are the same root — and `/p/a-evil` is not under `/p/a`,
+/// which a string prefix test would have said it was.
 pub fn path_is_within(child: &str, parent: &str) -> bool {
     if child.is_empty() || parent.is_empty() {
         return false;
@@ -198,26 +206,49 @@ pub fn path_is_within(child: &str, parent: &str) -> bool {
         return false;
     }
     let (child, parent) = (simplify_windows_path(child), simplify_windows_path(parent));
-    let (child, parent) = (components(&child), components(&parent));
+    let (child_shape, parent_shape) = (PathShape::of(&child), PathShape::of(&parent));
+    if child_shape != parent_shape {
+        return false;
+    }
+    let shape = child_shape;
+    let (child, parent) = (shape.components(&child), shape.components(&parent));
     if parent.is_empty() || child.len() < parent.len() {
         return false;
     }
     child
         .iter()
         .zip(parent.iter())
-        .all(|(c, p)| same_component(c, p))
+        .all(|(c, p)| shape.same_component(c, p))
 }
 
-fn components(path: &str) -> Vec<&str> {
-    let is_sep = |ch: char| ch == '/' || (cfg!(windows) && ch == '\\');
-    path.split(is_sep).filter(|c| !c.is_empty()).collect()
+/// Which family of absolute path a string is, decided by its text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PathShape {
+    /// `C:\…`, `\\server\share\…` — after verbatim stripping.
+    Windows,
+    /// `/…`.
+    Unix,
 }
 
-fn same_component(a: &str, b: &str) -> bool {
-    if cfg!(windows) {
-        a.eq_ignore_ascii_case(b)
-    } else {
-        a == b
+impl PathShape {
+    fn of(path: &str) -> Self {
+        if is_windows_absolute(path) {
+            Self::Windows
+        } else {
+            Self::Unix
+        }
+    }
+
+    fn components(self, path: &str) -> Vec<&str> {
+        let is_sep = move |ch: char| ch == '/' || (self == Self::Windows && ch == '\\');
+        path.split(is_sep).filter(|c| !c.is_empty()).collect()
+    }
+
+    fn same_component(self, a: &str, b: &str) -> bool {
+        match self {
+            Self::Windows => a.eq_ignore_ascii_case(b),
+            Self::Unix => a == b,
+        }
     }
 }
 
@@ -290,7 +321,11 @@ mod tests {
         assert!(!path_is_within("/Users/a/proj/src", "proj"));
     }
 
-    #[cfg(windows)]
+    // The Windows shapes below are pure string tests and run on every
+    // host — rules/paths.md: "Pure string ops … are tested on all host
+    // OSs." They were `#[cfg(windows)]`-gated at first, which meant the
+    // macOS and Linux runners never executed them, and the function they
+    // guarded split on `\` only under `cfg!(windows)`.
     #[test]
     fn windows_drive_paths_compare_by_component_and_case_insensitively() {
         assert!(path_is_within(r"C:\Users\a\proj\src", r"C:\Users\a\proj"));
@@ -299,7 +334,6 @@ mod tests {
         assert!(!path_is_within(r"D:\Users\a\proj", r"C:\Users\a\proj"));
     }
 
-    #[cfg(windows)]
     #[test]
     fn windows_unc_and_verbatim_paths_are_within_their_plain_form() {
         assert!(path_is_within(
@@ -317,12 +351,18 @@ mod tests {
         ));
     }
 
-    #[cfg(unix)]
     #[test]
-    fn a_backslash_is_a_filename_byte_on_unix() {
+    fn a_backslash_is_a_filename_byte_in_a_unix_shaped_path() {
         // Splitting on `\` here would make `/p/a\b` look like `/p/a`.
+        // Decided by the path's shape, so it holds on every host.
         assert!(!path_is_within(r"/p/a\b", "/p/a"));
         assert!(path_is_within(r"/p/a\b/c", r"/p/a\b"));
+    }
+
+    #[test]
+    fn a_windows_path_and_a_unix_path_are_never_within_each_other() {
+        assert!(!path_is_within(r"C:\p\a", "/p/a"));
+        assert!(!path_is_within("/p/a/src", r"C:\p\a"));
     }
 
     // ── covering_grant / any_live_grant ────────────────────────────

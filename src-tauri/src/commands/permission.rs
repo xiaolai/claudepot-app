@@ -77,10 +77,13 @@ fn load_grants() -> Result<claudepot_core::permission::grants::GrantsFile, Error
         .map_err(|e| ErrorDto::detail(codes::PERMISSION_GRANTS_LOAD_FAILED, e))
 }
 
-/// Is CC's `PreToolUse` entry present and pointing at this binary?
-/// Read once per command, not per project row.
+/// Is CC's `PreToolUse` entry present and pointing at the CLI binary
+/// the orchestrator installs (`hook::hook_binary`, never this GUI
+/// executable)? Read once per command, not per project row. A
+/// resolver failure reads as "not installed", which is the honest
+/// answer: nothing could have installed it either.
 fn hook_installed() -> bool {
-    std::env::current_exe()
+    hook::hook_binary()
         .ok()
         .and_then(|bin| hook::installed_state(&bin))
         .unwrap_or(false)
@@ -119,6 +122,42 @@ fn save_and_reconcile(
     permission_store::save(file).map_err(ErrorDto::from)?;
     reconcile_hook(file, Utc::now())
         .map_err(|detail| ErrorDto::detail(codes::PERMISSION_HOOK_INSTALL_FAILED, detail))
+}
+
+/// Run `persist` over a file that `mutate` has just changed; if it
+/// fails, put the file back the way `undo` says and persist *that*,
+/// so a failed command never leaves grant state it did not report.
+///
+/// A re-grant used to roll back by removing the grant, which threw
+/// away the grant that was there before; an extend used to save its
+/// new deadline and then fail, keeping the deadline. Both are the
+/// same mistake — a rollback that restores a guessed state rather
+/// than the prior one — so the shape is written once. The undo's own
+/// save is best effort: if the disk is failing the caller already has
+/// the error, and the orchestrator's next tick re-reconciles.
+fn commit_or_rollback<T>(
+    file: &mut claudepot_core::permission::grants::GrantsFile,
+    undo: impl FnOnce(&mut claudepot_core::permission::grants::GrantsFile),
+    persist: impl FnOnce(&claudepot_core::permission::grants::GrantsFile) -> Result<T, ErrorDto>,
+    save_rollback: impl FnOnce(&claudepot_core::permission::grants::GrantsFile),
+) -> Result<T, ErrorDto> {
+    match persist(file) {
+        Ok(v) => Ok(v),
+        Err(e) => {
+            undo(file);
+            save_rollback(file);
+            Err(e)
+        }
+    }
+}
+
+/// The production `save_rollback`: best effort, see
+/// [`commit_or_rollback`]. Tests inject a recorder instead, so a unit
+/// test of the rollback never writes to a real `CLAUDEPOT_DATA_DIR`.
+fn save_rollback_to_disk(file: &claudepot_core::permission::grants::GrantsFile) {
+    if let Err(e) = permission_store::save(file) {
+        tracing::warn!(error = %e, "permission: rollback save failed");
+    }
 }
 
 /// Every CC project with its effective permission mode and any active
@@ -211,19 +250,29 @@ pub async fn permission_grant(
         // hook out. See `permission_orchestrator::grants_file_guard`.
         let _guard = grants_file_guard();
         let mut file = load_grants()?;
-        file.upsert(Grant {
+        let previous = file.upsert(Grant {
             project_path: project_path.clone(),
             granted_at: now,
             expires_at,
         });
 
         // A grant with no hook behind it is inert. Roll it back rather
-        // than report an active grant that answers nothing.
-        if let Err(e) = save_and_reconcile(&file) {
-            file.remove(&project_path);
-            let _ = permission_store::save(&file);
-            return Err(e);
-        }
+        // than report an active grant that answers nothing — and on a
+        // re-grant, roll back to the grant that was there, not to none.
+        let path = project_path.clone();
+        commit_or_rollback(
+            &mut file,
+            move |f| match previous {
+                Some(prior) => {
+                    f.upsert(prior);
+                }
+                None => {
+                    f.remove(&path);
+                }
+            },
+            save_and_reconcile,
+            save_rollback_to_disk,
+        )?;
 
         current_dto(&project_path)
     })
@@ -272,8 +321,20 @@ pub async fn permission_extend(
             .iter_mut()
             .find(|g| g.project_path == project_path)
             .ok_or_else(|| no_active_grant(&project_path))?;
-        grant.expires_at = expires_at;
-        save_and_reconcile(&file)?;
+        let prior_deadline = std::mem::replace(&mut grant.expires_at, expires_at);
+
+        // A deadline the command failed to report must not stick.
+        let path = project_path.clone();
+        commit_or_rollback(
+            &mut file,
+            move |f| {
+                if let Some(g) = f.grants.iter_mut().find(|g| g.project_path == path) {
+                    g.expires_at = prior_deadline;
+                }
+            },
+            save_and_reconcile,
+            save_rollback_to_disk,
+        )?;
         current_dto(&project_path)
     })
     .await
@@ -357,6 +418,154 @@ mod tests {
         }));
         assert_eq!(clearable_ignored_layer(&committed), None);
         assert_eq!(clearable_ignored_layer(&state(None)), None);
+    }
+
+    fn grant_at(path: &str, expires: Option<chrono::DateTime<Utc>>) -> Grant {
+        Grant {
+            project_path: path.into(),
+            granted_at: Utc::now(),
+            expires_at: expires,
+        }
+    }
+
+    fn fail(_: &claudepot_core::permission::grants::GrantsFile) -> Result<(), ErrorDto> {
+        Err(ErrorDto::detail(
+            codes::PERMISSION_HOOK_INSTALL_FAILED,
+            "simulated hook install failure",
+        ))
+    }
+
+    /// Records what the rollback would have persisted, so the tests
+    /// assert on it without touching a real data dir.
+    fn recorder() -> (
+        std::rc::Rc<std::cell::RefCell<Option<claudepot_core::permission::grants::GrantsFile>>>,
+        impl FnOnce(&claudepot_core::permission::grants::GrantsFile),
+    ) {
+        let saved = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let sink = saved.clone();
+        (
+            saved,
+            move |f: &claudepot_core::permission::grants::GrantsFile| {
+                *sink.borrow_mut() = Some(f.clone());
+            },
+        )
+    }
+
+    #[test]
+    fn a_failed_regrant_restores_the_grant_that_was_there() {
+        // The rollback used to `remove` — correct for a first grant,
+        // and a silent revocation for a re-grant whose hook install
+        // failed. The prior grant must come back exactly.
+        let mut file = claudepot_core::permission::grants::GrantsFile::default();
+        let prior = grant_at("/p/a", None);
+        file.upsert(prior.clone());
+        let previous = file.upsert(grant_at("/p/a", Some(Utc::now() + Duration::hours(1))));
+        assert_eq!(previous.as_ref(), Some(&prior));
+
+        let (saved, record) = recorder();
+        let err = commit_or_rollback(
+            &mut file,
+            move |f| match previous {
+                Some(p) => {
+                    f.upsert(p);
+                }
+                None => {
+                    f.remove("/p/a");
+                }
+            },
+            fail,
+            record,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, codes::PERMISSION_HOOK_INSTALL_FAILED);
+        assert_eq!(
+            file.find("/p/a"),
+            Some(&prior),
+            "the earlier grant is back, deadline and all"
+        );
+        assert_eq!(saved.borrow().as_ref().unwrap().find("/p/a"), Some(&prior));
+    }
+
+    #[test]
+    fn a_failed_first_grant_leaves_no_grant_behind() {
+        let mut file = claudepot_core::permission::grants::GrantsFile::default();
+        let previous = file.upsert(grant_at("/p/a", None));
+        assert!(previous.is_none());
+        let (saved, record) = recorder();
+        let _ = commit_or_rollback(
+            &mut file,
+            move |f| match previous {
+                Some(p) => {
+                    f.upsert(p);
+                }
+                None => {
+                    f.remove("/p/a");
+                }
+            },
+            fail,
+            record,
+        );
+        assert!(file.find("/p/a").is_none());
+        assert!(saved.borrow().as_ref().unwrap().grants.is_empty());
+    }
+
+    #[test]
+    fn a_failed_extend_keeps_the_old_deadline() {
+        // `extend` used to save the new deadline and then fail on the
+        // hook reconcile, so a command that reported failure had still
+        // moved the deadline.
+        let mut file = claudepot_core::permission::grants::GrantsFile::default();
+        let old_deadline = Some(Utc::now() + Duration::minutes(30));
+        file.upsert(grant_at("/p/a", old_deadline));
+        let g = file
+            .grants
+            .iter_mut()
+            .find(|g| g.project_path == "/p/a")
+            .unwrap();
+        let prior = g.expires_at.take();
+        assert_eq!(prior, old_deadline);
+
+        let (saved, record) = recorder();
+        let _ = commit_or_rollback(
+            &mut file,
+            move |f| {
+                if let Some(g) = f.grants.iter_mut().find(|g| g.project_path == "/p/a") {
+                    g.expires_at = prior;
+                }
+            },
+            fail,
+            record,
+        );
+        assert_eq!(file.find("/p/a").unwrap().expires_at, old_deadline);
+        // And the rollback is what gets persisted, so the hook reads
+        // the old deadline too.
+        assert_eq!(
+            saved
+                .borrow()
+                .as_ref()
+                .unwrap()
+                .find("/p/a")
+                .unwrap()
+                .expires_at,
+            old_deadline
+        );
+    }
+
+    #[test]
+    fn a_successful_persist_keeps_the_change_and_saves_nothing_extra() {
+        let mut file = claudepot_core::permission::grants::GrantsFile::default();
+        file.upsert(grant_at("/p/a", None));
+        let (saved, record) = recorder();
+        let got = commit_or_rollback(
+            &mut file,
+            |f| f.grants.clear(),
+            |_| Ok::<_, ErrorDto>(7),
+            record,
+        )
+        .unwrap();
+        assert_eq!(got, 7);
+        assert!(file.find("/p/a").is_some(), "undo must not run on success");
+        assert!(saved.borrow().is_none(), "no rollback save on success");
     }
 
     #[test]

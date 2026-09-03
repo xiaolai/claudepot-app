@@ -208,6 +208,7 @@
     "ignoredTitle": "permissions.defaultMode is set in a project file Claude Code ignores",
     "activeSticky": "Auto-approval active — <hold>stays until you revoke it</hold>",
     "activeTimed": "Auto-approval active — lapses in <time/>",
+    "hookMissingTitle": "Grant recorded but not answering.",
     "hookMissing": "The Claude Code hook that answers this grant is not installed, so prompts still appear. Revoke and grant again; if it keeps failing, check ~/.claude/settings.json.",
     "makeSticky": "Make sticky",
     "setDeadline": "Set deadline",

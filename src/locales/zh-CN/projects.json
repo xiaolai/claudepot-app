@@ -202,6 +202,7 @@
     "ignoredTitle": "permissions.defaultMode 设置在 Claude Code 会忽略的项目文件里",
     "activeSticky": "自动批准生效中 — <hold>在你撤销之前一直有效</hold>",
     "activeTimed": "自动批准生效中 — 将在 <time/> 后失效",
+    "hookMissingTitle": "授权已记录，但未生效。",
     "hookMissing": "回答此授权的 Claude Code 钩子尚未安装，权限确认仍会出现。请撤销后重新授予；若持续失败，请检查 ~/.claude/settings.json。",
     "makeSticky": "设为永久",
     "setDeadline": "设置截止时间",

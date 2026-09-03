@@ -15,14 +15,14 @@
 //! - [`store`] — atomic load/save of the grants file.
 //! - [`eval`] — pure expiration logic (`partition`, `expired_grants`,
 //!   `active_grant`).
-//! - [`hook`] — what the `PermissionRequest` hook decides from a
-//!   grant, and the read-only load it uses.
+//! - [`hook`] — what the `PreToolUse` hook decides from a grant, the
+//!   read-only load it uses, and the entry's install/reconcile.
 //!
-//! A grant is answered by Claude Code's `PermissionRequest` hook
-//! (`claudepot hook permission-request`, shared with
-//! `remote::approval`), not by a settings write: CC ≥ 2.1.257 refuses
-//! `bypassPermissions` from the project-scope files a per-project
-//! grant could write to. The orchestrator
+//! A grant is answered by Claude Code's `PreToolUse` hook
+//! (`claudepot hook pre-tool-use`; the remote-approval feature keeps
+//! its own `PermissionRequest` entry), not by a settings write: CC ≥
+//! 2.1.257 refuses `bypassPermissions` from the project-scope files a
+//! per-project grant could write to. The orchestrator
 //! (`src-tauri/src/permission_orchestrator.rs`) loads grants each
 //! `usage_snapshot::run_tick`, drops the expired ones, reverts any
 //! schema-1 settings writes, and keeps the hook entry in step. Nothing
