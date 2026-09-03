@@ -6,7 +6,78 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.6.0 — beta (unreleased)
+## 0.6.1 — beta (released 2026-09-03)
+
+Every permission grant Claudepot had ever written was a silent no-op on
+the installed Claude Code, and the pane said "Bypass active" over it.
+Found by asking what upstream had changed, then checking the binary.
+
+### Fixed
+
+- **Permission grants work again, through a different door.** A grant
+  used to write `permissions.defaultMode: bypassPermissions` into the
+  project's `.claude/settings.local.json`. Claude Code 2.1.257 started
+  ignoring that value from project files — its own log line says
+  "projectSettings and localSettings are repo-controllable" — and does
+  not fall through to the user layer, so the session started in Manual
+  while Claudepot reported bypass. A grant is now a record that Claude
+  Code's `PreToolUse` hook answers: `claudepot hook pre-tool-use`
+  approves tool calls whose session runs inside the granted project,
+  until the grant lapses. Measured on 2.1.259 in real interactive
+  sessions before choosing that event: the `PermissionRequest` hook the
+  remote-approval feature uses never fires in auto mode when the
+  classifier approves, while a `PreToolUse` allow skips the prompt in
+  Manual mode **and** the 2–3 s classifier round trip in auto mode, and
+  covers subagent calls and protected-path writes. Cost: ~13 ms per
+  tool call while a grant is live.
+- **Both Claude Code hook entries point at the CLI, never at the
+  desktop app.** Installed from the GUI, the remote-approval hook was
+  written with the app's own executable as its command — a binary with
+  no `hook` verb, so Claude Code would have launched Claudepot on every
+  permission prompt and waited out the timeout. A shared resolver now
+  returns the bundled CLI, and errors rather than falling back to the
+  GUI. Found by the audit pass, not by a test: every end-to-end probe
+  had run the CLI directly.
+- **A stale project-file `bypassPermissions` reads as ignored, not as
+  elevated**, with a one-click removal from the Permissions panel. The
+  resolver mirrors Claude Code's scope rule: `bypassPermissions` and
+  `auto` from `.claude/settings.json` or `.claude/settings.local.json`
+  are dropped, and `auto` is a recognised mode now that it is a
+  documented setting.
+- **Old grant files migrate instead of being moved aside as corrupt.**
+  Each schema-1 record puts its settings key back (only if the file
+  still holds exactly what the grant wrote), carries its deadline over
+  as a hook grant, and gives up after three failed reverts with a
+  notice naming the file. Reading a v1 file as corrupt would have
+  dropped the only record obliging anyone to take the key out.
+- **A failed re-grant restores the grant that was there, and a failed
+  extend keeps the old deadline.** Both rollbacks used to leave state
+  the command had not reported.
+- **A grant whose hook entry is missing renders as an alert**, with no
+  "active" copy at all, and creating a grant fails loudly when the entry
+  cannot be written.
+
+### Changed
+
+- Expiry binds mid-session: the hook re-reads the grants file on every
+  call, so a lapsed grant stops at the next tool call rather than at the
+  next session. Deny and ask rules still apply, and so does everything
+  no mode auto-approves.
+- The revert circuit breaker and its `permission-breaker-tripped` event
+  are gone with the settings write they guarded.
+
+### Internal
+
+- Path containment for the hook decides separator and case rules from
+  the path's shape rather than the host, so the Windows-shape tests run
+  on every CI runner instead of only on Windows.
+- The 0.6.0 changelog entry was still marked unreleased; it shipped on
+  2026-09-02.
+- A channel-row test in the Updates panel asserted on rendered state
+  synchronously after its fetch resolved and flaked once under the full
+  parallel run; it now waits for the render.
+
+## 0.6.0 — beta (released 2026-09-02)
 
 Three read paths were doing far more work than reading requires. All
 three were found by measuring against a real machine — 2,585
