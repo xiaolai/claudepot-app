@@ -39,20 +39,34 @@ fn run(data_dir: &std::path::Path, payload: &str) -> (String, String, bool) {
     )
 }
 
+// Built with `serde_json`, not `format!`: a Windows temp path carries
+// backslashes, which a hand-interpolated JSON string turns into escape
+// sequences. The first version did exactly that, the grants file failed
+// to parse on `windows-latest`, and the hook was (correctly) silent — a
+// fixture is path-processing code too (rules/paths.md).
 fn grants_file(project: &str, expires_at: Option<&str>) -> String {
-    let expires = expires_at.map_or("null".to_string(), |e| format!("\"{e}\""));
-    format!(
-        r#"{{"schema_version":2,"grants":[{{"project_path":"{project}",
-            "granted_at":"2026-01-01T00:00:00Z","expires_at":{expires}}}]}}"#
-    )
+    serde_json::json!({
+        "schema_version": 2,
+        "grants": [{
+            "project_path": project,
+            "granted_at": "2026-01-01T00:00:00Z",
+            "expires_at": expires_at,
+        }],
+    })
+    .to_string()
 }
 
 fn payload(cwd: &str) -> String {
-    format!(
-        r#"{{"session_id":"s1","transcript_path":"/x.jsonl","cwd":"{cwd}",
-            "hook_event_name":"PreToolUse","tool_name":"Bash",
-            "tool_input":{{"command":"python3 -c 'print(6*7)'"}},"a_field_from_next_month":1}}"#
-    )
+    serde_json::json!({
+        "session_id": "s1",
+        "transcript_path": "/x.jsonl",
+        "cwd": cwd,
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": { "command": "python3 -c 'print(6*7)'" },
+        "a_field_from_next_month": 1,
+    })
+    .to_string()
 }
 
 #[test]
