@@ -469,10 +469,11 @@
   "permission": {
     "duration_out_of_range": "请选择 {{min}} 到 {{max}} 秒之间的时长。",
     "grants_load_failed": "无法加载权限授权记录：{{detail}}",
+    "hook_install_failed": "无法安装 Claude Code 的 PreToolUse 钩子，授权将不起作用：{{detail}}",
     "invalid_project_path": "该项目路径不可用：{{detail}}",
     "no_active_grant": "Claudepot 未管理该项目的权限。",
-    "read_settings_for_project_failed": "无法读取 {{project_path}} 的权限设置：{{detail}}",
-    "unknown_mode": "Claudepot 无法授予 {{mode}} 模式。"
+    "no_ignored_value": "此项目没有 Claudepot 可以移除的被忽略权限值。",
+    "read_settings_for_project_failed": "无法读取 {{project_path}} 的权限设置：{{detail}}"
   },
   "permission_grants": {
     "duplicate_project": "{{project_path}} 存在多条授权。",

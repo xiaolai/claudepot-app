@@ -3,26 +3,29 @@
 //!
 //! Unlike `rotation_orchestrator`, this holds **no managed state**:
 //! grants live entirely on disk (`~/.claudepot/permission-grants.json`)
-//! and are cheap to reload each tick. The orchestrator is two free
-//! functions:
+//! and are cheap to reload each tick. Three jobs, every
+//! `usage_snapshot::run_tick`:
 //!
-//! - [`tick`] — called from `usage_snapshot::run_tick`; reverts every
-//!   grant whose deadline has passed and drops it from the file.
-//! - [`revert_grant`] — the safety-checked revert, also used directly
-//!   by the `permission_revert` command.
+//! - drop grants whose deadline has passed and say so
+//!   (`permission-reverted`, outcome `expired`);
+//! - finish migrating schema-1 grants — put the `bypassPermissions`
+//!   they wrote into `.claude/settings.local.json` back, then carry
+//!   their deadline over as a hook grant — and tell the user once;
+//! - keep Claude Code's `PreToolUse` hook entry in step with the file:
+//!   present and pointing at this binary while a grant is live, gone
+//!   otherwise. Doing this every tick is also what repairs the entry
+//!   after the binary moves.
 //!
-//! Zero overhead when no grants exist — `tick` returns after one
-//! cheap file read.
+//! Zero overhead when no grants exist — `tick` returns after one cheap
+//! file read and an uninstall that finds nothing to remove.
 
 use chrono::{DateTime, Utc};
-use claudepot_core::breaker;
 use claudepot_core::notification_log::{NotificationKind, NotificationSource};
-use claudepot_core::permission::grants::{Grant, GrantsFile};
+use claudepot_core::permission::grants::{GrantsFile, LegacySettingsGrant};
 use claudepot_core::permission::settings::{
-    clear_default_mode, read_default_mode, resolve_default_mode, write_default_mode,
-    PermissionSettingsError,
+    clear_default_mode, read_default_mode, write_default_mode, PermissionSettingsError,
 };
-use claudepot_core::permission::{eval, store as permission_store, PermissionMode};
+use claudepot_core::permission::{eval, hook, store as permission_store, PermissionMode};
 use serde::Serialize;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -30,34 +33,47 @@ use std::sync::{Mutex, MutexGuard};
 use tauri::{AppHandle, Emitter, Manager};
 
 /// Serializes every load → mutate → save sequence on
-/// `permission-grants.json` within this process. The writers are
-/// [`tick`] (every 5 min via `usage_snapshot::run_tick`) and the
-/// `permission_grant` / `permission_revert` / `permission_extend`
-/// commands; without a shared lock an interleaved tick could save
-/// its older snapshot over a just-upserted grant, leaving the
-/// project's settings elevated with no managing grant record — the
-/// same fail-open as the corruption case, never auto-reverted.
-/// `atomic_write` only prevents torn files, not lost updates.
+/// `permission-grants.json` within this process, **and the hook
+/// reconcile that follows it**. The writers are [`tick`] (every 5 min
+/// via `usage_snapshot::run_tick`) and the `permission_grant` /
+/// `permission_revert` / `permission_extend` commands; without a shared
+/// lock an interleaved tick could save its older snapshot over a
+/// just-upserted grant, or read "no grants" and take the hook entry out
+/// from under a grant a command had just written. `atomic_write` only
+/// prevents torn files, not lost updates.
 ///
-/// Read-only loads (`permission_list` / `permission_get` /
-/// `current_dto`) don't take the lock: the atomic file replace means
-/// they see either the old or the new snapshot, and a stale read
-/// has no persistence to lose.
+/// Read-only loads (`permission_list` / `permission_get`) don't take
+/// the lock: the atomic file replace means they see either the old or
+/// the new snapshot, and a stale read has no persistence to lose.
 ///
-/// The CLI never touches this file, so an intra-process mutex is
-/// the whole fix — no file lock needed.
+/// The CLI never writes this file — the hook verb reads it and nothing
+/// else — so an intra-process mutex is the whole fix.
 static GRANTS_FILE_LOCK: Mutex<()> = Mutex::new(());
 
 /// Acquire the grants-file lock, recovering from poison (a panic in
-/// one writer must not disable grant persistence — and auto-revert —
-/// for the app's lifetime). Hold the returned guard across the
-/// entire load → mutate → save sequence, and never across an
-/// `.await`.
+/// one writer must not disable grant persistence for the app's
+/// lifetime). Hold the returned guard across the entire load → mutate
+/// → save → reconcile sequence, and never across an `.await`.
 pub fn grants_file_guard() -> MutexGuard<'static, ()> {
     claudepot_core::sync::recover_lock(&GRANTS_FILE_LOCK, "permission grants file")
 }
 
-/// What happened when a grant's deadline was reached.
+/// Make Claude Code's `PreToolUse` entry agree with `file` at `now`,
+/// pointing at the `claudepot` CLI. Returns whether it is now
+/// installed.
+///
+/// **Not `current_exe`.** This process is the Tauri app, which has no
+/// `hook` verb; the verb lives in the CLI bundled beside it.
+/// `hook::hook_binary` resolves that, and refuses rather than falling
+/// back to the GUI — an entry aimed at the GUI would have CC launch
+/// the desktop app on every tool call and block the call at the
+/// timeout. Callers hold [`grants_file_guard`].
+pub fn reconcile_hook(file: &GrantsFile, now: DateTime<Utc>) -> Result<bool, String> {
+    let binary = hook::hook_binary().map_err(|e| e.to_string())?;
+    hook::reconcile(file, now, &binary).map_err(|e| e.to_string())
+}
+
+/// What happened when a legacy grant's settings write was undone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RevertOutcome {
     /// The layer still held the granted mode; it was restored to
@@ -65,15 +81,18 @@ pub enum RevertOutcome {
     Reverted,
     /// The layer no longer holds the granted mode — the user changed
     /// the setting themselves after the grant. We don't clobber their
-    /// change; the grant is just dropped.
+    /// change; the record is just dropped.
     SkippedUserChanged,
 }
 
-/// Revert one grant, with a safety check: only restore `previous_mode`
-/// if the settings layer *still* holds exactly `granted_mode`. If the
-/// user has since changed the setting by hand, leave their value
-/// alone and report [`RevertOutcome::SkippedUserChanged`].
-pub fn revert_grant(grant: &Grant) -> Result<RevertOutcome, PermissionSettingsError> {
+/// Undo one schema-1 grant's settings write, with a safety check: only
+/// restore `previous_mode` if the settings layer *still* holds exactly
+/// `granted_mode`. If the user has since changed the setting by hand,
+/// leave their value alone and report
+/// [`RevertOutcome::SkippedUserChanged`].
+pub fn revert_legacy(
+    grant: &LegacySettingsGrant,
+) -> Result<RevertOutcome, PermissionSettingsError> {
     let root = Path::new(&grant.project_path);
     let current = read_default_mode(&grant.layer.settings_file(root))?;
     if user_changed_layer(current.as_ref(), &grant.granted_mode) {
@@ -87,65 +106,89 @@ pub fn revert_grant(grant: &Grant) -> Result<RevertOutcome, PermissionSettingsEr
 }
 
 /// Pure skip-user-changed comparison: the layer no longer holds
-/// exactly the granted mode (changed value, or key removed) means
-/// the user took over and the revert must not clobber their choice.
+/// exactly the granted mode (changed value, or key removed) means the
+/// user took over and the revert must not clobber their choice.
 fn user_changed_layer(current: Option<&PermissionMode>, granted: &PermissionMode) -> bool {
     current != Some(granted)
 }
 
-/// Pure stale-sweep decision: grants whose project's LocalProject
-/// layer no longer holds `granted_mode` (per the injected
-/// `local_value` resolver) — the user hand-edited settings since the
-/// grant was created, so the on-disk record is no longer managing
-/// anything. [`tick`] injects `resolve_default_mode`; tests inject a
-/// closure over a fixture map.
+/// One migration pass over `file.legacy`, with the revert injected so
+/// tests run it against a fixture instead of real settings files.
 ///
-/// A resolver error (unreadable settings for that project) skips
-/// that ONE grant — never marked stale, never aborting the sweep.
-/// Anything stronger would fail-open: one malformed settings file
-/// would block the expired-grant revert loop for every other
-/// project. The unreadable project's own revert attempt fails
-/// downstream and advances its circuit breaker.
-fn stale_grant_paths<F, E>(grants: &[Grant], local_value: F) -> Vec<String>
+/// A record whose revert succeeds (or was skipped because the user
+/// already changed the key) is promoted to a hook grant carrying its
+/// deadline. A record whose revert fails is kept for the next tick, up
+/// to [`LegacySettingsGrant::MAX_REVERT_ATTEMPTS`]; the attempt that
+/// crosses that line drops it and reports it, so a malformed settings
+/// file costs three warnings and one notice rather than one warning
+/// every five minutes for the app's lifetime. The key CC ignores
+/// anyway, so what is left behind is litter, not an elevation.
+fn migrate_legacy<F, E>(file: &mut GrantsFile, now: DateTime<Utc>, revert: F) -> Migration
 where
-    F: Fn(&str) -> Result<Option<PermissionMode>, E>,
+    F: Fn(&LegacySettingsGrant) -> Result<RevertOutcome, E>,
+    E: std::fmt::Display,
 {
-    grants
-        .iter()
-        .filter(|g| match local_value(&g.project_path) {
-            Ok(current) => current.as_ref() != Some(&g.granted_mode),
-            Err(_) => false,
-        })
-        .map(|g| g.project_path.clone())
-        .collect()
+    let mut out = Migration::default();
+    for legacy in file.legacy.clone() {
+        match revert(&legacy) {
+            Ok(_) => {
+                let promoted = file.promote_legacy(&legacy.project_path, now);
+                out.migrated.push((legacy.project_path, promoted.is_some()));
+            }
+            Err(e) => {
+                let attempts = legacy.revert_attempts + 1;
+                tracing::warn!(
+                    project = %legacy.project_path,
+                    attempt = attempts,
+                    error = %e,
+                    "permission_orchestrator: legacy grant revert failed"
+                );
+                if attempts >= LegacySettingsGrant::MAX_REVERT_ATTEMPTS {
+                    file.legacy
+                        .retain(|l| l.project_path != legacy.project_path);
+                    out.given_up.push(legacy.project_path);
+                } else if let Some(live) = file
+                    .legacy
+                    .iter_mut()
+                    .find(|l| l.project_path == legacy.project_path)
+                {
+                    live.revert_attempts = attempts;
+                    out.retrying = true;
+                }
+            }
+        }
+    }
+    out
 }
 
-/// Pure breaker advance for a failed revert: returns the advanced
-/// ledger plus whether this failure is the one that newly crosses
-/// the threshold. `trips_on_next_failure` is checked *before* the
-/// record so the trip event fires exactly once — the same idiom the
-/// rotation orchestrator uses.
-fn advance_breaker_on_failure(
-    prev: &breaker::FailureLedger,
-    now: DateTime<Utc>,
-) -> (breaker::FailureLedger, bool) {
-    let newly_tripped = breaker::trips_on_next_failure(prev);
-    (breaker::record_failure(prev, now), newly_tripped)
+/// What one migration pass did. Every field non-empty means the file
+/// changed and there is something to tell the user.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Migration {
+    /// `(project, still_granted)` — the settings key is back to what
+    /// it was; `true` when the deadline had not passed and a hook grant
+    /// now carries it.
+    migrated: Vec<(String, bool)>,
+    /// Reverts that failed for the last time; the settings file needs a
+    /// person.
+    given_up: Vec<String>,
+    /// A revert failed but will be retried next tick.
+    retrying: bool,
 }
 
-/// Drive one expiration cycle. Called from `usage_snapshot::run_tick`
-/// after the snapshot is written. Loads grants, reverts the expired
-/// ones, and saves the trimmed file. A real I/O failure on load skips
-/// the tick (rather than treating it as "no grants" and never
-/// reverting); a per-grant revert failure advances that grant's
-/// consecutive-failure circuit breaker and leaves it in the file to
-/// retry next tick.
-///
-/// A grant whose breaker is *tripped* — repeated revert failures —
-/// is skipped entirely: not reverted, not retried, just left in the
-/// file flagged. The breaker's cooldown lets one probe retry through
-/// later. The breaker arithmetic is pure `claudepot_core::breaker`;
-/// this function only wires it.
+impl Migration {
+    fn changed_file(&self) -> bool {
+        !self.migrated.is_empty() || !self.given_up.is_empty() || self.retrying
+    }
+    fn worth_a_notice(&self) -> bool {
+        !self.migrated.is_empty() || !self.given_up.is_empty()
+    }
+}
+
+/// Drive one cycle. Called from `usage_snapshot::run_tick` after the
+/// snapshot is written. A real I/O failure on load skips the tick
+/// (rather than treating it as "no grants" and taking the hook entry
+/// out from under a live grant).
 pub async fn tick(app: &AppHandle) {
     // Exclude the grant commands for the whole read-modify-write
     // cycle (this function never awaits, so holding a sync guard is
@@ -159,119 +202,67 @@ pub async fn tick(app: &AppHandle) {
         }
     };
     let mut file = loaded.value;
+    // What the hook reads until a save lands. If the save below fails,
+    // the entry is reconciled against THIS, not against the in-memory
+    // changes that never reached disk.
+    let on_disk = file.clone();
 
-    // Corruption is fail-open for this store: the on-disk record is
-    // the ONLY thing obliging us to revert a `bypassPermissions`
-    // elevation, and it just got recovered to empty. Surface it —
-    // BEFORE the grants-empty early return below, which a recovered
-    // file always hits. `corrupt_grant_copies` also catches a
-    // recovery that happened in an earlier process (a command-path
-    // load, a previous app run); that cross-restart scan runs once
-    // per process.
+    // Corruption is loud for this store: the file just got recovered
+    // to empty, which withdrew every grant and dropped any legacy
+    // revert obligation. Surface it BEFORE the empty early return
+    // below, which a recovered file always hits. `corrupt_grant_copies`
+    // also catches a recovery that happened in an earlier process;
+    // that cross-restart scan runs once per process.
     let recovered_now = loaded.recovery.is_some();
     let first_scan = !CORRUPTION_SCAN_DONE.swap(true, Ordering::Relaxed);
     if recovered_now || first_scan {
-        maybe_notify_grants_corruption(app, &file, recovered_now);
-    }
-
-    if file.grants.is_empty() {
-        return;
+        maybe_notify_grants_corruption(app, recovered_now);
     }
 
     let now = Utc::now();
 
-    // Sweep stale records first: any grant whose `granted_mode` no
-    // longer matches the project's LocalProject layer value means the
-    // user hand-edited settings since the grant was created. Time-
-    // boxed grants self-heal via `revert_grant`'s `skipped_user_changed`
-    // path on the expired-revert loop below, but sticky grants would
-    // otherwise linger on disk indefinitely. Drop them here so disk
-    // state matches what `current_dto::filter_stale` already hides
-    // from the UI.
-    let stale_paths = stale_grant_paths(&file.grants, |path| {
-        resolve_default_mode(std::path::Path::new(path))
-            .map(|state| state.local_project_value)
-            .inspect_err(|e| {
-                tracing::warn!(
-                    project_path = %path,
-                    error = %e,
-                    "permission_orchestrator: settings unreadable; skipping stale check for this grant"
-                );
-            })
-    });
-    let mut changed = false;
-    for path in &stale_paths {
-        if file.remove(path).is_some() {
-            changed = true;
-        }
-    }
-
-    let expired_paths: Vec<String> = eval::expired_grants(&file, now)
-        .into_iter()
+    let migration = migrate_legacy(&mut file, now, revert_legacy);
+    let expired: Vec<String> = eval::expired_grants(&file, now)
+        .iter()
         .map(|g| g.project_path.clone())
         .collect();
-    if expired_paths.is_empty() {
-        if changed {
-            if let Err(e) = permission_store::save(&file) {
-                tracing::warn!(error = %e, "permission_orchestrator: stale sweep save failed");
-            }
-        }
-        return;
+    for path in &expired {
+        file.remove(path);
     }
 
-    for path in &expired_paths {
-        // Re-fetch the grant from `file` each iteration so the
-        // breaker mutations below land on the live struct.
-        let grant = match file.find(path) {
-            Some(g) => g.clone(),
-            None => continue,
-        };
-
-        // Circuit-breaker gate: a grant that has failed to revert
-        // THRESHOLD times in a row is quarantined — skip it until
-        // the cooldown lets a probe through. Without this, a
-        // permanently un-revertable grant (settings file deleted,
-        // permission lost) retries every 5 minutes forever.
-        if breaker::is_tripped(&grant.breaker_ledger(), now) {
-            continue;
-        }
-
-        match revert_grant(&grant) {
-            Ok(outcome) => {
-                // Success removes the grant — its breaker state goes
-                // with it. (Probe retries that succeed land here.)
-                file.remove(path);
-                changed = true;
-                emit_reverted(app, &grant, outcome);
+    // Persist BEFORE saying anything. A notice that a project was
+    // migrated, or an event that a grant lapsed, describes the file on
+    // disk — if the save fails, the hook still reads the old file and
+    // both claims would be false. On failure the next tick redoes the
+    // work: the settings reverts already landed, so a legacy record
+    // then reads as `SkippedUserChanged` and is promoted the same way.
+    let persisted: &GrantsFile = if migration.changed_file() || !expired.is_empty() {
+        match permission_store::save(&file) {
+            Ok(()) => {
+                if migration.worth_a_notice() {
+                    notify_migration(app, &migration);
+                }
+                for path in &expired {
+                    emit_reverted(app, path);
+                }
+                &file
             }
             Err(e) => {
-                tracing::warn!(
-                    error = %e,
-                    project = %path,
-                    "permission_orchestrator: revert failed; advancing circuit breaker"
-                );
-                // Advance the breaker on the live grant and persist.
-                // `advance_breaker_on_failure` checks the trip
-                // transition *before* the record so the trip event
-                // fires exactly once, on the failure that crosses
-                // the threshold.
-                if let Some(live) = file.find_mut(path) {
-                    let (ledger, newly_tripped) =
-                        advance_breaker_on_failure(&live.breaker_ledger(), now);
-                    live.set_breaker_ledger(ledger);
-                    changed = true;
-                    if newly_tripped {
-                        emit_breaker_tripped(app, &grant, ledger.consecutive);
-                    }
-                }
+                tracing::warn!(error = %e, "permission_orchestrator: grants save failed; nothing announced");
+                &on_disk
             }
         }
-    }
+    } else {
+        &file
+    };
 
-    if changed {
-        if let Err(e) = permission_store::save(&file) {
-            tracing::warn!(error = %e, "permission_orchestrator: grants save failed");
-        }
+    // Last, and unconditionally, against whatever is actually on disk:
+    // the entry follows the file. A grant that outlived an app upgrade
+    // gets its `command` re-pointed here, and a failed save must not
+    // skip that — the persisted grants are still live and still need
+    // an entry that points at a binary which exists.
+    if let Err(e) = reconcile_hook(persisted, now) {
+        tracing::warn!(error = %e, "permission_orchestrator: hook reconcile failed");
     }
 }
 
@@ -280,25 +271,83 @@ pub async fn tick(app: &AppHandle) {
 /// gate, so a corruption event mid-run is still surfaced.
 static CORRUPTION_SCAN_DONE: AtomicBool = AtomicBool::new(false);
 
-/// Surface a grants-file corruption recovery to the user. The grants
-/// store is fail-open on corruption (see `permission::store` module
-/// docs): the recovered-to-empty file silently ends every revert
-/// obligation, so the user must hear about it through the existing
-/// notification mechanism — an OS banner plus a bell-log entry
-/// listing the projects whose `settings.local.json` still holds
-/// `bypassPermissions` with no managing grant.
-fn maybe_notify_grants_corruption(app: &AppHandle, file: &GrantsFile, recovered_now: bool) {
+/// Surface a grants-file corruption recovery to the user through the
+/// existing notification mechanism — an OS banner plus a bell-log
+/// entry. The store is loud on corruption (see `permission::store`):
+/// the recovered-to-empty file silently withdrew every grant, and a
+/// user who granted eight hours of unattended work should hear that
+/// the prompts are back rather than discover it.
+fn maybe_notify_grants_corruption(app: &AppHandle, recovered_now: bool) {
     let prior_copies = !permission_store::corrupt_grant_copies().is_empty();
-    if !recovered_now && !prior_copies {
-        return;
-    }
-    let elevated = elevated_unmanaged_projects(file);
-    let Some((title, body)) = corruption_notice(recovered_now, prior_copies, &elevated) else {
+    let Some((title, body)) = corruption_notice(recovered_now, prior_copies) else {
         return;
     };
+    notify(app, NotificationKind::Error, title, body);
+}
 
-    // OS banner — this is a "your safety net is gone" condition;
-    // worth OS-level prominence like the P0 categories get.
+/// Pure decision: should a corruption recovery be surfaced?
+///
+/// A recovery observed by *this* load is always surfaced. Stale
+/// forensic copies from an earlier process are not: the grants they
+/// held are gone either way, the hook fails closed without them, and
+/// re-nagging on every launch about a file the user may have already
+/// looked at would be noise.
+fn corruption_notice(recovered_now: bool, _prior_corrupt_copies: bool) -> Option<(String, String)> {
+    use crate::i18n::tr;
+    if !recovered_now {
+        return None;
+    }
+    Some((tr("permission.corruptTitle"), tr("permission.corruptBody")))
+}
+
+/// Tell the user, once per migration pass, what happened to the grants
+/// a schema-1 Claudepot wrote into settings files. Both halves in one
+/// entry: which projects had their key put back (and which of those
+/// are still granted, now through the hook), and which settings files
+/// could not be repaired.
+fn notify_migration(app: &AppHandle, m: &Migration) {
+    let (title, body) = migration_notice(m);
+    notify(app, NotificationKind::Notice, title, body);
+}
+
+/// Pure: the notice text for a migration pass.
+fn migration_notice(m: &Migration) -> (String, String) {
+    use crate::i18n::{tr, tr1};
+    let title = tr("permission.migratedTitle");
+    let mut parts = Vec::new();
+    let regranted: Vec<&str> = m
+        .migrated
+        .iter()
+        .filter(|(_, live)| *live)
+        .map(|(p, _)| p.as_str())
+        .collect();
+    let lapsed: Vec<&str> = m
+        .migrated
+        .iter()
+        .filter(|(_, live)| !*live)
+        .map(|(p, _)| p.as_str())
+        .collect();
+    if !regranted.is_empty() {
+        parts.push(tr1(
+            "permission.migratedRegranted",
+            "list",
+            &regranted.join(", "),
+        ));
+    }
+    if !lapsed.is_empty() {
+        parts.push(tr1("permission.migratedLapsed", "list", &lapsed.join(", ")));
+    }
+    if !m.given_up.is_empty() {
+        parts.push(tr1(
+            "permission.migratedGivenUp",
+            "list",
+            &m.given_up.join(", "),
+        ));
+    }
+    (title, parts.join(" "))
+}
+
+fn notify(app: &AppHandle, kind: NotificationKind, title: String, body: String) {
     {
         use tauri_plugin_notification::NotificationExt;
         if let Err(e) = app
@@ -308,164 +357,48 @@ fn maybe_notify_grants_corruption(app: &AppHandle, file: &GrantsFile, recovered_
             .body(&body)
             .show()
         {
-            tracing::warn!(error = %e, "permission_orchestrator: corruption OS notification failed");
+            tracing::warn!(error = %e, "permission_orchestrator: OS notification failed");
         }
     }
-
-    // Bell log so the event survives past the banner.
     if let Some(log) = app.try_state::<crate::commands::notification::NotificationLogState>() {
         if let Err(e) = log.log.append(
             NotificationSource::Os,
-            NotificationKind::Error,
+            kind,
             title,
             body,
             serde_json::Value::Null,
         ) {
-            tracing::warn!(error = %e, "permission_orchestrator: corruption log append failed");
+            tracing::warn!(error = %e, "permission_orchestrator: log append failed");
         }
     }
-}
-
-/// Pure decision: should a corruption recovery be surfaced, and with
-/// what message?
-///
-/// - A recovery observed by *this* load is always surfaced — the
-///   user's revert obligations were just dropped, even if no project
-///   is currently elevated.
-/// - Stale forensic copies from an *earlier* process are only worth
-///   a notification while some project still holds an unmanaged
-///   `bypassPermissions`; once the user has re-granted or reverted
-///   everything by hand, re-nagging on every launch would be noise.
-fn corruption_notice(
-    recovered_now: bool,
-    prior_corrupt_copies: bool,
-    elevated_bypass_projects: &[String],
-) -> Option<(String, String)> {
-    use crate::i18n::{tr, tr1, tr_args};
-    let stale_copies_worth_notice = prior_corrupt_copies && !elevated_bypass_projects.is_empty();
-    if !recovered_now && !stale_copies_worth_notice {
-        return None;
-    }
-    let title = tr("permission.corruptTitle");
-    let body = if elevated_bypass_projects.is_empty() {
-        tr("permission.corruptBodyClean")
-    } else {
-        let shown: Vec<&str> = elevated_bypass_projects
-            .iter()
-            .map(|s| s.as_str())
-            .take(3)
-            .collect();
-        let more = elevated_bypass_projects.len() - shown.len();
-        let list = if more > 0 {
-            tr_args(
-                "permission.listMore",
-                &[("shown", &shown.join(", ")), ("more", &more.to_string())],
-            )
-        } else {
-            shown.join(", ")
-        };
-        tr1("permission.corruptBodyElevated", "list", &list)
-    };
-    Some((title, body))
-}
-
-/// Projects whose LocalProject layer holds `bypassPermissions` but
-/// that have no grant in `file` — after a corruption recovery these
-/// are the elevations nobody is managing. Scans the CC project list;
-/// only invoked on the (rare) corruption path.
-fn elevated_unmanaged_projects(file: &GrantsFile) -> Vec<String> {
-    let cfg = claudepot_core::paths::claude_config_dir();
-    let projects = match claudepot_core::project::list_projects(&cfg) {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::warn!(error = %e, "permission_orchestrator: project scan for corruption notice failed");
-            return Vec::new();
-        }
-    };
-    let mut modes = Vec::with_capacity(projects.len());
-    for p in projects {
-        match resolve_default_mode(Path::new(&p.original_path)) {
-            Ok(state) => modes.push((p.original_path, state.local_project_value)),
-            Err(e) => tracing::warn!(
-                project_path = %p.original_path,
-                error = %e,
-                "permission_orchestrator: skipping unreadable project settings"
-            ),
-        }
-    }
-    filter_elevated_unmanaged(modes, file)
-}
-
-/// Pure filter behind [`elevated_unmanaged_projects`]: keep paths
-/// whose layer value is `bypassPermissions` AND that have no grant
-/// record in `file`.
-fn filter_elevated_unmanaged(
-    modes: Vec<(String, Option<PermissionMode>)>,
-    file: &GrantsFile,
-) -> Vec<String> {
-    modes
-        .into_iter()
-        .filter(|(path, mode)| {
-            *mode == Some(PermissionMode::BypassPermissions) && file.find(path).is_none()
-        })
-        .map(|(path, _)| path)
-        .collect()
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PermissionRevertedPayload {
     project_path: String,
-    /// The mode the project is back to (`previous_mode`, or the CC
-    /// default wire string when the grant cleared the key).
-    reverted_to: String,
-    /// `"reverted"` or `"skipped_user_changed"`.
+    /// Always `"expired"` today: a hook grant reaches its deadline and
+    /// is dropped. Kept as a string so a second outcome can be added
+    /// without changing the event's shape.
     outcome: String,
 }
 
-fn emit_reverted(app: &AppHandle, grant: &Grant, outcome: RevertOutcome) {
-    let reverted_to = grant
-        .previous_mode
-        .as_ref()
-        .map(|m| m.as_wire_str().to_string())
-        .unwrap_or_else(|| "default".to_string());
+fn emit_reverted(app: &AppHandle, project_path: &str) {
     let payload = PermissionRevertedPayload {
-        project_path: grant.project_path.clone(),
-        reverted_to,
-        outcome: match outcome {
-            RevertOutcome::Reverted => "reverted".into(),
-            RevertOutcome::SkippedUserChanged => "skipped_user_changed".into(),
-        },
+        project_path: project_path.to_string(),
+        outcome: "expired".into(),
     };
     if let Err(e) = app.emit(crate::events::PERMISSION_REVERTED, payload) {
         tracing::warn!(error = %e, "permission_orchestrator: emit reverted failed");
     }
 }
 
-/// `permission-breaker-tripped` payload — a grant's auto-revert kept
-/// failing, so its circuit breaker quarantined it. Emitted once, on
-/// the failure that crosses the threshold.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PermissionBreakerTrippedPayload {
-    project_path: String,
-    /// Number of consecutive revert failures that tripped the breaker.
-    consecutive_failures: u32,
-}
-
-fn emit_breaker_tripped(app: &AppHandle, grant: &Grant, consecutive_failures: u32) {
-    let payload = PermissionBreakerTrippedPayload {
-        project_path: grant.project_path.clone(),
-        consecutive_failures,
-    };
-    if let Err(e) = app.emit(crate::events::PERMISSION_BREAKER_TRIPPED, payload) {
-        tracing::warn!(error = %e, "permission_orchestrator: emit breaker-tripped failed");
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
+    use claudepot_core::permission::grants::Grant;
+    use claudepot_core::settings_writer::SettingsLayer;
 
     /// One test covers both lock properties (a single test because
     /// the static is shared — a separate poison test could race a
@@ -475,8 +408,8 @@ mod tests {
     ///    orchestrator tick and the grant commands is what it exists
     ///    to close;
     /// 2. a panic while holding it must not disable grant
-    ///    persistence (and auto-revert) for the app lifetime —
-    ///    `grants_file_guard` recovers from poison.
+    ///    persistence for the app lifetime — `grants_file_guard`
+    ///    recovers from poison.
     #[test]
     fn test_grants_file_guard_exclusive_and_poison_recoverable() {
         {
@@ -505,37 +438,37 @@ mod tests {
         let _g = grants_file_guard();
     }
 
-    use chrono::TimeZone;
-    use claudepot_core::settings_writer::SettingsLayer;
-
-    fn grant(path: &str, granted: PermissionMode, previous: Option<PermissionMode>) -> Grant {
-        Grant {
-            project_path: path.to_string(),
-            layer: SettingsLayer::LocalProject,
-            granted_mode: granted,
-            previous_mode: previous,
-            granted_at: Utc.timestamp_opt(1_700_000_000, 0).unwrap(),
-            expires_at: Some(Utc.timestamp_opt(1_700_007_200, 0).unwrap()),
-            consecutive_failures: 0,
-            last_failure_at: None,
-        }
-    }
-
-    fn grants_file(grants: Vec<Grant>) -> GrantsFile {
-        GrantsFile {
-            grants,
-            ..GrantsFile::default()
-        }
-    }
-
     fn now() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 6, 1, 12, 0, 0).unwrap()
     }
 
-    // ── revert_grant — the three branches, on real settings files ──
+    fn legacy(
+        path: &str,
+        previous: Option<PermissionMode>,
+        expires: Option<DateTime<Utc>>,
+    ) -> LegacySettingsGrant {
+        LegacySettingsGrant {
+            project_path: path.to_string(),
+            layer: SettingsLayer::LocalProject,
+            granted_mode: PermissionMode::BypassPermissions,
+            previous_mode: previous,
+            granted_at: Utc.with_ymd_and_hms(2026, 6, 1, 10, 0, 0).unwrap(),
+            expires_at: expires,
+            revert_attempts: 0,
+        }
+    }
+
+    fn with_legacy(legacy: Vec<LegacySettingsGrant>) -> GrantsFile {
+        GrantsFile {
+            legacy,
+            ..GrantsFile::default()
+        }
+    }
+
+    // ── revert_legacy — the three branches, on real settings files ─
 
     #[test]
-    fn test_revert_grant_restores_previous_mode() {
+    fn test_revert_legacy_restores_previous_mode() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
         write_default_mode(
@@ -544,18 +477,14 @@ mod tests {
             &PermissionMode::BypassPermissions,
         )
         .unwrap();
-        let g = grant(
-            root.to_str().unwrap(),
-            PermissionMode::BypassPermissions,
-            Some(PermissionMode::Default),
-        );
-        assert_eq!(revert_grant(&g).unwrap(), RevertOutcome::Reverted);
+        let g = legacy(root.to_str().unwrap(), Some(PermissionMode::Default), None);
+        assert_eq!(revert_legacy(&g).unwrap(), RevertOutcome::Reverted);
         let after = read_default_mode(&SettingsLayer::LocalProject.settings_file(root)).unwrap();
         assert_eq!(after, Some(PermissionMode::Default));
     }
 
     #[test]
-    fn test_revert_grant_clears_key_when_no_previous_mode() {
+    fn test_revert_legacy_clears_key_when_no_previous_mode() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
         write_default_mode(
@@ -564,226 +493,185 @@ mod tests {
             &PermissionMode::BypassPermissions,
         )
         .unwrap();
-        let g = grant(
-            root.to_str().unwrap(),
-            PermissionMode::BypassPermissions,
-            None,
-        );
-        assert_eq!(revert_grant(&g).unwrap(), RevertOutcome::Reverted);
+        let g = legacy(root.to_str().unwrap(), None, None);
+        assert_eq!(revert_legacy(&g).unwrap(), RevertOutcome::Reverted);
         let after = read_default_mode(&SettingsLayer::LocalProject.settings_file(root)).unwrap();
         assert_eq!(after, None, "key must be cleared, not set to a mode");
     }
 
     #[test]
-    fn test_revert_grant_skips_when_user_changed_layer() {
+    fn test_revert_legacy_skips_when_user_changed_layer() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
         // User hand-set the layer to plain `default` after the grant.
         write_default_mode(SettingsLayer::LocalProject, root, &PermissionMode::Default).unwrap();
-        let g = grant(
-            root.to_str().unwrap(),
-            PermissionMode::BypassPermissions,
-            Some(PermissionMode::Plan),
+        let g = legacy(root.to_str().unwrap(), Some(PermissionMode::Plan), None);
+        assert_eq!(
+            revert_legacy(&g).unwrap(),
+            RevertOutcome::SkippedUserChanged
         );
-        assert_eq!(revert_grant(&g).unwrap(), RevertOutcome::SkippedUserChanged);
         // Their value must be left alone — not clobbered with `Plan`.
         let after = read_default_mode(&SettingsLayer::LocalProject.settings_file(root)).unwrap();
         assert_eq!(after, Some(PermissionMode::Default));
     }
 
+    #[test]
+    fn test_revert_legacy_errors_on_a_malformed_settings_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let path = SettingsLayer::LocalProject.settings_file(root);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"{ not json").unwrap();
+        let g = legacy(root.to_str().unwrap(), None, None);
+        assert!(revert_legacy(&g).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"{ not json");
+    }
+
     // ── user_changed_layer — the pure comparison ───────────────────
 
     #[test]
-    fn test_user_changed_layer_matching_mode_is_not_changed() {
+    fn test_user_changed_layer() {
         assert!(!user_changed_layer(
             Some(&PermissionMode::BypassPermissions),
             &PermissionMode::BypassPermissions
         ));
-    }
-
-    #[test]
-    fn test_user_changed_layer_different_mode_is_changed() {
         assert!(user_changed_layer(
             Some(&PermissionMode::Default),
             &PermissionMode::BypassPermissions
         ));
-    }
-
-    #[test]
-    fn test_user_changed_layer_cleared_key_is_changed() {
         assert!(user_changed_layer(None, &PermissionMode::BypassPermissions));
     }
 
-    // ── stale_grant_paths — sweep decision with injected resolver ──
+    // ── migrate_legacy — promotion, bounded retries ────────────────
 
     #[test]
-    fn test_stale_grant_paths_keeps_matching_grant() {
-        let grants = vec![grant("/p/a", PermissionMode::BypassPermissions, None)];
-        let stale = stale_grant_paths(&grants, |_| {
-            Ok::<_, String>(Some(PermissionMode::BypassPermissions))
+    fn a_reverted_legacy_grant_becomes_a_hook_grant_with_its_deadline() {
+        let later = now() + chrono::Duration::hours(2);
+        let mut f = with_legacy(vec![legacy("/p/a", None, Some(later))]);
+        let m = migrate_legacy(&mut f, now(), |_| Ok::<_, String>(RevertOutcome::Reverted));
+        assert_eq!(m.migrated, vec![("/p/a".to_string(), true)]);
+        assert!(m.given_up.is_empty());
+        assert!(f.legacy.is_empty());
+        assert_eq!(
+            f.grants,
+            vec![Grant {
+                project_path: "/p/a".into(),
+                granted_at: Utc.with_ymd_and_hms(2026, 6, 1, 10, 0, 0).unwrap(),
+                expires_at: Some(later),
+            }]
+        );
+        assert!(m.changed_file() && m.worth_a_notice());
+    }
+
+    #[test]
+    fn a_user_changed_key_still_promotes_the_grant() {
+        // The user took the key out by hand; the grant they asked for
+        // is still what they asked for, now honoured by the hook.
+        let mut f = with_legacy(vec![legacy("/p/a", None, None)]);
+        let m = migrate_legacy(&mut f, now(), |_| {
+            Ok::<_, String>(RevertOutcome::SkippedUserChanged)
         });
-        assert!(stale.is_empty());
+        assert_eq!(m.migrated, vec![("/p/a".to_string(), true)]);
+        assert_eq!(f.grants.len(), 1);
+        assert!(f.grants[0].expires_at.is_none(), "sticky stays sticky");
     }
 
     #[test]
-    fn test_stale_grant_paths_flags_hand_edited_value() {
-        let grants = vec![
-            grant("/p/a", PermissionMode::BypassPermissions, None),
-            grant("/p/b", PermissionMode::BypassPermissions, None),
-        ];
-        // /p/a was hand-reverted to default; /p/b still matches.
-        let stale = stale_grant_paths(&grants, |path| {
-            Ok::<_, String>(if path == "/p/a" {
-                Some(PermissionMode::Default)
+    fn an_already_expired_legacy_grant_is_reverted_and_reported_as_lapsed() {
+        let earlier = now() - chrono::Duration::hours(1);
+        let mut f = with_legacy(vec![legacy("/p/a", None, Some(earlier))]);
+        let m = migrate_legacy(&mut f, now(), |_| Ok::<_, String>(RevertOutcome::Reverted));
+        assert_eq!(m.migrated, vec![("/p/a".to_string(), false)]);
+        assert!(f.grants.is_empty());
+        assert!(f.legacy.is_empty());
+    }
+
+    #[test]
+    fn a_failed_revert_is_kept_and_counted_until_the_third_failure() {
+        let mut f = with_legacy(vec![legacy("/p/broken", None, None)]);
+        for attempt in 1..LegacySettingsGrant::MAX_REVERT_ATTEMPTS {
+            let m = migrate_legacy(&mut f, now(), |_| Err::<RevertOutcome, _>("malformed"));
+            assert!(m.migrated.is_empty() && m.given_up.is_empty());
+            assert!(m.retrying && m.changed_file() && !m.worth_a_notice());
+            assert_eq!(f.legacy.len(), 1, "kept for retry");
+            assert_eq!(f.legacy[0].revert_attempts, attempt);
+            assert!(
+                f.grants.is_empty(),
+                "never promoted while the key is still there"
+            );
+        }
+        let m = migrate_legacy(&mut f, now(), |_| Err::<RevertOutcome, _>("malformed"));
+        assert_eq!(m.given_up, vec!["/p/broken".to_string()]);
+        assert!(
+            f.legacy.is_empty(),
+            "given up: dropped, not retried forever"
+        );
+        assert!(
+            f.grants.is_empty(),
+            "and NOT promoted — the key was never put back"
+        );
+        assert!(m.worth_a_notice());
+    }
+
+    #[test]
+    fn one_broken_settings_file_does_not_block_the_others() {
+        let mut f = with_legacy(vec![
+            legacy("/p/broken", None, None),
+            legacy("/p/fine", None, None),
+        ]);
+        let m = migrate_legacy(&mut f, now(), |l| {
+            if l.project_path == "/p/broken" {
+                Err("malformed".to_string())
             } else {
-                Some(PermissionMode::BypassPermissions)
-            })
-        });
-        assert_eq!(stale, vec!["/p/a".to_string()]);
-    }
-
-    #[test]
-    fn test_stale_grant_paths_flags_cleared_key() {
-        let grants = vec![grant("/p/a", PermissionMode::BypassPermissions, None)];
-        let stale = stale_grant_paths(&grants, |_| Ok::<_, String>(None));
-        assert_eq!(stale, vec!["/p/a".to_string()]);
-    }
-
-    #[test]
-    fn unreadable_settings_skips_that_grant_not_the_sweep() {
-        // One project's unreadable settings must neither mark that
-        // grant stale nor abort evaluation of the others — the
-        // whole-tick abort was the fail-open that let a single
-        // malformed settings file block every project's auto-revert.
-        let grants = vec![
-            grant("/p/broken", PermissionMode::BypassPermissions, None),
-            grant("/p/edited", PermissionMode::BypassPermissions, None),
-        ];
-        let stale = stale_grant_paths(&grants, |path| {
-            if path == "/p/broken" {
-                Err("settings unreadable".to_string())
-            } else {
-                Ok(Some(PermissionMode::Default))
+                Ok(RevertOutcome::Reverted)
             }
         });
-        assert_eq!(stale, vec!["/p/edited".to_string()]);
-    }
-
-    // ── advance_breaker_on_failure — trip-exactly-once semantics ───
-
-    #[test]
-    fn test_advance_breaker_first_failure_does_not_trip() {
-        let (ledger, newly_tripped) =
-            advance_breaker_on_failure(&breaker::FailureLedger::default(), now());
-        assert_eq!(ledger.consecutive, 1);
-        assert_eq!(ledger.last_failure, Some(now()));
-        assert!(!newly_tripped);
+        assert_eq!(m.migrated, vec![("/p/fine".to_string(), true)]);
+        assert_eq!(f.legacy.len(), 1);
+        assert_eq!(f.legacy[0].project_path, "/p/broken");
+        assert_eq!(f.grants.len(), 1);
+        assert_eq!(f.grants[0].project_path, "/p/fine");
     }
 
     #[test]
-    fn test_advance_breaker_threshold_crossing_trips_once() {
-        // Walk a clean ledger through THRESHOLD failures: only the
-        // crossing failure may report newly_tripped.
-        let mut ledger = breaker::FailureLedger::default();
-        let mut trips = Vec::new();
-        for _ in 0..breaker::THRESHOLD {
-            let (next, newly_tripped) = advance_breaker_on_failure(&ledger, now());
-            trips.push(newly_tripped);
-            ledger = next;
-        }
-        let expected: Vec<bool> = (1..=breaker::THRESHOLD)
-            .map(|n| n == breaker::THRESHOLD)
-            .collect();
-        assert_eq!(trips, expected, "only the crossing failure trips");
-        assert_eq!(ledger.consecutive, breaker::THRESHOLD);
+    fn an_empty_legacy_list_is_a_no_op() {
+        let mut f = GrantsFile::default();
+        let m = migrate_legacy(&mut f, now(), |_| Ok::<_, String>(RevertOutcome::Reverted));
+        assert_eq!(m, Migration::default());
+        assert!(!m.changed_file());
     }
 
-    #[test]
-    fn test_advance_breaker_past_threshold_does_not_retrip() {
-        let tripped = breaker::FailureLedger {
-            consecutive: breaker::THRESHOLD,
-            last_failure: Some(now()),
-        };
-        let (ledger, newly_tripped) = advance_breaker_on_failure(&tripped, now());
-        assert_eq!(ledger.consecutive, breaker::THRESHOLD + 1);
-        assert!(!newly_tripped, "trip event must not re-fire");
-    }
-
-    // ── corruption_notice — fail-open recovery surfacing ───────────
+    // ── notices — pure text ────────────────────────────────────────
 
     #[test]
-    fn test_corruption_notice_silent_when_nothing_happened() {
-        assert!(corruption_notice(false, false, &[]).is_none());
+    fn test_corruption_notice_fires_only_for_a_fresh_recovery() {
+        assert!(corruption_notice(false, false).is_none());
         assert!(
-            corruption_notice(false, false, &["/p/a".to_string()]).is_none(),
-            "elevated projects alone (no corruption evidence) must not notify"
+            corruption_notice(false, true).is_none(),
+            "stale forensic copies alone are not worth a banner"
         );
-    }
-
-    #[test]
-    fn test_corruption_notice_fresh_recovery_fires_even_without_elevated_projects() {
-        let (title, body) = corruption_notice(true, false, &[]).unwrap();
+        let (title, body) = corruption_notice(true, false).unwrap();
         assert!(title.contains("unreadable"), "title={title}");
-        assert!(body.contains("No project currently holds"), "body={body}");
+        assert!(body.contains("withdrawn"), "body={body}");
     }
 
     #[test]
-    fn test_corruption_notice_fresh_recovery_lists_elevated_projects() {
-        let elevated = vec!["/p/a".to_string(), "/p/b".to_string()];
-        let (_, body) = corruption_notice(true, false, &elevated).unwrap();
-        assert!(body.contains("/p/a"), "body={body}");
-        assert!(body.contains("/p/b"), "body={body}");
-        assert!(body.contains("will NOT auto-revert"), "body={body}");
-    }
-
-    #[test]
-    fn test_corruption_notice_truncates_project_list_to_three() {
-        let elevated: Vec<String> = (0..5).map(|i| format!("/p/proj-{i}")).collect();
-        let (_, body) = corruption_notice(true, false, &elevated).unwrap();
-        assert!(body.contains("/p/proj-0"));
-        assert!(body.contains("/p/proj-2"));
-        assert!(!body.contains("/p/proj-3"), "body={body}");
-        assert!(body.contains("and 2 more"), "body={body}");
-    }
-
-    #[test]
-    fn test_corruption_notice_stale_copies_fire_only_with_elevated_projects() {
-        // Cross-restart detection: forensic copies linger on disk
-        // forever, so they only warrant a notification while an
-        // unmanaged elevation still exists.
-        assert!(corruption_notice(false, true, &[]).is_none());
-        let (_, body) = corruption_notice(false, true, &["/p/a".to_string()]).unwrap();
-        assert!(body.contains("/p/a"), "body={body}");
-    }
-
-    // ── filter_elevated_unmanaged — who gets named in the notice ───
-
-    #[test]
-    fn test_filter_elevated_unmanaged_keeps_bypass_without_grant() {
-        let file = grants_file(vec![]);
-        let modes = vec![
-            ("/p/a".to_string(), Some(PermissionMode::BypassPermissions)),
-            ("/p/b".to_string(), Some(PermissionMode::Default)),
-            ("/p/c".to_string(), None),
-        ];
-        assert_eq!(
-            filter_elevated_unmanaged(modes, &file),
-            vec!["/p/a".to_string()]
-        );
-    }
-
-    #[test]
-    fn test_filter_elevated_unmanaged_excludes_regranted_project() {
-        // A project the user already re-granted after the recovery is
-        // managed again — naming it would be a false alarm.
-        let file = grants_file(vec![grant("/p/a", PermissionMode::BypassPermissions, None)]);
-        let modes = vec![
-            ("/p/a".to_string(), Some(PermissionMode::BypassPermissions)),
-            ("/p/b".to_string(), Some(PermissionMode::BypassPermissions)),
-        ];
-        assert_eq!(
-            filter_elevated_unmanaged(modes, &file),
-            vec!["/p/b".to_string()]
-        );
+    fn test_migration_notice_names_each_group_once() {
+        let m = Migration {
+            migrated: vec![("/p/live".into(), true), ("/p/lapsed".into(), false)],
+            given_up: vec!["/p/broken".into()],
+            retrying: false,
+        };
+        let (title, body) = migration_notice(&m);
+        assert!(title.contains("2.1.257"), "title={title}");
+        assert!(body.contains("/p/live"), "body={body}");
+        assert!(body.contains("/p/lapsed"), "body={body}");
+        assert!(body.contains("/p/broken"), "body={body}");
+        // The three groups are told apart by their sentence, not by
+        // the reader guessing.
+        let live_at = body.find("/p/live").unwrap();
+        let lapsed_at = body.find("/p/lapsed").unwrap();
+        let broken_at = body.find("/p/broken").unwrap();
+        assert!(live_at < lapsed_at && lapsed_at < broken_at, "body={body}");
     }
 }

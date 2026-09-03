@@ -6,20 +6,26 @@
 //!
 //! **This store fails loud on corruption recovery.** For rotation
 //! rules, recovering a corrupt file to empty is safe — the feature
-//! just turns off. For grants it is fail-open: the on-disk record is
-//! the ONLY thing obliging the orchestrator to revert a time-boxed
-//! `bypassPermissions` elevation, and AGENTS.md's contract is "the
-//! elevated state is never left to memory". A corrupt or
-//! future-schema grants file therefore:
+//! just turns off. For grants the loss cuts two ways. A hook grant
+//! that vanishes fails *closed* — the hook reads nothing and the
+//! prompt is drawn at the keyboard — but the user who granted eight
+//! hours of unattended work finds it silently withdrawn. A legacy
+//! (schema-1) record that vanishes fails *open*: it was the only
+//! thing obliging the orchestrator to take `bypassPermissions` back
+//! out of a settings file. A corrupt or future-schema grants file
+//! therefore:
 //!
 //! - still gets moved aside so boot never wedges, and the store
 //!   still returns a usable (empty) file, BUT
 //! - the recovery is logged at `error!` (not `warn!`), and
 //! - [`load_outcome`] exposes a [`CorruptionRecovery`] marker so the
-//!   orchestrator/UI can surface "grants file unreadable; elevated
-//!   projects may not auto-revert" instead of silently ending all
-//!   revert obligations. [`corrupt_grant_copies`] lets a later boot
-//!   detect a recovery that happened in an earlier process.
+//!   orchestrator/UI can surface it instead of silently ending every
+//!   grant. [`corrupt_grant_copies`] lets a later boot detect a
+//!   recovery that happened in an earlier process.
+//!
+//! A schema-1 file is **not** corruption: `GrantsFile`'s deserializer
+//! migrates it. Only the hook reads this file outside the GUI, and it
+//! goes through `hook::load_readonly`, which never recovers anything.
 
 use std::path::{Path, PathBuf};
 
@@ -87,11 +93,9 @@ impl json_store::Validate for GrantsFile {
 /// Load grants from the canonical path, reporting corruption
 /// recovery explicitly. `Ok(Loaded { recovery: Some(..), .. })`
 /// means the on-disk file was corrupt or had an unsupported schema:
-/// it was moved aside, the returned grants are empty, and **projects
-/// elevated by a Claudepot grant will not auto-revert** until the
-/// user re-grants or reverts by hand. Callers that can reach the
-/// user (orchestrator, commands) must surface this; see the module
-/// docs for why this store cannot fail silently-open.
+/// it was moved aside, the returned grants are empty, and every
+/// grant is withdrawn. Callers that can reach the user (orchestrator,
+/// commands) must surface this; see the module docs.
 pub fn load_outcome() -> std::io::Result<Loaded<GrantsFile>> {
     load_outcome_from(&grants_path())
 }
@@ -105,8 +109,8 @@ pub fn load_outcome_from(path: &Path) -> std::io::Result<Loaded<GrantsFile>> {
             error = %rec.error,
             moved_to = ?rec.moved_to,
             "permission_store: grants file was corrupt or unsupported; recovered to \
-             empty — projects elevated by a Claudepot grant will NOT auto-revert \
-             until re-granted or reverted by hand"
+             empty — every Claudepot permission grant is withdrawn, and a legacy \
+             settings write will NOT be reverted until done by hand"
         );
     }
     Ok(loaded)
@@ -166,20 +170,13 @@ pub fn save_to(path: &Path, file: &GrantsFile) -> Result<(), PermissionStoreErro
 mod tests {
     use super::*;
     use crate::permission::grants::Grant;
-    use crate::permission::mode::PermissionMode;
-    use crate::settings_writer::SettingsLayer;
     use chrono::{TimeZone, Utc};
 
     fn sample_grant(path: &str) -> Grant {
         Grant {
             project_path: path.to_string(),
-            layer: SettingsLayer::LocalProject,
-            granted_mode: PermissionMode::BypassPermissions,
-            previous_mode: Some(PermissionMode::Default),
             granted_at: Utc.timestamp_opt(1_700_000_000, 0).unwrap(),
             expires_at: Some(Utc.timestamp_opt(1_700_007_200, 0).unwrap()),
-            consecutive_failures: 0,
-            last_failure_at: None,
         }
     }
 
@@ -207,8 +204,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let p = tmp.path().join("grants.json");
         let bad = GrantsFile {
-            schema_version: 1,
             grants: vec![sample_grant("/p/a"), sample_grant("/p/a")],
+            ..GrantsFile::default()
         };
         let err = save_to(&p, &bad);
         assert!(matches!(err, Err(PermissionStoreError::Validation(_))));
@@ -273,13 +270,11 @@ mod tests {
         let p = tmp.path().join("grants.json");
         // Parses, fails validate (duplicate project).
         let bad = serde_json::json!({
-            "schema_version": 1,
+            "schema_version": 2,
             "grants": [
-                { "project_path": "/p/a", "layer": "local_project",
-                  "granted_mode": "bypassPermissions", "previous_mode": "default",
+                { "project_path": "/p/a",
                   "granted_at": "2023-11-14T22:13:20Z", "expires_at": "2023-11-15T00:13:20Z" },
-                { "project_path": "/p/a", "layer": "local_project",
-                  "granted_mode": "bypassPermissions", "previous_mode": "default",
+                { "project_path": "/p/a",
                   "granted_at": "2023-11-14T22:13:20Z", "expires_at": "2023-11-15T00:13:20Z" }
             ]
         });
@@ -287,5 +282,35 @@ mod tests {
         let f = load_from(&p).unwrap();
         assert!(f.grants.is_empty());
         assert_eq!(crate::json_store::corrupt_siblings(&p).len(), 1);
+    }
+
+    #[test]
+    fn a_schema_1_file_is_migrated_not_moved_aside() {
+        // The upgrade path. A v1 file on disk is the only record that
+        // a settings key needs reverting; treating it as corrupt would
+        // rename it out of reach and leave the key behind.
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("grants.json");
+        std::fs::write(
+            &p,
+            br#"{"schema_version":1,"grants":[{"project_path":"/p/a","layer":"local_project",
+                "granted_mode":"bypassPermissions","previous_mode":null,
+                "granted_at":"2023-11-14T22:13:20Z","expires_at":null}]}"#,
+        )
+        .unwrap();
+        let loaded = load_outcome_from(&p).unwrap();
+        assert!(loaded.recovery.is_none(), "migration is not corruption");
+        assert!(crate::json_store::corrupt_siblings(&p).is_empty());
+        assert!(loaded.value.grants.is_empty());
+        assert_eq!(loaded.value.legacy.len(), 1);
+        assert_eq!(loaded.value.legacy[0].project_path, "/p/a");
+        // Saving writes the migrated shape; the legacy record survives
+        // the round trip until the orchestrator consumes it.
+        save_to(&p, &loaded.value).unwrap();
+        let again = load_from(&p).unwrap();
+        assert_eq!(again, loaded.value);
+        assert!(std::fs::read_to_string(&p)
+            .unwrap()
+            .contains("\"schema_version\": 2"));
     }
 }

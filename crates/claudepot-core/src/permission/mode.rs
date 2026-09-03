@@ -1,16 +1,15 @@
 //! CC's `permissions.defaultMode` value as a typed enum.
 //!
-//! Verified against `~/github/claude_code_src/src/types/permissions.ts`
-//! (`EXTERNAL_PERMISSION_MODES`). Only the *external* modes are
-//! user-addressable in `settings.json`; `auto` / `bubble` are
-//! internal and never written to disk by CC, so an on-disk file
-//! carrying one is treated as [`PermissionMode::Unknown`] rather
-//! than rejected — forward-compat with a newer CC.
-//!
-//! The `manual` alias is verified against CC's published permissions
-//! reference (`code.claude.com/docs/en/permissions`) rather than that
-//! source checkout, which predates v2.1.200. Re-verify against source
-//! once the checkout is refreshed.
+//! Verified against CC's published settings reference
+//! (`code.claude.com/docs/en/settings-reference#permissions-defaultmode`)
+//! and the 2.1.259 binary (2026-09-03). The documented values are
+//! `default` / `manual` / `acceptEdits` / `plan` / `auto` / `dontAsk`
+//! / `bypassPermissions`. `auto` was once an internal, feature-flagged
+//! mode CC never wrote to disk; it is now the built-in starting mode
+//! on Pro, Max and Team plans and a value users set themselves, so it
+//! has its own variant. Anything else (`bubble`, a future mode) is
+//! [`PermissionMode::Unknown`] rather than rejected — forward-compat
+//! with a newer CC.
 
 use serde::{Deserialize, Serialize};
 
@@ -48,14 +47,19 @@ pub enum PermissionMode {
     AcceptEdits,
     /// `plan` — read-only planning mode.
     Plan,
+    /// `auto` — a classifier answers prompts instead of the user.
+    /// Like [`PermissionMode::BypassPermissions`], CC ignores it when
+    /// it comes from a project-scope settings file (see
+    /// `settings::PROJECT_SCOPE_IGNORES_SINCE`).
+    Auto,
     /// `dontAsk` — suppress prompts for allowlisted ops without
     /// granting bypass.
     DontAsk,
     /// `bypassPermissions` — the elevated mode: no prompts at all.
     /// This is the only [`is_elevated`](Self::is_elevated) variant.
     BypassPermissions,
-    /// Any other string (e.g. a feature-flagged `auto`, or a future
-    /// CC mode). Preserved verbatim so writes never corrupt it.
+    /// Any other string (an internal mode such as `bubble`, or a
+    /// future CC mode). Preserved verbatim so writes never corrupt it.
     Unknown(String),
 }
 
@@ -67,6 +71,7 @@ impl PermissionMode {
             Self::Manual => "manual",
             Self::AcceptEdits => "acceptEdits",
             Self::Plan => "plan",
+            Self::Auto => "auto",
             Self::DontAsk => "dontAsk",
             Self::BypassPermissions => "bypassPermissions",
             Self::Unknown(s) => s,
@@ -81,6 +86,7 @@ impl PermissionMode {
             "manual" => Self::Manual,
             "acceptEdits" => Self::AcceptEdits,
             "plan" => Self::Plan,
+            "auto" => Self::Auto,
             "dontAsk" => Self::DontAsk,
             "bypassPermissions" => Self::BypassPermissions,
             other => Self::Unknown(other.to_string()),
@@ -130,6 +136,7 @@ mod tests {
             PermissionMode::Manual,
             PermissionMode::AcceptEdits,
             PermissionMode::Plan,
+            PermissionMode::Auto,
             PermissionMode::DontAsk,
             PermissionMode::BypassPermissions,
         ] {
@@ -173,10 +180,23 @@ mod tests {
 
     #[test]
     fn unknown_mode_preserves_string_verbatim() {
-        let m = PermissionMode::from_wire_str("auto");
-        assert_eq!(m, PermissionMode::Unknown("auto".into()));
-        assert_eq!(m.as_wire_str(), "auto");
+        let m = PermissionMode::from_wire_str("bubble");
+        assert_eq!(m, PermissionMode::Unknown("bubble".into()));
+        assert_eq!(m.as_wire_str(), "bubble");
         assert!(!m.is_known());
+    }
+
+    #[test]
+    fn auto_is_a_known_mode_since_it_is_a_documented_settings_value() {
+        // `auto` is the built-in starting mode on paid plans and a value
+        // this user's own `~/.claude/settings.json` carries. Reading it
+        // as Unknown made the Permissions pane call a normal setup
+        // unmanageable.
+        let m = PermissionMode::from_wire_str("auto");
+        assert_eq!(m, PermissionMode::Auto);
+        assert!(m.is_known());
+        assert!(!m.is_elevated());
+        assert_eq!(serde_json::to_string(&m).unwrap(), r#""auto""#);
     }
 
     #[test]
@@ -187,8 +207,9 @@ mod tests {
             PermissionMode::Manual,
             PermissionMode::AcceptEdits,
             PermissionMode::Plan,
+            PermissionMode::Auto,
             PermissionMode::DontAsk,
-            PermissionMode::Unknown("auto".into()),
+            PermissionMode::Unknown("bubble".into()),
         ] {
             assert!(!m.is_elevated(), "{m} must not be elevated");
         }
@@ -204,9 +225,9 @@ mod tests {
 
     #[test]
     fn serde_unknown_round_trips() {
-        let m = PermissionMode::Unknown("auto".into());
+        let m = PermissionMode::Unknown("bubble".into());
         let json = serde_json::to_string(&m).unwrap();
-        assert_eq!(json, r#""auto""#);
+        assert_eq!(json, r#""bubble""#);
         assert_eq!(serde_json::from_str::<PermissionMode>(&json).unwrap(), m);
     }
 }

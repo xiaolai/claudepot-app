@@ -50,6 +50,7 @@ pub mod cc_commands;
 pub mod cc_daemon;
 pub mod cc_doctor;
 pub mod cc_env;
+pub mod cc_hook_entry;
 pub mod cc_retention;
 pub mod cc_sweep;
 pub mod cc_tips;

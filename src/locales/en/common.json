@@ -83,6 +83,7 @@
       "manual": "Manual",
       "acceptEdits": "Accept edits",
       "plan": "Plan",
+      "auto": "Auto",
       "dontAsk": "Don't ask",
       "bypassPermissions": "Bypass permissions"
     },
