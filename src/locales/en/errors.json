@@ -469,10 +469,11 @@
   "permission": {
     "duration_out_of_range": "Pick a duration between {{min}} and {{max}} seconds.",
     "grants_load_failed": "Couldn't load the permission grants: {{detail}}",
+    "hook_install_failed": "Couldn't install Claude Code's PreToolUse hook, so the grant would answer nothing: {{detail}}",
     "invalid_project_path": "That project path can't be used: {{detail}}",
     "no_active_grant": "Claudepot isn't managing permissions for this project.",
-    "read_settings_for_project_failed": "Couldn't read the permission settings for {{project_path}}: {{detail}}",
-    "unknown_mode": "Claudepot can't grant the mode {{mode}}."
+    "no_ignored_value": "There is no ignored permission value Claudepot can remove for this project.",
+    "read_settings_for_project_failed": "Couldn't read the permission settings for {{project_path}}: {{detail}}"
   },
   "permission_grants": {
     "duplicate_project": "{{project_path}} has more than one grant.",

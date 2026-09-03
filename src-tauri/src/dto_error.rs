@@ -142,7 +142,12 @@ pub mod codes {
     /// A renderer-supplied grant duration outside the guard-rail range.
     pub const PERMISSION_DURATION_OUT_OF_RANGE: &str = "permission.duration_out_of_range";
     /// A permission mode string Claudepot will not grant.
-    pub const PERMISSION_UNKNOWN_MODE: &str = "permission.unknown_mode";
+    /// Claude Code's `PreToolUse` hook entry could not be written, so
+    /// the grant would answer nothing; the grant is rolled back.
+    pub const PERMISSION_HOOK_INSTALL_FAILED: &str = "permission.hook_install_failed";
+    /// `permission_clear_ignored` found no ignored project-scope value
+    /// in a file Claudepot may write.
+    pub const PERMISSION_NO_IGNORED_VALUE: &str = "permission.no_ignored_value";
     /// A renderer-supplied remote-control window duration outside the
     /// guard-rail range.
     pub const PEER_INBOUND_DURATION_OUT_OF_RANGE: &str = "peer_inbound.duration_out_of_range";
@@ -886,7 +891,8 @@ pub mod codes {
         PREFERENCES_UNSUPPORTED_LOCALE,
         PREFERENCES_SET_ACTIVATION_POLICY_FAILED,
         PERMISSION_DURATION_OUT_OF_RANGE,
-        PERMISSION_UNKNOWN_MODE,
+        PERMISSION_HOOK_INSTALL_FAILED,
+        PERMISSION_NO_IGNORED_VALUE,
         PERMISSION_NO_ACTIVE_GRANT,
         PERMISSION_INVALID_PROJECT_PATH,
         PERMISSION_READ_SETTINGS_FOR_PROJECT,

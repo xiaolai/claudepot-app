@@ -63,18 +63,14 @@ pub const ROTATION_BREAKER_TRIPPED: &str = "rotation-breaker-tripped";
 /// is near cap" instead of only seeing an audit-log row.
 pub const ROTATION_STALLED: &str = "rotation-stalled";
 
-/// A permission grant was auto-reverted (or skipped because the
-/// user hand-changed the setting).
+/// A permission grant reached its deadline and was dropped, so the
+/// ProjectDetail panel stops showing a countdown for it.
 pub const PERMISSION_REVERTED: &str = "permission-reverted";
 
 /// The time-boxed remote-control window closed — either its deadline
 /// passed or the setting was changed by hand. The chrome indicator
 /// subscribes so it stops showing "open" without waiting for a poll.
 pub const PEER_INBOUND_CLOSED: &str = "peer-inbound-closed";
-
-/// A grant's auto-revert kept failing and its circuit breaker
-/// quarantined it.
-pub const PERMISSION_BREAKER_TRIPPED: &str = "permission-breaker-tripped";
 
 /// CLI-active account crossed a configured usage threshold.
 pub const USAGE_THRESHOLD_CROSSED: &str = "usage-threshold-crossed";

@@ -19,6 +19,22 @@
   background: var(--bg-raised);
 }
 
+/* A stale project-scope defaultMode Claude Code ignores: a note with
+   its own repair action, above whichever grant state follows. */
+.permission-ignored {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-8);
+  margin-bottom: var(--sp-8);
+}
+
+/* Grant recorded, hook entry missing — the grant answers nothing. */
+.permission-hook-missing {
+  color: var(--danger);
+  margin: 0;
+}
+
 /* ── per-project .env panel ─────────────────────────────────────── */
 
 .env-file-card {

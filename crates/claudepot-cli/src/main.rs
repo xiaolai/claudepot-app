@@ -456,6 +456,10 @@ enum HookAction {
     /// the decision Claude Code should honour.
     #[command(name = "permission-request")]
     PermissionRequest,
+    /// Skip the permission prompt for a tool call inside a project
+    /// with a live Claudepot permission grant.
+    #[command(name = "pre-tool-use")]
+    PreToolUse,
 }
 
 #[derive(Subcommand)]
@@ -1249,6 +1253,7 @@ async fn main() -> Result<()> {
     if let Commands::Hook { action } = cli.command {
         return match action {
             HookAction::PermissionRequest => commands::hook::permission_request_cmd().await,
+            HookAction::PreToolUse => commands::hook::pre_tool_use_cmd(),
         };
     }
 

@@ -803,12 +803,20 @@
       "message": "duration must be 60..=86400 seconds, got 5"
     },
     {
-      "code": "permission.unknown_mode",
+      "code": "permission.hook_install_failed",
       "owner": "command",
       "params": [
-        "mode"
+        "detail"
       ],
-      "message": "`yolo` is not a permission mode Claudepot can grant"
+      "message": "cannot locate this binary: No such file or directory (os error 2)"
+    },
+    {
+      "code": "permission.no_ignored_value",
+      "owner": "command",
+      "params": [
+        "project_path"
+      ],
+      "message": "no ignored project-scope value Claudepot can remove for /p/a"
     },
     {
       "code": "permission.no_active_grant",

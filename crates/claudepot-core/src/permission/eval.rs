@@ -1,5 +1,8 @@
 //! Pure expiration logic over a set of grants. No I/O — the clock is
-//! injected so the orchestrator and tests share one code path.
+//! injected so the orchestrator and tests share one code path. The
+//! per-prompt question ("does a grant cover this cwd?") lives in
+//! `permission::hook`; this module answers the orchestrator's ("which
+//! grants have lapsed?").
 
 use chrono::{DateTime, Utc};
 
@@ -10,7 +13,7 @@ use crate::permission::grants::{Grant, GrantsFile};
 pub struct GrantPartition<'a> {
     /// Not yet expired — the UI shows these with a live countdown.
     pub active: Vec<&'a Grant>,
-    /// Reached or passed `expires_at` — the orchestrator reverts these.
+    /// Reached or passed `expires_at` — the orchestrator drops these.
     pub expired: Vec<&'a Grant>,
 }
 
@@ -30,14 +33,15 @@ pub fn partition(file: &GrantsFile, now: DateTime<Utc>) -> GrantPartition<'_> {
 }
 
 /// Grants that have reached their deadline at `now` — the set the
-/// orchestrator must revert.
+/// orchestrator must drop.
 pub fn expired_grants(file: &GrantsFile, now: DateTime<Utc>) -> Vec<&Grant> {
     partition(file, now).expired
 }
 
 /// The *active* (not-yet-expired) grant for `project_path`, if any.
 /// An expired grant returns `None` — from the UI's perspective an
-/// expired-but-not-yet-reverted grant is no longer in effect.
+/// expired-but-not-yet-pruned grant is no longer in effect, and the
+/// hook agrees (`hook::covering_grant` skips it too).
 pub fn active_grant<'a>(
     file: &'a GrantsFile,
     project_path: &str,
@@ -49,8 +53,6 @@ pub fn active_grant<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::permission::mode::PermissionMode;
-    use crate::settings_writer::SettingsLayer;
     use chrono::TimeZone;
 
     fn ts(secs: i64) -> DateTime<Utc> {
@@ -60,20 +62,15 @@ mod tests {
     fn grant(path: &str, granted: i64, expires: i64) -> Grant {
         Grant {
             project_path: path.to_string(),
-            layer: SettingsLayer::LocalProject,
-            granted_mode: PermissionMode::BypassPermissions,
-            previous_mode: Some(PermissionMode::Default),
             granted_at: ts(granted),
             expires_at: Some(ts(expires)),
-            consecutive_failures: 0,
-            last_failure_at: None,
         }
     }
 
     fn file(grants: Vec<Grant>) -> GrantsFile {
         GrantsFile {
-            schema_version: 1,
             grants,
+            ..GrantsFile::default()
         }
     }
 

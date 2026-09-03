@@ -83,6 +83,7 @@
       "manual": "手动",
       "acceptEdits": "接受编辑",
       "plan": "计划",
+      "auto": "自动",
       "dontAsk": "不再询问",
       "bypassPermissions": "跳过权限确认"
     },

@@ -34,7 +34,10 @@ vi.mock("../../api", () => ({
         effectiveMode: "default",
         decidedBy: "default",
         isElevated: false,
+        ignoredValue: null,
         activeGrant: null,
+        hookInstalled: false,
+        projectScopeIgnoresSince: "2.1.257",
       }),
     envFileList: (...args: unknown[]) =>
       Promise.resolve({ projectPath: String(args[0] ?? ""), files: [] }),

@@ -1393,6 +1393,7 @@ pub fn run() {
             commands::permission::permission_grant,
             commands::permission::permission_revert,
             commands::permission::permission_extend,
+            commands::permission::permission_clear_ignored,
             commands::env_secret::env_vault_list,
             commands::env_secret::env_vault_add,
             commands::env_secret::env_vault_update,

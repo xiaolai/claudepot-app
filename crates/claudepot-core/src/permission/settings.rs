@@ -6,9 +6,11 @@
 //! reuse [`SettingsLayer`]; the read/write helpers here are
 //! nested-key-aware and preserve every sibling key.
 //!
-//! Verified against `~/github/claude_code_src/src/utils/settings/types.ts`
-//! (`PermissionsSchema`) and `permissionSetup.ts:743`
-//! (`settings.permissions?.defaultMode`).
+//! The key and its values are verified against CC's published settings
+//! reference (`code.claude.com/docs/en/settings-reference`) and the
+//! 2.1.259 binary (2026-09-03), not the abandoned source mirror. The
+//! one rule that is not "most specific layer wins" is
+//! [`PROJECT_SCOPE_IGNORES_SINCE`].
 
 use std::path::{Path, PathBuf};
 
@@ -97,6 +99,25 @@ impl From<crate::settings_mutex::SettingsMutexError> for PermissionSettingsError
     }
 }
 
+/// First Claude Code release that ignores `bypassPermissions` when it
+/// comes from `.claude/settings.json` or `.claude/settings.local.json`.
+///
+/// CC's changelog for 2.1.257: *"Changed `defaultMode:
+/// "bypassPermissions"` in `.claude/settings.json` or
+/// `.claude/settings.local.json` to be ignored, like `"auto"`; set it
+/// in user or managed settings, or pass `--permission-mode`."* The
+/// binary's own log line names the reason: *"only policy/user/flag
+/// settings may grant bypass mode (projectSettings and localSettings
+/// are repo-controllable)"*. The session starts in Manual, and CC does
+/// **not** fall through to a user-settings value — the settings
+/// reference says it "uses the built-in default rather than a
+/// `defaultMode` from `~/.claude/settings.json`".
+///
+/// This is the pin for [`resolve_default_mode`]'s ignore rule and the
+/// version the pane quotes. Re-check against the `permissions.defaultMode`
+/// row in `crates/xtask/cc-upstream-watch.md`.
+pub const PROJECT_SCOPE_IGNORES_SINCE: &str = "2.1.257";
+
 /// Where the effective `permissions.defaultMode` came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PermissionDecisionSource {
@@ -108,6 +129,21 @@ pub enum PermissionDecisionSource {
     UserSettings,
     /// No layer set the key — CC's built-in default (`default`).
     Default,
+    /// A project-scope file set a value CC refuses from that scope
+    /// (`bypassPermissions` or `auto`, since
+    /// [`PROJECT_SCOPE_IGNORES_SINCE`]). CC starts the session in its
+    /// built-in default and ignores the user layer too; the offending
+    /// value is in [`PermissionState::ignored`].
+    ProjectScopeIgnored,
+}
+
+/// A `defaultMode` value present on disk that CC will not honour
+/// because of the file it is in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IgnoredValue {
+    /// The project-scope layer carrying the value.
+    pub layer: SettingsLayer,
+    pub mode: PermissionMode,
 }
 
 /// Aggregate per-project permission state surfaced to the UI.
@@ -121,6 +157,20 @@ pub struct PermissionState {
     pub user_value: Option<PermissionMode>,
     pub project_value: Option<PermissionMode>,
     pub local_project_value: Option<PermissionMode>,
+    /// Set when the layer that would have won holds a value CC ignores
+    /// from project scope. The pane renders it as a stale key with a
+    /// repair action rather than as "elevated".
+    pub ignored: Option<IgnoredValue>,
+}
+
+/// The two values CC refuses from `.claude/settings.json` and
+/// `.claude/settings.local.json`. `acceptEdits`, `plan`, `dontAsk` and
+/// `default`/`manual` are honoured from any file.
+fn refused_from_project_scope(mode: &PermissionMode) -> bool {
+    matches!(
+        mode,
+        PermissionMode::BypassPermissions | PermissionMode::Auto
+    )
 }
 
 /// Read `permissions.defaultMode` from one settings file. Missing
@@ -159,6 +209,14 @@ pub fn read_default_mode(path: &Path) -> Result<Option<PermissionMode>, Permissi
 /// Resolve the effective `permissions.defaultMode` for `project_root`
 /// across the layering chain. Pure over the filesystem — no env vars
 /// participate in this setting (unlike `autoMemoryEnabled`).
+///
+/// Mirrors CC ≥ [`PROJECT_SCOPE_IGNORES_SINCE`]: the most specific
+/// layer wins, except that `bypassPermissions` / `auto` in a
+/// project-scope file is dropped outright — the session starts in
+/// CC's built-in default, and a user-layer value beneath it is *not*
+/// consulted. Reporting the local value as effective there is exactly
+/// how this pane showed "Bypass active" over a session that prompted
+/// for everything.
 pub fn resolve_default_mode(
     project_root: &Path,
 ) -> Result<PermissionState, PermissionSettingsError> {
@@ -167,14 +225,29 @@ pub fn resolve_default_mode(
     let local_project_value =
         read_default_mode(&SettingsLayer::LocalProject.settings_file(project_root))?;
 
-    let (effective, decided_by) = if let Some(v) = local_project_value.clone() {
-        (v, PermissionDecisionSource::LocalProjectSettings)
-    } else if let Some(v) = project_value.clone() {
-        (v, PermissionDecisionSource::ProjectSettings)
-    } else if let Some(v) = user_value.clone() {
-        (v, PermissionDecisionSource::UserSettings)
-    } else {
-        (PermissionMode::Default, PermissionDecisionSource::Default)
+    let winning_project_scope = local_project_value
+        .clone()
+        .map(|v| (SettingsLayer::LocalProject, v))
+        .or_else(|| project_value.clone().map(|v| (SettingsLayer::Project, v)));
+
+    let (effective, decided_by, ignored) = match winning_project_scope {
+        Some((layer, mode)) if refused_from_project_scope(&mode) => (
+            PermissionMode::Default,
+            PermissionDecisionSource::ProjectScopeIgnored,
+            Some(IgnoredValue { layer, mode }),
+        ),
+        Some((SettingsLayer::LocalProject, mode)) => {
+            (mode, PermissionDecisionSource::LocalProjectSettings, None)
+        }
+        Some((_, mode)) => (mode, PermissionDecisionSource::ProjectSettings, None),
+        None => match user_value.clone() {
+            Some(v) => (v, PermissionDecisionSource::UserSettings, None),
+            None => (
+                PermissionMode::Default,
+                PermissionDecisionSource::Default,
+                None,
+            ),
+        },
     };
 
     Ok(PermissionState {
@@ -183,6 +256,7 @@ pub fn resolve_default_mode(
         user_value,
         project_value,
         local_project_value,
+        ignored,
     })
 }
 
@@ -312,18 +386,47 @@ mod tests {
         assert_eq!(s.local_project_value, None);
     }
 
-    #[test]
-    fn local_project_overrides_user_and_project() {
-        let (_t, project, _l) = isolated();
-        write_default_mode(SettingsLayer::User, &project, &PermissionMode::Plan).unwrap();
+    fn write_project_layer(project: &Path, mode: &str) {
         // Project layer is hand-written (Claudepot won't write it).
-        let proj_path = SettingsLayer::Project.settings_file(&project);
+        let proj_path = SettingsLayer::Project.settings_file(project);
         fs::create_dir_all(proj_path.parent().unwrap()).unwrap();
         fs::write(
             &proj_path,
-            br#"{"permissions":{"defaultMode":"acceptEdits"}}"#,
+            format!(r#"{{"permissions":{{"defaultMode":"{mode}"}}}}"#),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn local_project_overrides_user_and_project_for_honoured_values() {
+        let (_t, project, _l) = isolated();
+        write_default_mode(SettingsLayer::User, &project, &PermissionMode::Plan).unwrap();
+        write_project_layer(&project, "acceptEdits");
+        write_default_mode(
+            SettingsLayer::LocalProject,
+            &project,
+            &PermissionMode::DontAsk,
+        )
+        .unwrap();
+
+        let s = resolve_default_mode(&project).unwrap();
+        assert_eq!(s.effective, PermissionMode::DontAsk);
+        assert_eq!(s.decided_by, PermissionDecisionSource::LocalProjectSettings);
+        assert_eq!(s.user_value, Some(PermissionMode::Plan));
+        assert_eq!(s.project_value, Some(PermissionMode::AcceptEdits));
+        assert_eq!(s.local_project_value, Some(PermissionMode::DontAsk));
+        assert_eq!(s.ignored, None);
+    }
+
+    #[test]
+    fn bypass_in_the_local_file_is_ignored_and_does_not_fall_through_to_user() {
+        // CC ≥ 2.1.257. The session starts in Manual, and the user
+        // layer's `plan` is NOT consulted — the settings reference says
+        // CC "uses the built-in default rather than a defaultMode from
+        // ~/.claude/settings.json". This is the state every Claudepot
+        // grant written before schema 2 left behind.
+        let (_t, project, _l) = isolated();
+        write_default_mode(SettingsLayer::User, &project, &PermissionMode::Plan).unwrap();
         write_default_mode(
             SettingsLayer::LocalProject,
             &project,
@@ -332,14 +435,72 @@ mod tests {
         .unwrap();
 
         let s = resolve_default_mode(&project).unwrap();
-        assert_eq!(s.effective, PermissionMode::BypassPermissions);
-        assert_eq!(s.decided_by, PermissionDecisionSource::LocalProjectSettings);
+        assert_eq!(s.effective, PermissionMode::Default);
+        assert_eq!(s.decided_by, PermissionDecisionSource::ProjectScopeIgnored);
+        assert_eq!(
+            s.ignored,
+            Some(IgnoredValue {
+                layer: SettingsLayer::LocalProject,
+                mode: PermissionMode::BypassPermissions,
+            })
+        );
+        // The raw per-layer values are still reported verbatim.
         assert_eq!(s.user_value, Some(PermissionMode::Plan));
-        assert_eq!(s.project_value, Some(PermissionMode::AcceptEdits));
         assert_eq!(
             s.local_project_value,
             Some(PermissionMode::BypassPermissions)
         );
+    }
+
+    #[test]
+    fn bypass_and_auto_in_the_committed_project_file_are_ignored_too() {
+        for mode in ["bypassPermissions", "auto"] {
+            let (_t, project, _l) = isolated();
+            write_project_layer(&project, mode);
+            let s = resolve_default_mode(&project).unwrap();
+            assert_eq!(s.effective, PermissionMode::Default, "{mode}");
+            assert_eq!(s.decided_by, PermissionDecisionSource::ProjectScopeIgnored);
+            assert_eq!(
+                s.ignored.as_ref().map(|i| i.layer),
+                Some(SettingsLayer::Project)
+            );
+            assert_eq!(
+                s.ignored.map(|i| i.mode),
+                Some(PermissionMode::from_wire_str(mode))
+            );
+        }
+    }
+
+    #[test]
+    fn the_local_file_still_shadows_a_project_file_value_that_would_be_ignored() {
+        // Local `plan` wins over committed `bypassPermissions`: the
+        // most specific layer decides, and its value is honoured.
+        let (_t, project, _l) = isolated();
+        write_project_layer(&project, "bypassPermissions");
+        write_default_mode(SettingsLayer::LocalProject, &project, &PermissionMode::Plan).unwrap();
+        let s = resolve_default_mode(&project).unwrap();
+        assert_eq!(s.effective, PermissionMode::Plan);
+        assert_eq!(s.decided_by, PermissionDecisionSource::LocalProjectSettings);
+        assert_eq!(s.ignored, None, "the shadowed value is not what CC ignores");
+    }
+
+    #[test]
+    fn bypass_and_auto_in_user_settings_are_honoured() {
+        // "only policy/user/flag settings may grant bypass mode".
+        for mode in [PermissionMode::BypassPermissions, PermissionMode::Auto] {
+            let (_t, project, _l) = isolated();
+            write_default_mode(SettingsLayer::User, &project, &mode).unwrap();
+            let s = resolve_default_mode(&project).unwrap();
+            assert_eq!(s.effective, mode);
+            assert_eq!(s.decided_by, PermissionDecisionSource::UserSettings);
+            assert_eq!(s.ignored, None);
+        }
+    }
+
+    #[test]
+    fn the_pin_names_the_release_that_changed_the_rule() {
+        // The pane quotes this; the watchlist row re-verifies it.
+        assert_eq!(PROJECT_SCOPE_IGNORES_SINCE, "2.1.257");
     }
 
     #[test]
@@ -511,9 +672,9 @@ mod tests {
         let (_t, project, _l) = isolated();
         let path = SettingsLayer::LocalProject.settings_file(&project);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(&path, br#"{"permissions":{"defaultMode":"auto"}}"#).unwrap();
+        fs::write(&path, br#"{"permissions":{"defaultMode":"bubble"}}"#).unwrap();
         let v = read_default_mode(&path).unwrap();
-        assert_eq!(v, Some(PermissionMode::Unknown("auto".into())));
+        assert_eq!(v, Some(PermissionMode::Unknown("bubble".into())));
     }
 
     #[test]

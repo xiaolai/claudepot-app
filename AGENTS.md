@@ -441,11 +441,20 @@ Two details are load-bearing:
     times running is quarantined (skipped before `evaluate`) until
     a 6-hour cooldown probe. Stale rule_ids are pruned each tick.
     Empty file = no failures recorded.
-  - `permission-grants.json` — active time-boxed permission grants.
-    `{schema_version, grants: [...]}`, one grant per project_path.
-    Owned by `claudepot-core::permission::store`. The orchestrator
-    reverts expired grants each `usage_snapshot::run_tick`. Empty
-    file or no grants = feature off. See "## Permission grants".
+  - `permission-grants.json` — active permission grants.
+    `{schema_version: 2, grants: [{project_path, granted_at,
+    expires_at}], legacy?: [...]}`, one grant per project_path. Owned
+    by `claudepot-core::permission::store`. **The record is the
+    capability**: `claudepot hook pre-tool-use` reads this file inside
+    every Claude Code tool call while a grant is live and answers
+    `allow` for sessions inside a granted project, so deleting a row
+    ends the grant at the next call. The orchestrator drops lapsed
+    grants each `usage_snapshot::run_tick` and keeps CC's hook entry in
+    step. A schema-1 file (grants that wrote `bypassPermissions` into
+    `.claude/settings.local.json`) is migrated on read, not moved
+    aside: its records sit in `legacy` until the settings key has been
+    put back. Empty file or no grants = feature off. See
+    "## Permission grants".
   - `peer-inbound-grant.json` — the single open remote-control window.
     `{schema_version, grant: {...}|null}`. Owned by
     `claudepot-core::peer::inbound::store`. Records that Claudepot set
@@ -646,29 +655,121 @@ fast-mode session is under-reported.
 
 ## Permission grants (ProjectDetail → Permissions)
 
-Optional feature: grant a project a time-boxed
-`permissions.defaultMode` (almost always `bypassPermissions`) that
-Claudepot auto-reverts on expiry — the elevated state is never
-left to memory.
+Optional feature: for a time-boxed window (or until revoked), Claude
+Code's tool calls in one project run without permission prompts. The
+grant is a record, never a mode: the state is visible with a countdown
+and a Revoke button, and lapses on its own.
+
+**It used to write `bypassPermissions` into
+`.claude/settings.local.json`, and Claude Code stopped honouring that
+in 2.1.257.** The changelog entry: *"Changed `defaultMode:
+"bypassPermissions"` in `.claude/settings.json` or
+`.claude/settings.local.json` to be ignored, like `"auto"`; set it in
+user or managed settings, or pass `--permission-mode`."* The binary
+says why — *"projectSettings and localSettings are repo-controllable"*
+— and the session starts in Manual, without falling through to a user
+value. Every grant written before this was a silent no-op on the
+installed CC (2.1.259 here) while the pane said "Bypass active": the
+`cleanupPeriodDays` inversion again, a control that kept writing a
+value upstream had stopped reading. `permission::settings::PROJECT_SCOPE_IGNORES_SINCE`
+is the pin; the resolver reports such a value as
+`PermissionDecisionSource::ProjectScopeIgnored`, and the pane renders
+it as *ignored* with a one-click removal, never as elevated.
+
+**A grant is now Claude Code's `PreToolUse` hook answering `allow`.**
+`claudepot hook pre-tool-use` (hidden, CC invokes it) reads
+`permission-grants.json` and prints the allow decision when a live
+grant's `project_path` contains the payload's `cwd`, by path
+components. Nothing in CC's settings changes except the hook entry
+itself, which lives beside the remote-approval one in
+`~/.claude/settings.json` and exists exactly while a grant is live.
+
+Why `PreToolUse` and not the `PermissionRequest` hook remote approvals
+use — measured on 2.1.259, in real interactive sessions driven through
+a pty, with `--debug-file`:
+
+| mode | `PermissionRequest` allow | `PreToolUse` allow |
+|---|---|---|
+| Manual | fires once, prompt skipped | fires once, prompt skipped |
+| auto | **never fires**; the classifier decided | fires once, **classifier skipped** |
+
+Auto mode is the built-in starting mode on Pro, Max and Team, so a
+grant on `PermissionRequest` would have done nothing for most users.
+`PreToolUse` runs before the permission system decides anything, and
+its `allow` is what `bypassPermissions` used to be: no prompt, and no
+2–3 s classifier round trip per call (the classifier request is absent
+from the debug log). Subagents report the parent's `cwd` and are
+covered; a protected-path write (`.claude/probe.txt`) went through.
+Headless `claude -p` does **not** consult either hook — it denies —
+which is why the first probe, run headless, said the hook never fired.
+
+Five properties hold it together:
+
+- **Two hooks, two lifetimes, one installer.** `cc_hook_entry` writes
+  and removes a verb-matched exec-form entry for either event through
+  `settings_mutex`; `remote::approval::install` and `permission::hook`
+  are thin over it. The approval entry leaves with `remote serve`, the
+  grant entry with the last live grant, and one's uninstall cannot
+  take the other (tested). The orchestrator tick reconciles the grant
+  entry every five minutes, which is also what re-points it at the
+  current binary after a Homebrew upgrade or an app move — a sticky
+  grant outlives both.
+- **The hook never touches the file.** It runs inside every tool call,
+  as the user, from a process CC started. `hook::load_readonly` parses
+  and nothing else: no corruption recovery, no rename-aside, no log
+  line. A corrupt file reads as "no grant", the call goes through CC's
+  normal flow, and the GUI's next tick moves the file aside and says
+  so. The CLI end-to-end test asserts the corrupt file is byte-for-byte
+  untouched and no sibling appears.
+- **Scope is the session's working directory.** Same scope
+  `bypassPermissions` had — per session, not per file touched — so a
+  granted session that runs `cd ../elsewhere && …` is approved as it
+  would have been under bypass. `/p/a-evil` is not under `/p/a`; a
+  symlinked root is matched on a second, canonicalized pass. Deny and
+  ask rules still apply (CC evaluates them regardless of a hook), and
+  so does everything no mode auto-approves.
+- **A grant with no hook is an error, not a grant.** `permission_grant`
+  rolls the record back if the entry cannot be written, and the DTO
+  carries `hook_installed` so a grant whose entry has gone missing
+  renders with a warning rather than as active — the one state this
+  feature must never show, having just replaced a control that did
+  exactly that.
+- **Cost is one spawn per tool call, reads included: ~13 ms here.**
+  There is deliberately no `matcher`; a fixed list of "tools that can
+  prompt" would drift with CC. The entry's timeout is 10 s, a ceiling on
+  a wedged disk, and a killed `PreToolUse` hook blocks the call, so
+  the verb does no waiting at all.
+
+The schema-1 migration runs in the orchestrator: each legacy record's
+settings key is put back (only if the layer still holds exactly the
+granted mode — a hand-changed value is left alone), the deadline is
+carried over as a hook grant unless it has already passed, and one
+bell entry says what happened. A revert that keeps failing is retried
+three times and then reported with the file to fix by hand; the key CC
+ignores anyway, so what is left behind is litter, not an elevation.
+Reviewed adversarially by Codex before building (thread
+`01a064df-b03c-77d3-99c6-b102b1fe0cba`); its checkable objections —
+the hook must not recover files, the two hook lifetimes must not race,
+the binary path must be repaired, legacy reverts need a bound — are the
+tests above. Sticky ("Never") grants survive: the record is persistent
+and one click ends it, which is what the original rationale required.
 
 - Pure logic in `claudepot-core::permission`: `mode` (PermissionMode
-  over CC's wire strings), `settings` (resolve/read/write the nested
-  `permissions.defaultMode` key, format-preserving, refuses the
-  committed Project layer), `grants` + `store` (the JSON file),
-  `eval` (expiration, clock injected).
+  over CC's wire strings, `auto` included), `settings` (resolve /
+  read / write the nested `permissions.defaultMode` key, with the
+  project-scope ignore rule), `grants` + `store` (the JSON file and
+  its v1 migration), `eval` (expiration, clock injected), `hook` (the
+  per-call decision, the read-only load, the entry's reconcile).
 - Orchestrator at `src-tauri/src/permission_orchestrator.rs` —
-  `tick()` reverts expired grants (skips if the user hand-changed
-  the setting since the grant) and emits `permission-reverted`.
-  Hooked into `usage_snapshot::run_tick` ahead of the account-state
-  early returns. Zero overhead when no grants exist.
-- Grants always land in `.claude/settings.local.json`. A project
-  elevated by hand-editing settings shows as elevated but *not*
-  Claudepot-managed — the UI won't revert someone's own choice.
-- CC schema (`permissions.defaultMode`) verified against
-  `~/github/claude_code_src/src` — i.e. against **2.1.88**, and not
-  re-checked since. See "Reference" for why that mirror is no longer
-  authoritative, and `crates/xtask/cc-upstream-watch.md` for the row
-  that re-verifies this key.
+  `tick()` drops lapsed grants (`permission-reverted`, outcome
+  `expired`), migrates legacy records, reconciles the hook. Hooked
+  into `usage_snapshot::run_tick`. Zero overhead when no grants exist.
+- A project running in `bypassPermissions` from the user's own
+  `~/.claude/settings.json` shows as elevated but *not*
+  Claudepot-managed — the UI won't touch someone's own choice.
+- Verified against the **2.1.259** binary and the published settings
+  reference (2026-09-03); the `permissions.defaultMode` and `PreToolUse
+  hook` rows in `crates/xtask/cc-upstream-watch.md` re-verify it.
 
 ## Peer messaging (`claudepot session live` / `send` / `inbound`)
 
