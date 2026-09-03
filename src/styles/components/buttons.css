@@ -1,37 +1,7 @@
 /* Legacy .btn opt-in chrome (paper-mono primitives are preferred for new code).
    Sharded out of src/App.css to keep each file under the 350-LOC
    loc-guardian limit. Tokens still live in src/styles/tokens.css —
-   nothing in this file may declare global custom properties.        */` {
-  font: inherit;
-  font-size: var(--fs-sm);
-  font-weight: 400;
-  height: var(--btn-h-legacy);
-  padding: var(--sp-1) var(--sp-12);
-  border: var(--bw-subhair) solid var(--line);
-  border-radius: var(--r-2);
-  background: var(--bg-raised);
-  color: var(--fg);
-  cursor: default;
-  -webkit-user-select: none;
-  user-select: none;
-  transition: background var(--dur-hover) var(--ease-out);
-  box-shadow: var(--shadow-sm);
-  /* Button labels should never break mid-word. In
-     `.project-detail-actions` three buttons ("Open in Finder",
-     "Rename…", "Open in Config") were wrapping to two lines when
-     the actions flex block shrank under pressure from the title
-     block. Buttons size to their intrinsic content now; if the whole
-     row overflows, `flex-wrap` on the parent is the right knob. */
-  white-space: nowrap;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  /* `--sp-6` between an inline icon and its label. Paired with the
-     `.btn > svg` width rule below so the icon reads as a peer of
-     the body text rather than a badge. */
-  gap: var(--sp-6);
-  flex-shrink: 0;
-}
+   nothing in this file may declare global custom properties.        */
 
 /* Keyboard-focus safety net.
  *
