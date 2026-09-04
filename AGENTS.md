@@ -2345,7 +2345,12 @@ See `dev-docs/implementation-plan.md` for the full plan.
 - GUI is paper-mono shell: custom 38px `WindowChrome` at top
   (breadcrumb + ⌘K palette hint + bell + theme toggle), 240px `Sidebar`
   on the left (swap targets + primary nav + live Activity strip
-  + synced strip), content column, 24px `StatusBar` at bottom.
+  + synced strip — **starts collapsed to its rail**; ⌘\ or either
+  chevron expands it, the choice is remembered per device in
+  localStorage as an explicit three-state value, and there is no
+  Settings toggle for it), content column, 24px `StatusBar` at bottom.
+  The screenshot capture expands it before navigating, because the
+  rail hides the labels the script matches on.
   Primitives live in `src/components/primitives/`. Sections live
   under `src/sections/`; the registry (`src/sections/registry.tsx`)
   is the single source of truth for primary nav. Sections in order:

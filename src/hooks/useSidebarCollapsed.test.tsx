@@ -8,27 +8,46 @@ describe("useSidebarCollapsed", () => {
     localStorage.clear();
   });
 
-  it("defaults to expanded when no localStorage entry exists", () => {
+  it("defaults to collapsed when no localStorage entry exists", () => {
+    // The rail is the resting state: a fresh profile starts collapsed.
     const { result } = renderHook(() => useSidebarCollapsed());
-    expect(result.current.collapsed).toBe(false);
+    expect(result.current.collapsed).toBe(true);
   });
 
-  it("bootstraps to collapsed when localStorage carries the marker", () => {
+  it("bootstraps to collapsed when localStorage carries '1'", () => {
     localStorage.setItem("cp-sidebar-collapsed", "1");
     const { result } = renderHook(() => useSidebarCollapsed());
     expect(result.current.collapsed).toBe(true);
   });
 
-  it("ignores non-marker values in localStorage", () => {
-    // Defensive: localStorage is user-mutable; only the exact "1"
-    // sentinel should collapse. "true" / "yes" / garbage should fall
-    // back to expanded so corrupted state never wedges the user.
-    localStorage.setItem("cp-sidebar-collapsed", "true");
+  it("bootstraps to expanded when localStorage carries '0'", () => {
+    // Expanded is a stored choice, not the absence of one. Without this
+    // a user who opened the sidebar would find it collapsed again on
+    // every launch — the default would win over their decision.
+    localStorage.setItem("cp-sidebar-collapsed", "0");
     const { result } = renderHook(() => useSidebarCollapsed());
     expect(result.current.collapsed).toBe(false);
   });
 
-  it("toggle flips the state and persists the marker", () => {
+  it("treats non-sentinel values as never chosen", () => {
+    // Defensive: localStorage is user-mutable; only the exact "1" /
+    // "0" sentinels carry meaning. "true" / "yes" / garbage fall back
+    // to the default rather than being guessed at.
+    localStorage.setItem("cp-sidebar-collapsed", "true");
+    const { result } = renderHook(() => useSidebarCollapsed());
+    expect(result.current.collapsed).toBe(true);
+  });
+
+  it("toggle flips the state and persists an explicit '0' for expanded", () => {
+    const { result } = renderHook(() => useSidebarCollapsed());
+    expect(result.current.collapsed).toBe(true);
+    act(() => result.current.toggle());
+    expect(result.current.collapsed).toBe(false);
+    expect(localStorage.getItem("cp-sidebar-collapsed")).toBe("0");
+  });
+
+  it("toggle back to collapsed persists '1'", () => {
+    localStorage.setItem("cp-sidebar-collapsed", "0");
     const { result } = renderHook(() => useSidebarCollapsed());
     expect(result.current.collapsed).toBe(false);
     act(() => result.current.toggle());
@@ -36,35 +55,33 @@ describe("useSidebarCollapsed", () => {
     expect(localStorage.getItem("cp-sidebar-collapsed")).toBe("1");
   });
 
-  it("toggle back to expanded removes the marker (no stale '0')", () => {
-    // We store the marker by absence, not by an explicit "0". A
-    // stored "0" would be a regression — the bootstrap reader checks
-    // === "1" only, so "0" would be treated as expanded too, but
-    // leaving a non-marker value behind invites future drift.
-    localStorage.setItem("cp-sidebar-collapsed", "1");
-    const { result } = renderHook(() => useSidebarCollapsed());
-    act(() => result.current.toggle());
-    expect(result.current.collapsed).toBe(false);
-    expect(localStorage.getItem("cp-sidebar-collapsed")).toBeNull();
+  it("an expanded choice survives a remount", () => {
+    // The regression the three-state encoding exists to prevent: open
+    // the sidebar, come back later, and it is still open.
+    const first = renderHook(() => useSidebarCollapsed());
+    act(() => first.result.current.setCollapsed(false));
+    first.unmount();
+    const second = renderHook(() => useSidebarCollapsed());
+    expect(second.result.current.collapsed).toBe(false);
   });
 
   it("setCollapsed accepts an explicit boolean", () => {
     const { result } = renderHook(() => useSidebarCollapsed());
-    act(() => result.current.setCollapsed(true));
-    expect(result.current.collapsed).toBe(true);
     act(() => result.current.setCollapsed(false));
     expect(result.current.collapsed).toBe(false);
+    act(() => result.current.setCollapsed(true));
+    expect(result.current.collapsed).toBe(true);
   });
 
   it("⌘\\ keyboard event toggles the sidebar", () => {
     const { result } = renderHook(() => useSidebarCollapsed());
-    expect(result.current.collapsed).toBe(false);
+    expect(result.current.collapsed).toBe(true);
     act(() => {
       window.dispatchEvent(
         new KeyboardEvent("keydown", { key: "\\", metaKey: true }),
       );
     });
-    expect(result.current.collapsed).toBe(true);
+    expect(result.current.collapsed).toBe(false);
   });
 
   it("does not fire while a text input is focused", () => {
@@ -83,7 +100,7 @@ describe("useSidebarCollapsed", () => {
         }),
       );
     });
-    expect(result.current.collapsed).toBe(false);
+    expect(result.current.collapsed).toBe(true);
     document.body.removeChild(input);
   });
 
@@ -92,6 +109,6 @@ describe("useSidebarCollapsed", () => {
     act(() => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "\\" }));
     });
-    expect(result.current.collapsed).toBe(false);
+    expect(result.current.collapsed).toBe(true);
   });
 });

@@ -6,19 +6,35 @@ import { useCallback, useEffect, useState } from "react";
  * hides labels + the swap-targets, activity, and sync strips that
  * need horizontal space to read.
  *
- * Persisted in localStorage under `cp-sidebar-collapsed`. Default is
- * expanded — a returning user keeps whatever state they last chose.
+ * Persisted in localStorage under `cp-sidebar-collapsed`, three-state:
+ * `"1"` collapsed, `"0"` expanded, absent = never chosen. **The default
+ * is collapsed** — the rail is the resting state — and a returning user
+ * keeps whatever they last chose. There is no Settings toggle; ⌘\ and
+ * the two chevrons (sidebar, status bar) are the controls.
+ *
+ * Expanded is stored explicitly rather than by absence. It used to BE
+ * absence, which only worked while the default was expanded too:
+ * flipping the default under that encoding would have made an expanded
+ * choice unrememberable, so every launch re-collapsed a sidebar the
+ * user had just opened. Anything other than the two sentinels reads as
+ * "never chosen" — localStorage is user-mutable, and a stray value
+ * must not wedge the reader.
  *
  * Pattern mirrors `useTheme` so the keys and lifecycle are familiar.
  */
 import { SIDEBAR_COLLAPSED_KEY as KEY } from "../lib/storageKeys";
 import { isShortcutContextBlocked } from "./useGlobalShortcuts";
 
+const DEFAULT_COLLAPSED = true;
+
 function read(): boolean {
   try {
-    return localStorage.getItem(KEY) === "1";
+    const v = localStorage.getItem(KEY);
+    if (v === "1") return true;
+    if (v === "0") return false;
+    return DEFAULT_COLLAPSED;
   } catch {
-    return false;
+    return DEFAULT_COLLAPSED;
   }
 }
 
@@ -32,8 +48,7 @@ export function useSidebarCollapsed(): {
   const setCollapsed = useCallback((next: boolean) => {
     setState(next);
     try {
-      if (next) localStorage.setItem(KEY, "1");
-      else localStorage.removeItem(KEY);
+      localStorage.setItem(KEY, next ? "1" : "0");
     } catch {
       // ignore — localStorage unavailable
     }

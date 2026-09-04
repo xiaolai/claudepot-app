@@ -175,6 +175,31 @@ async function main() {
   await send(ws, "resize_window", { width: WIDTH, height: HEIGHT, logical: true });
   await sleep(500);
 
+  // The sidebar starts collapsed to its rail on a fresh profile, and the
+  // fixture home is always fresh. The rail hides the labels `navigate`
+  // matches on, and a rail is not what the docs should show — so expand
+  // it first, through the same toggle a user would press (the sidebar's
+  // own chevron carries `aria-expanded`, so this needs no locale string).
+  // A missing sidebar or toggle is a failure, not a skip: every shot
+  // below would otherwise navigate nowhere and settle on the wrong pane.
+  const sidebar = await js(
+    ws,
+    `(() => {
+      const aside = document.querySelector('aside');
+      if (!aside) return 'no-aside';
+      if (!aside.hasAttribute('data-collapsed')) return 'already-expanded';
+      const toggle = [...aside.querySelectorAll('button')]
+        .find(b => b.getAttribute('aria-expanded') === 'false');
+      if (!toggle) return 'no-toggle';
+      toggle.click();
+      return 'expanded';
+    })()`,
+  );
+  if (sidebar !== "expanded" && sidebar !== "already-expanded") {
+    throw new Error(`could not expand the sidebar before capturing: ${sidebar}`);
+  }
+  await sleep(300);
+
   let ok = 0;
   const failures = [];
   for (const shot of SHOTS) {

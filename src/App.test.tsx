@@ -73,6 +73,11 @@ beforeEach(() => {
   // section if we don't clear between runs.
   try {
     localStorage.clear();
+    // The sidebar starts collapsed to its rail, which hides the nav
+    // labels these tests read by text. Seed the stored "expanded"
+    // choice so the shell renders the full sidebar; the rail's own
+    // behaviour is covered in useSidebarCollapsed.test.tsx.
+    localStorage.setItem("cp-sidebar-collapsed", "0");
   } catch {
     // ignore — localStorage unavailable
   }
