@@ -6,6 +6,35 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.6.3 — beta (released 2026-09-05)
+
+Two changes to the window chrome: the status bar gains a pin that
+keeps Claudepot in front of other apps, and the sidebar starts at its
+rail.
+
+### Added
+
+- **A pin in the status bar keeps the window in front.** It sits at
+  the bar's right end, just before the service-status dot. Pressed,
+  the main window floats above every other app's windows; pressed
+  again, it goes back. The choice is `window_always_on_top` in
+  `preferences.json`, and a launch re-applies it — always-on-top is
+  window state, not something a fresh process reads from the file.
+  The command changes the level before it persists and undoes it if
+  the save fails, so the file, the window and the button never
+  disagree; a rejected toggle reverts the button and says why.
+
+### Changed
+
+- **The sidebar starts collapsed to its rail.** Opening it is
+  remembered, so a returning user keeps their choice. The stored value
+  is now three-state (collapsed, expanded, never chosen): "expanded"
+  used to be encoded as the absence of a marker, and flipping the
+  default under that encoding would have re-collapsed the sidebar on
+  every launch. ⌘\ and the two chevrons remain the controls; there is
+  no Settings toggle. The documentation screenshots expand it before
+  capturing, since the rail hides the labels the capture matches on.
+
 ## 0.6.2 — beta (released 2026-09-04)
 
 A mermaid diagram in a transcript drew as black boxes in the installed
