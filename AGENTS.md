@@ -2279,6 +2279,15 @@ accepts it in place of the missing host. Note the asymmetry: a host
 that is *reachable and fails* still aborts. Only absence of evidence
 falls back, never contrary evidence.
 
+"Runs the gate" is the operative phrase, and it has been misjudged
+twice in the same direction: a host that could not reach GitHub (v0.3.1)
+and a host that could not download a crate from crates.io (v0.6.2, a
+30 s timeout on `wayland-scanner`) were both reported as "clippy
+failed" over a gate that never started. The hook now syncs the commit
+and runs `cargo fetch --locked` as separate steps, and a failure in
+either is absence of evidence. Only the gate command's own exit is
+contrary evidence.
+
 The lookup dereferences `^{commit}` first — an annotated tag's own
 object sha differs from the commit's, and CI indexes runs by commit,
 so looking up the tag sha would silently never match. It also needs

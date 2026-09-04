@@ -65,8 +65,9 @@
 #
 # Note the asymmetry: a host that RUNS THE GATE and fails still aborts.
 # Only absence of evidence falls back, never contrary evidence. "Could
-# not run the gate" — offline, or online but unable to fetch the commit
-# — is absence, and `validate_on` distinguishes the two by exit code.
+# not run the gate" — offline, online but unable to fetch the commit,
+# or unable to download the crates the gate compiles — is absence, and
+# `validate_on` distinguishes the two by exit code.
 #
 # History: added 2026-05-01 after a four-round CI cascade where each
 # fix on macOS-only commits surfaced the next layer of platform-
@@ -165,6 +166,17 @@ validate_on() {
   # shellcheck disable=SC2029  # $_commit must expand client-side
   ssh "$_host" "cd $_dir && git fetch --quiet && git checkout --quiet --detach $_commit" \
     >/dev/null 2>&1 || return 2
+  # Dependencies are fetched as their own step, and a failure here is
+  # exit 2, not 1: whether the host can reach crates.io says nothing
+  # about whether the commit passes the gate. Folded into the gate
+  # command, a download timeout surfaced as "clippy failed" — the same
+  # misreport as the GitHub one above, one endpoint over. That aborted
+  # the v0.6.2 tag push (2026-09-04: the Linux validator timed out on
+  # wayland-scanner at under 10 bytes/sec and the hook printed "a real
+  # lint failure" over a gate that never started). `--locked` so the
+  # validator's checkout is never left with a rewritten lockfile.
+  # shellcheck disable=SC2029  # $_dir must expand client-side
+  ssh "$_host" "cd $_dir && cargo fetch --locked" >/dev/null 2>&1 || return 2
   # shellcheck disable=SC2029  # $_gate must expand client-side
   ssh "$_host" "cd $_dir && $_gate" || return 1
   return 0
@@ -327,8 +339,8 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   case "$linux_rc" in
     0) echo "✓ Linux clippy clean" ;;
     2)
-      echo "• Linux validator unusable (offline, or cannot reach GitHub to"
-      echo "  sync $commit_sha) — deferring to CI"
+      echo "• Linux validator unusable (offline, cannot reach GitHub to"
+      echo "  sync $commit_sha, or cannot fetch its crates) — deferring to CI"
       skipped="Linux"
       ;;
     *)
@@ -356,8 +368,8 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   case "$win_rc" in
     0) echo "✓ Windows test compile clean" ;;
     2)
-      echo "• Windows validator unusable (offline, or cannot reach GitHub"
-      echo "  to sync $commit_sha) — deferring to CI"
+      echo "• Windows validator unusable (offline, cannot reach GitHub to"
+      echo "  sync $commit_sha, or cannot fetch its crates) — deferring to CI"
       skipped="${skipped:+$skipped + }Windows"
       ;;
     *)
