@@ -6,6 +6,36 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.6.2 — beta (released 2026-09-04)
+
+A mermaid diagram in a transcript drew as black boxes in the installed
+app and drew correctly in dev. The difference was the Content Security
+Policy the release build actually runs under, which is not the one
+written in the config.
+
+### Fixed
+
+- **Mermaid diagrams render in the release build.** Mermaid styles its
+  SVG through a `<style>` element it inserts at render time.
+  `tauri.conf.json` grants `style-src 'unsafe-inline'`, but Tauri
+  hardens the embedded bundle on its own: it stamps a nonce on
+  `index.html`'s inline `<style>` and appends `'nonce-…'` to
+  `style-src` at runtime — and a nonce or hash source makes browsers
+  ignore `'unsafe-inline'`. So the installed app, and only the installed
+  app, refused mermaid's stylesheet and drew every diagram with SVG
+  defaults: black node fills, edge curves filled black into crescents,
+  labels anchored at their start and spilling out of their boxes. Dev
+  never showed it because the nonce is injected only into embedded
+  assets; the remote panel never did because its server writes its own
+  header. `dangerousDisableAssetCspModification: ["style-src"]` keeps
+  the written policy in force for styles while `script-src` stays under
+  Tauri's nonce and hash hardening. Reproduced in Playwright WebKit by
+  adding one nonce to a harness's `style-src`, and checked on the real
+  release pipeline both ways: the embedded `index.html` carries the
+  nonce token without the flag and is bare with it. A test now locks
+  both halves of the config, since either alone is a silent no-op in
+  release and CI never runs the release webview.
+
 ## 0.6.1 — beta (released 2026-09-03)
 
 Every permission grant Claudepot had ever written was a silent no-op on
