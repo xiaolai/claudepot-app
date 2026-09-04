@@ -324,6 +324,65 @@ pub async fn preferences_set_show_window_on_startup(
         .map_err(save_failed)
 }
 
+/// The windowing layer refused the always-on-top change, or there is
+/// no main window to change.
+fn always_on_top_failed(e: impl std::fmt::Display) -> ErrorDto {
+    ErrorDto::with_params(
+        codes::PREFERENCES_SET_ALWAYS_ON_TOP_FAILED,
+        json!({ "detail": e.to_string() }),
+        format!("set_always_on_top: {e}"),
+    )
+}
+
+/// Pin or unpin the main window in front of every other app's
+/// windows, then persist the choice (the status bar's pin button).
+///
+/// The order matters, and so does the rollback. The window level
+/// changes first: a file that says "pinned" over a window that sinks
+/// behind the next click is the exact lie this control exists to
+/// prevent. If the save then fails, both the level and the in-memory
+/// field are put back before the error returns, so the file, the
+/// window and the button never disagree. Returns the refreshed
+/// snapshot so the caller can broadcast it (`cp-prefs-changed`)
+/// without a second read.
+#[tauri::command]
+pub async fn preferences_set_window_always_on_top(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, crate::preferences::PreferencesState>,
+    pinned: bool,
+) -> Result<crate::preferences::Preferences, ErrorDto> {
+    use tauri::Manager;
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| always_on_top_failed("window not found"))?;
+    window
+        .set_always_on_top(pinned)
+        .map_err(always_on_top_failed)?;
+    let (prev, snapshot) = {
+        let mut p = state.0.lock().map_err(lock_poisoned)?;
+        let prev = p.window_always_on_top;
+        p.window_always_on_top = pinned;
+        (prev, p.clone())
+    };
+    // Audit-fix Medium #13: persist off the std::sync mutex.
+    let saved = tokio::task::spawn_blocking({
+        let snapshot = snapshot.clone();
+        move || snapshot.save()
+    })
+    .await
+    .map_err(ErrorDto::task_join)?;
+    if let Err(m) = saved {
+        if let Ok(mut p) = state.0.lock() {
+            p.window_always_on_top = prev;
+        }
+        if let Err(e) = window.set_always_on_top(prev) {
+            tracing::warn!("preferences: could not undo the window pin after a failed save: {e}");
+        }
+        return Err(save_failed(m));
+    }
+    Ok(snapshot)
+}
+
 /// Set fields on the `service_status` preference block. Same
 /// "optional per field" shape as `preferences_set_activity`. The
 /// poll-interval value is clamped to `[2, 60]` minutes; values

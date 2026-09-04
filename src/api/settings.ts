@@ -3,6 +3,7 @@
 // domain slice into the canonical `api` object.
 
 import { invoke } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
 import type {
   Preferences,
   ProtectedPath,
@@ -63,6 +64,23 @@ export const settingsApi = {
    */
   preferencesSetShowWindowOnStartup: (show: boolean) =>
     invoke<void>("preferences_set_show_window_on_startup", { show }),
+
+  /**
+   * Pin / unpin the main window in front of other apps (the status
+   * bar's pin). The backend changes the window level first and then
+   * persists; a failed save puts the level back, so file, window and
+   * button never disagree. Returns the refreshed snapshot and
+   * broadcasts `cp-prefs-changed` with it — the same shape as
+   * `preferencesSetServiceStatus`, so any other reader of the flag
+   * moves without a second `preferencesGet`.
+   */
+  preferencesSetWindowAlwaysOnTop: (pinned: boolean) =>
+    invoke<Preferences>("preferences_set_window_always_on_top", {
+      pinned,
+    }).then((p) => {
+      void emit("cp-prefs-changed", p).catch(() => {});
+      return p;
+    }),
 
   /**
    * Persist the UI language preference. `null` = follow the OS

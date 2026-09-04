@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { i18n } from "../lib/i18n";
 import { useSessionLive } from "../hooks/useSessionLive";
@@ -37,7 +38,34 @@ export interface AppStatusBarProps {
   sidebarCollapsed?: boolean;
   /** Toggle the sidebar's collapsed/expanded state. */
   onToggleSidebar?: () => void;
+  /** Whether the window is pinned in front of every other app's
+   *  windows (`window_always_on_top`). Drives the pin's pressed state
+   *  and its label. Omitting `onToggleWindowPin` hides the pin
+   *  entirely — the same contract as the sidebar toggle. */
+  windowPinned?: boolean;
+  /** Pin / unpin the window. See `useWindowPin`. */
+  onToggleWindowPin?: () => void;
 }
+
+/**
+ * The bar's two chrome toggles share one box: a 20px square,
+ * transparent, hairline-bordered so a focus ring has an edge to sit
+ * on. Hoisted so the sidebar toggle (far left) and the window pin
+ * (right end) cannot drift apart — a second copy of this block is how
+ * they would.
+ */
+const barToggleStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  width: "var(--sp-20)",
+  height: "var(--sp-20)",
+  padding: 0,
+  background: "transparent",
+  border: "var(--bw-hair) solid transparent",
+  borderRadius: "var(--r-1)",
+  color: "var(--fg-muted)",
+};
 
 /**
  * Bottom 24px chrome — the single ambient-state surface for the app.
@@ -48,6 +76,10 @@ export interface AppStatusBarProps {
  * "tokens.sp[28]". Grepping only "tokens.s[" missed them.)
  *
  * Layout, left → right:
+ *   0. Sidebar toggle at the far left — a control, and not a
+ *      contradiction of design.md's "a surface that only reports state
+ *      is not a control": it acts on the window itself rather than
+ *      reporting anything about a section.
  *   1. Live sessions segment (`● 3 live`) — a count, as plain text.
  *      Ambient state, never a control: the sidebar strip directly above
  *      already opens the live list.
@@ -56,6 +88,13 @@ export interface AppStatusBarProps {
  *   3. Right cluster of action chips: `[● N op]` running-ops chip +
  *      `[⚠ N pending]` pending-journals chip. Each chip resolves to
  *      a real UI destination per design.md "render-if-nonzero" rule.
+ *      Then the window pin (`window_always_on_top`, see
+ *      `useWindowPin`) — the same kind of control as the sidebar
+ *      toggle, placed at the right end at the user's request — and the
+ *      service-status dot last, so the dot keeps the corner.
+ *      The pin is in this bar rather than the title chrome because
+ *      that strip is a drag region and its buttons are the ones every
+ *      window has; this one is Claudepot's own.
  *
  * Why no `branch` or `model` fields: Claudepot has no app-wide
  * concept of a "current project" (it's a switcher, not an editor),
@@ -69,10 +108,15 @@ export function AppStatusBar({
   onOpenRepair,
   sidebarCollapsed,
   onToggleSidebar,
+  windowPinned,
+  onToggleWindowPin,
 }: AppStatusBarProps) {
   const { t } = useTranslation("shell");
   const live = useSessionLive();
   const liveSegment = formatLiveSegment(live);
+  const pinLabel = windowPinned
+    ? t("statusbar.unpinWindow")
+    : t("statusbar.pinWindow");
 
 
   // Each count segment carries a `title` so the bar's terse glyph-y
@@ -142,16 +186,7 @@ export function AppStatusBar({
           aria-pressed={sidebarCollapsed === true}
           className="pm-focus"
           style={{
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: "var(--sp-20)",
-            height: "var(--sp-20)",
-            padding: 0,
-            background: "transparent",
-            border: "var(--bw-hair) solid transparent",
-            borderRadius: "var(--r-1)",
-            color: "var(--fg-muted)",
+            ...barToggleStyle,
             // Pull the button slightly left so it sits against the
             // bar's left edge inset, matching where a status-bar
             // platform glyph usually anchors.
@@ -221,6 +256,29 @@ export function AppStatusBar({
               summary={pendingSummary ?? null}
               onOpen={onOpenRepair}
             />
+          )}
+          {onToggleWindowPin && (
+            // Window pin, at the right end just before the service
+            // dot. Pressed state is painted with the active tokens AND
+            // announced with aria-pressed, so colour is never the only
+            // cue; the tooltip flips to the verb that undoes it, per
+            // rules/icon-buttons.md.
+            <button
+              type="button"
+              onClick={onToggleWindowPin}
+              title={pinLabel}
+              aria-label={pinLabel}
+              aria-pressed={windowPinned === true}
+              className="pm-focus"
+              style={{
+                ...barToggleStyle,
+                background: windowPinned ? "var(--bg-active)" : "transparent",
+                borderColor: windowPinned ? "var(--line)" : "transparent",
+                color: windowPinned ? "var(--accent-ink)" : "var(--fg-muted)",
+              }}
+            >
+              <Glyph g={NF.pin} style={{ fontSize: "var(--fs-xs)" }} />
+            </button>
           )}
           <ServiceStatusDot />
         </span>

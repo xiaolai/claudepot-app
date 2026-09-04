@@ -82,6 +82,9 @@
     "sessionsTitle_other": "{{count}} session transcripts on disk",
     "live": "● {{count}} live",
     "liveTip": "Sessions Claude Code is currently writing to. Suffix groups by model family.",
-    "liveTipClick": "Sessions Claude Code is currently writing to. Suffix groups by model family. Click to open Activities → Live."
+    "liveTipClick": "Sessions Claude Code is currently writing to. Suffix groups by model family. Click to open Activities → Live.",
+    "pinWindow": "Pin window in front of other apps",
+    "unpinWindow": "Unpin window",
+    "pinFailed": "Couldn't change the window pin"
   }
 }

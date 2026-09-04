@@ -31,6 +31,11 @@ export interface Preferences {
    *  quiet tray-only background. Defaults to true. */
   show_window_on_startup: boolean;
 
+  /** Keep the main window in front of every other app's windows.
+   *  Toggled by the pin button in the status bar; re-applied at the
+   *  next launch. Defaults to false. */
+  window_always_on_top: boolean;
+
   /** User opted in to the live Activity feature. Gate for starting
    *  the LiveRuntime. Defaults to false until the consent modal is
    *  accepted. */

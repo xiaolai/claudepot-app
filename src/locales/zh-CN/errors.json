@@ -499,6 +499,7 @@
     "lock_poisoned": "之前的失败导致偏好设置卡住。请重启 Claudepot。",
     "save_failed": "无法保存偏好设置：{{detail}}",
     "set_activation_policy_failed": "无法更改 Dock 图标设置：{{detail}}",
+    "set_always_on_top_failed": "无法固定窗口：{{detail}}",
     "unsupported_locale": "Claudepot 没有 “{{locale}}” 的翻译。"
   },
   "pricing_history": {

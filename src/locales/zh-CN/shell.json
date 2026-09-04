@@ -78,6 +78,9 @@
     "sessionsTitle_other": "磁盘上有 {{count}} 份会话记录",
     "live": "● {{count}} 进行中",
     "liveTip": "Claude Code 正在写入的会话。后缀按模型家族分组。",
-    "liveTipClick": "Claude Code 正在写入的会话。后缀按模型家族分组。点击打开 活动 → 实时。"
+    "liveTipClick": "Claude Code 正在写入的会话。后缀按模型家族分组。点击打开 活动 → 实时。",
+    "pinWindow": "将窗口固定在其他应用之前",
+    "unpinWindow": "取消固定窗口",
+    "pinFailed": "无法更改窗口固定状态"
   }
 }

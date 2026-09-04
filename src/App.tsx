@@ -41,6 +41,8 @@ import { bindingFrom } from "./hooks/useAccounts";
 import { useShellStatusIssues } from "./hooks/useShellStatusIssues";
 import { useTheme } from "./hooks/useTheme";
 import { useSidebarCollapsed } from "./hooks/useSidebarCollapsed";
+import { useWindowPin } from "./hooks/useWindowPin";
+import { renderError } from "./lib/i18n-error";
 import { OperationsProvider, useOperations } from "./hooks/useOperations";
 import { AppStateProvider, useAppState } from "./providers/AppStateProvider";
 import { UpdateProvider } from "./providers/UpdateProvider";
@@ -175,6 +177,12 @@ function AppShell() {
   const { resolved: themeResolved, toggle: toggleTheme } = useTheme();
   const { collapsed: sidebarCollapsed, toggle: toggleSidebar, setCollapsed: setSidebarCollapsed } =
     useSidebarCollapsed();
+  // The status bar's window pin. A rejected toggle has already been
+  // undone by the backend (window level and file both put back), so
+  // the hook reverts the button and the toast is the whole report.
+  const windowPin = useWindowPin((e) =>
+    pushToast("error", renderError(e, t("statusbar.pinFailed"))),
+  );
 
   // Binding derived from the same source of truth AccountsSection
   // uses — the active flags on each account. When the user binds via
@@ -470,6 +478,8 @@ function AppShell() {
         onOpenRepair={() => setSection("projects", "repair")}
         sidebarCollapsed={sidebarCollapsed}
         onToggleSidebar={toggleSidebar}
+        windowPinned={windowPin.pinned}
+        onToggleWindowPin={windowPin.toggle}
       />
 
       {/* Data-driven overlays get their own scoped boundaries so a

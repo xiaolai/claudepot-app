@@ -505,6 +505,14 @@
         "detail"
       ],
       "message": "set_activation_policy: unsupported on this platform"
+    },
+    {
+      "code": "preferences.set_always_on_top_failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "set_always_on_top: window not found"
     }
   ]
 }

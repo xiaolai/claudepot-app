@@ -499,6 +499,7 @@
     "lock_poisoned": "Preferences are stuck after an earlier failure. Restart Claudepot.",
     "save_failed": "Couldn't save preferences: {{detail}}",
     "set_activation_policy_failed": "Couldn't change the Dock icon setting: {{detail}}",
+    "set_always_on_top_failed": "Couldn't pin the window: {{detail}}",
     "unsupported_locale": "Claudepot has no \"{{locale}}\" translation."
   },
   "pricing_history": {

@@ -137,6 +137,10 @@ pub mod codes {
     /// macOS refused the Dock activation-policy change.
     pub const PREFERENCES_SET_ACTIVATION_POLICY_FAILED: &str =
         "preferences.set_activation_policy_failed";
+    /// The windowing layer refused to change the main window's
+    /// always-on-top level (the status bar's pin), or the window was
+    /// not found.
+    pub const PREFERENCES_SET_ALWAYS_ON_TOP_FAILED: &str = "preferences.set_always_on_top_failed";
 
     // --- config / permissions / rotation / retention -----------------
     /// A renderer-supplied grant duration outside the guard-rail range.
@@ -890,6 +894,7 @@ pub mod codes {
         PREFERENCES_SAVE_FAILED,
         PREFERENCES_UNSUPPORTED_LOCALE,
         PREFERENCES_SET_ACTIVATION_POLICY_FAILED,
+        PREFERENCES_SET_ALWAYS_ON_TOP_FAILED,
         PERMISSION_DURATION_OUT_OF_RANGE,
         PERMISSION_HOOK_INSTALL_FAILED,
         PERMISSION_NO_IGNORED_VALUE,

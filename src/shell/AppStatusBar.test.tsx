@@ -71,6 +71,71 @@ vi.mock("../hooks/useSessionLive", () => ({
 
 
 /**
+ * The window pin at the bar's far left. A control over the window
+ * itself: pressed state must be announced, not only painted, and the
+ * label must flip to the verb that undoes it.
+ */
+describe("AppStatusBar — window pin", () => {
+  afterEach(() => cleanup());
+
+  const stats = { projects: null, sessions: null };
+
+  it("renders no pin without a handler", () => {
+    render(<AppStatusBar stats={stats} windowPinned={true} />);
+    expect(screen.queryByRole("button", { name: /pin window/i })).toBeNull();
+  });
+
+  it("renders an unpressed pin and fires the toggle on click", () => {
+    const toggle = vi.fn();
+    render(
+      <AppStatusBar
+        stats={stats}
+        windowPinned={false}
+        onToggleWindowPin={toggle}
+      />,
+    );
+    const pin = screen.getByRole("button", { name: /^pin window/i });
+    expect(pin).toHaveAttribute("aria-pressed", "false");
+    pin.click();
+    expect(toggle).toHaveBeenCalledTimes(1);
+  });
+
+  it("announces the pinned state and offers to unpin", () => {
+    render(
+      <AppStatusBar
+        stats={stats}
+        windowPinned={true}
+        onToggleWindowPin={() => {}}
+      />,
+    );
+    const pin = screen.getByRole("button", { name: /^unpin window/i });
+    expect(pin).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: /^pin window/i })).toBeNull();
+  });
+
+  it("sits at the right end, after every chip", () => {
+    // The service-status dot renders nothing here (no preferences
+    // reach it under test), so the pin is the last button in the bar;
+    // in the app the dot follows it and keeps the corner.
+    render(
+      <AppStatusBar
+        stats={stats}
+        sidebarCollapsed={false}
+        onToggleSidebar={() => {}}
+        pendingSummary={{ pending: 1, stale: 0, running: 0 }}
+        onOpenRepair={() => {}}
+        windowPinned={false}
+        onToggleWindowPin={() => {}}
+      />,
+    );
+    const buttons = screen.getAllByRole("button");
+    expect(buttons[0]).toHaveAccessibleName(/collapse sidebar/i);
+    expect(buttons[buttons.length - 2]).toHaveAccessibleName(/pending/i);
+    expect(buttons[buttons.length - 1]).toHaveAccessibleName(/^pin window/i);
+  });
+});
+
+/**
  * Right-cluster chip rendering. Locks down the contract: the chips
  * appear when their hooks have nonzero data, are wired to the
  * corresponding callbacks, and disappear when handlers are absent.

@@ -622,6 +622,25 @@ plain plist rewrite — no `launchctl` — so a moved bundle or a stale dev
 registration heals itself on the next launch instead of persisting until
 someone toggles the switch twice.
 
+**The status bar's pin is `window_always_on_top` in `preferences.json`,
+and a launch re-applies it.** `set_always_on_top` is window state, not
+a setting the window reads, so a fresh process starts at the normal
+level whatever the file says; `setup()` re-applies it beside the
+show-on-startup check. `preferences_set_window_always_on_top` changes
+the level *before* it persists and puts both the level and the
+in-memory field back if the save fails — file, window and button must
+never disagree, because a pressed pin over a window that sinks behind
+the next click is the one state the control exists to prevent. The
+button sits at the bar's right end, just before the service-status
+dot, which keeps the corner. It is the same kind of control as the
+sidebar toggle at the far left — it acts on the window itself rather
+than reporting state, so design.md's "a surface that only reports
+state is not a control" does not apply to it — and it lives among the
+ambient chips only because that is where its owner wanted it, not
+because it is one. `useWindowPin` is the renderer half —
+optimistic, reverting on a rejected call, and following
+`cp-prefs-changed` like every other reader of that file.
+
 ## Pricing (Activities → Cost, and every "on API" figure)
 
 Cost figures answer "what would pay-per-call have cost me". Rates are

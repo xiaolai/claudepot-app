@@ -254,6 +254,7 @@ pub fn run() {
     #[cfg(target_os = "macos")]
     let hide_dock = prefs.hide_dock_icon;
     let show_window_on_startup = prefs.show_window_on_startup;
+    let window_always_on_top = prefs.window_always_on_top;
 
     // Open the persistent notification log before the builder chain
     // so its handle can be `.manage()`d alongside the other state. The
@@ -537,6 +538,16 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 if !show_window_on_startup {
                     let _ = window.hide();
+                }
+
+                // Re-apply the status bar's pin. Always-on-top is window
+                // state, not a setting the window reads, so a fresh
+                // process starts at the normal level whatever
+                // preferences.json says.
+                if window_always_on_top {
+                    if let Err(e) = window.set_always_on_top(true) {
+                        tracing::warn!("startup: could not pin the window on top: {e}");
+                    }
                 }
 
                 // On Windows, set the WebView2 background color to match
@@ -1191,6 +1202,7 @@ pub fn run() {
             commands::preferences::preferences_set_hide_dock_icon,
             commands::preferences::preferences_set_locale,
             commands::preferences::preferences_set_show_window_on_startup,
+            commands::preferences::preferences_set_window_always_on_top,
             commands::board::board_list,
             commands::board::board_detail,
             commands::board::board_data_version,

@@ -129,6 +129,15 @@ pub struct Preferences {
     #[serde(default = "default_true")]
     pub show_window_on_startup: bool,
 
+    /// Keep the main window in front of every other app's windows
+    /// (`set_always_on_top`). The pin button in the status bar toggles
+    /// it, and `setup()` re-applies it on the next launch so a pinned
+    /// window stays pinned — the level is window state, not something
+    /// the window reads from this file. Defaults to false: a window
+    /// that floats over everything because the app was installed is
+    /// not a feature.
+    pub window_always_on_top: bool,
+
     /// Whether the user has enabled the live Activity feature. Gate
     /// for starting the `LiveRuntime`: false until the consent modal
     /// is accepted. Defaults to false — no PID files or transcripts
@@ -328,6 +337,7 @@ impl Default for Preferences {
             locale: None,
             hide_dock_icon: false,
             show_window_on_startup: default_true(),
+            window_always_on_top: false,
             activity_enabled: false,
             activity_consent_seen: false,
             activity_hide_thinking: default_true(),
@@ -825,5 +835,28 @@ mod tests {
         let p = Preferences::default();
         assert_eq!(p.schema_version, PREFS_SCHEMA_VERSION_CURRENT);
         assert!(p.category_prefs.is_empty());
+    }
+
+    #[test]
+    fn window_always_on_top_defaults_to_false_and_survives_a_missing_key() {
+        // Cold start and an upgrade from a file written before the pin
+        // existed must both land unpinned: a window that floats over
+        // every other app because Claudepot was updated is a regression,
+        // not a default.
+        assert!(!Preferences::default().window_always_on_top);
+        let json = r#"{"hide_dock_icon": false}"#;
+        let p: Preferences = serde_json::from_str(json).unwrap();
+        assert!(!p.window_always_on_top);
+    }
+
+    #[test]
+    fn window_always_on_top_serde_round_trip() {
+        let p = Preferences {
+            window_always_on_top: true,
+            ..Preferences::default()
+        };
+        let s = serde_json::to_string(&p).unwrap();
+        let back: Preferences = serde_json::from_str(&s).unwrap();
+        assert!(back.window_always_on_top);
     }
 }
