@@ -175,8 +175,19 @@ validate_on() {
   # wayland-scanner at under 10 bytes/sec and the hook printed "a real
   # lint failure" over a gate that never started). `--locked` so the
   # validator's checkout is never left with a rewritten lockfile.
-  # shellcheck disable=SC2029  # $_dir must expand client-side
-  ssh "$_host" "cd $_dir && cargo fetch --locked" >/dev/null 2>&1 || return 2
+  #
+  # Scoped to the host's own target: a bare `cargo fetch` pulls every
+  # platform's crates — the Windows box was watched downloading cairo,
+  # pango and glib it will never compile — and on a slow crates.io link
+  # that alone turns a validator that would have passed into a deferral.
+  # The triple is read in a separate call and interpolated HERE, on the
+  # client, because the Windows login shell is cmd.exe and has no
+  # `$(...)`. An empty triple (no rustc on PATH) falls back to the full
+  # fetch rather than skipping the step.
+  _triple="$(ssh "$_host" "rustc --print host-tuple" 2>/dev/null | tr -d '\r\n')"
+  # shellcheck disable=SC2029  # $_dir and $_triple must expand client-side
+  ssh "$_host" "cd $_dir && cargo fetch --locked ${_triple:+--target $_triple}" \
+    >/dev/null 2>&1 || return 2
   # shellcheck disable=SC2029  # $_gate must expand client-side
   ssh "$_host" "cd $_dir && $_gate" || return 1
   return 0
