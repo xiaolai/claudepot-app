@@ -1264,6 +1264,47 @@ Five decisions are worth not re-litigating:
   turning HTML labels off fixes both surfaces at the source, and
   `<br/>` still breaks a line because mermaid emits tspans for it.
 
+  **The desktop's diagram styling is a runtime `<style>`, and the
+  release CSP refused it.** Mermaid puts every rule it draws with —
+  fills, `fill: none` on edge paths, `text-anchor: middle` on labels —
+  in a `<style>` element inside the SVG, inserted when the diagram
+  mounts. `tauri.conf.json` grants `style-src 'unsafe-inline'`, and in
+  dev that is what runs. In the **release bundle** Tauri hardens the
+  policy on its own: at build time it stamps a nonce on `index.html`'s
+  inline `<style>` and at runtime appends `'nonce-…'` to `style-src` —
+  and a nonce or hash source makes browsers **ignore `'unsafe-inline'`**
+  (CSP Level 3). So the installed app, and only the installed app, drew
+  every diagram with SVG defaults: black node fills, edge curves filled
+  black into crescents, labels anchored `start` so their right halves
+  poked out of the boxes. Nothing errored; the render succeeded and the
+  stylesheet was silently dropped. Reproduced in Playwright WebKit by
+  adding one `'nonce-…'` to a harness's `style-src` (the console says
+  *"Refused to apply a stylesheet because its hash, its nonce, or
+  'unsafe-inline' does not appear in the style-src directive"*), and
+  the same page drew correctly without it.
+
+  `dangerousDisableAssetCspModification: ["style-src"]` keeps the
+  written policy in force for styles; `script-src` stays under Tauri's
+  nonce/hash hardening, which is where that protection matters.
+  `MermaidBlock.test.tsx` locks both halves of the config, since either
+  one alone is a silent no-op in release and CI never runs the release
+  webview. The panel is unaffected: `remote::server` writes its own
+  header with no nonces. The general lesson: **dev does not run the
+  release CSP**, so any runtime `<style>` injection — a library's, not
+  only mermaid's — has to be checked against the built app, not
+  `tauri dev`.
+
+  Checked on the real pipeline, both ways. `pnpm tauri build` leaves the
+  processed HTML at
+  `target/release/build/claudepot-tauri-*/out/tauri-codegen-assets/*.html`,
+  brotli-compressed; with the flag its `<style>` is bare, and with the
+  flag stripped it reads `<style nonce="__TAURI_STYLE_NONCE__">` — the
+  token the runtime turns into the `'nonce-…'` source. Two traps in
+  getting there: a plain `cargo build --release -p claudepot-tauri`
+  embeds **no** frontend at all, because `generate_context!` gates
+  embedding on the `custom-protocol` feature that only the Tauri CLI
+  enables; and there is no `.html` to find until it does.
+
   **The failure says why.** `Mermaid.jsx` captured the reason and then
   rendered a generic sentence, so every failure looked identical from
   outside — which is how one cause (oklch, see below) was fixed while

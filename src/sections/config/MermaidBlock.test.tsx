@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, waitFor } from "@testing-library/react";
 import { MarkdownRenderer } from "./MarkdownRenderer";
+import tauriConf from "../../../src-tauri/tauri.conf.json";
 
 // Stand in for the mermaid runtime. The real library needs real
 // SVG measurement (getBBox), which jsdom does not implement, so we
@@ -125,5 +126,63 @@ describe("MermaidBlock via MarkdownRenderer", () => {
     const args = calls[calls.length - 1];
     expect(args[0]).toMatch(/^mermaid-/);
     expect(String(args[1]).trim()).toBe(source);
+  });
+});
+
+/**
+ * Mermaid styles its SVG through a `<style>` element it inserts at
+ * render time, and that element is governed by the webview's
+ * `style-src`. The configured policy grants `'unsafe-inline'`, but Tauri
+ * hardens the embedded bundle on its own: it stamps a nonce on
+ * `index.html`'s inline `<style>` and appends `'nonce-…'` to `style-src`
+ * (tauri-codegen `map_core_assets` → `inject_nonce_token`; runtime
+ * `replace_csp_nonce`). A nonce or hash source makes a browser IGNORE
+ * `'unsafe-inline'` (CSP Level 3, "does a source list allow all inline
+ * behavior"), so in the release app — and only there — mermaid's
+ * stylesheet was refused and every diagram drew with SVG defaults: black
+ * node fills, edge paths filled black, labels anchored `start` and
+ * spilling out of the right edge of their boxes. Dev never showed it,
+ * because the nonce is injected only into embedded assets, and the
+ * remote panel never did, because its server writes its own header.
+ * Reproduced in Playwright WebKit by adding one `'nonce-…'` to a
+ * harness's `style-src`; the same page without it drew correctly.
+ *
+ * `dangerousDisableAssetCspModification: ["style-src"]` keeps the
+ * written policy in force for styles while leaving `script-src` under
+ * Tauri's nonce/hash hardening. Both halves are asserted here because
+ * either one without the other is a silent no-op in release — and
+ * nothing in CI runs the release webview.
+ */
+describe("the release CSP admits mermaid's runtime <style>", () => {
+  const security = tauriConf.app.security;
+  // Read as `unknown` so a config that drops the key fails the assertion
+  // below with the key's name in the message, instead of failing to
+  // compile on a property access.
+  const disabled: unknown = (security as Record<string, unknown>)
+    .dangerousDisableAssetCspModification;
+  const directives = new Map(
+    security.csp.split(";").map((d) => {
+      const [name, ...sources] = d.trim().split(/\s+/);
+      return [name, sources] as const;
+    }),
+  );
+
+  it("style-src grants 'unsafe-inline'", () => {
+    expect(directives.get("style-src")).toContain("'unsafe-inline'");
+  });
+
+  it("Tauri is told not to append nonce/hash sources to style-src", () => {
+    // A nonce or hash source in the list would make the grant above
+    // ignored, which is exactly the state that shipped.
+    expect(
+      disabled,
+      "app.security.dangerousDisableAssetCspModification must list style-src",
+    ).toEqual(expect.arrayContaining(["style-src"]));
+  });
+
+  it("script-src stays under Tauri's hardening", () => {
+    // `true` disables the injection for every directive, scripts included.
+    expect(disabled).not.toBe(true);
+    expect(disabled).not.toEqual(expect.arrayContaining(["script-src"]));
   });
 });
