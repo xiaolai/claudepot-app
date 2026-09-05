@@ -51,6 +51,7 @@
   "pnpm": {
     "overrides": {
       "@babel/core": "^7.29.6",
+      "browserslist": "^4.28.7",
       "dompurify": "3.4.13",
       "esbuild": "^0.28.1",
       "mermaid": "^11.16.1",
