@@ -85,6 +85,16 @@ jobs:
       - name: Architectural invariants
         run: bash scripts/repo-invariants.sh
 
+      # ─── Hook installer ───────────────────────────────────────
+      # install-hooks.sh chains this clone's hooks to the inherited
+      # global ones, and a global pre-push that delegates back into
+      # .githooks/ turned that chain into an unbounded loop that hung a
+      # release push (2026-09-17). The self-test reproduces that
+      # collision in a throwaway repo, bounded, so a regression fails
+      # here instead of hanging someone's push.
+      - name: Hook installer self-test
+        run: bash scripts/install-hooks.sh --self-test
+
   test:
     name: Tests (${{ matrix.os }})
     strategy:
