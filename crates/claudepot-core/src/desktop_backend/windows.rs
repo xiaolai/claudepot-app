@@ -161,7 +161,8 @@ fn dpapi_unprotect(data: &[u8]) -> Result<Vec<u8>, super::DesktopKeyError> {
     use windows_sys::Win32::Foundation::LocalFree;
     use windows_sys::Win32::Security::Cryptography::{CryptUnprotectData, CRYPT_INTEGER_BLOB};
 
-    let mut input = CRYPT_INTEGER_BLOB {
+    // Read-only: `CryptUnprotectData` takes the input as `*const`.
+    let input = CRYPT_INTEGER_BLOB {
         cbData: data.len() as u32,
         pbData: data.as_ptr() as *mut _,
     };
@@ -171,7 +172,7 @@ fn dpapi_unprotect(data: &[u8]) -> Result<Vec<u8>, super::DesktopKeyError> {
     };
     let ok = unsafe {
         CryptUnprotectData(
-            &mut input,
+            &input,
             std::ptr::null_mut(),
             std::ptr::null_mut(),
             std::ptr::null_mut(),

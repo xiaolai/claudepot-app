@@ -170,12 +170,14 @@ pub fn default_path_segments(claudepot_bin_dir: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use parking_lot::Mutex;
 
     /// Serializes tests that mutate `HOME`. Cargo runs tests in
     /// parallel within one binary; without this lock the two
     /// `default_path_segments_unix_*` cases would race over the
-    /// process-global env.
+    /// process-global env. Both are Unix-only, and so is the lock.
+    #[cfg(unix)]
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn map(entries: &[(&str, &str)]) -> BTreeMap<String, String> {

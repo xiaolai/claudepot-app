@@ -776,7 +776,8 @@ pub(crate) async fn switch_force_for_tests(
 }
 
 // Re-export storage functions for external callers (account_service, etc.)
-#[cfg(test)]
+// Only the Unix permission tests read the private path directly.
+#[cfg(all(test, unix))]
 pub(crate) use storage::private_path;
 pub use storage::{delete as delete_private, load as load_private, save as save_private};
 

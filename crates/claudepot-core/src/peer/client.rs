@@ -11,7 +11,9 @@ use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::time::Duration;
 
-use super::wire::{encode_line, AuthFrame, Priority, UserFrame, MAX_LINE_BYTES, PEER_PROTOCOL};
+#[cfg(unix)]
+use super::wire::{encode_line, AuthFrame, UserFrame, MAX_LINE_BYTES};
+use super::wire::{Priority, PEER_PROTOCOL};
 use super::PeerError;
 use crate::session_live::types::PidRecord;
 

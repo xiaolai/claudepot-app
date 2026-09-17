@@ -16,7 +16,9 @@
 //!     `export` line to the shell rc file the interactive shell
 //!     actually sources, idempotently.
 
-use std::path::{Path, PathBuf};
+#[cfg(any(unix, test))]
+use std::path::Path;
+use std::path::PathBuf;
 
 use super::error::RouteError;
 // `wrapper_dir` is only consumed by the `#[cfg(unix)]` PATH helpers
@@ -24,16 +26,24 @@ use super::error::RouteError;
 #[cfg(unix)]
 use super::wrapper::wrapper_dir;
 
+// The rc-file helpers below are pure string logic whose only caller is
+// the `#[cfg(unix)]` half of this module. They are built for Unix and
+// for tests: a Windows library build has nothing to call them, while
+// `rules/paths.md` wants pure string operations tested on every OS.
+//
 /// Comment line stamped above the appended `export`, so a human
 /// reading the rc file can recognize where the line came from. It
 /// is *not* used for the idempotency decision — see
 /// [`body_has_wrapper_dir`].
+#[cfg(any(unix, test))]
 const RC_MARKER: &str = "# Added by Claudepot — third-party route wrappers on PATH";
 
 /// `\037` (US, unit separator) brackets the probe's PATH output so
 /// an interactive rc file that prints a banner to stdout can't be
 /// mistaken for the PATH value.
+#[cfg(unix)]
 const PROBE_CMD: &str = r#"printf '\037%s\037' "$PATH""#;
+#[cfg(any(unix, test))]
 const PROBE_DELIM: char = '\u{1f}';
 
 /// Whether `~/.claudepot/bin` is reachable from a terminal the user
@@ -63,6 +73,7 @@ impl PathStatus {
 
 /// Pull the PATH value back out of the sentinel-bracketed probe
 /// output. Returns `None` if the delimiters aren't both present.
+#[cfg(any(unix, test))]
 fn extract_probe_path(stdout: &str) -> Option<&str> {
     let start = stdout.find(PROBE_DELIM)? + PROBE_DELIM.len_utf8();
     let rest = &stdout[start..];
@@ -71,6 +82,7 @@ fn extract_probe_path(stdout: &str) -> Option<&str> {
 }
 
 /// Is `dir` one of the `:`-separated entries in a `PATH` string?
+#[cfg(any(unix, test))]
 fn path_var_contains(path_var: &str, dir: &Path) -> bool {
     path_var
         .split(':')
@@ -102,6 +114,7 @@ fn resolve_shell() -> std::ffi::OsString {
 /// whose config syntax we don't auto-edit (e.g. fish — `set -gx` /
 /// `fish_add_path`, a different grammar). The caller turns `None`
 /// into a "edit it by hand" error so we never write a broken line.
+#[cfg(any(unix, test))]
 fn rc_path_for_shell(shell: &str, home: &Path) -> Option<PathBuf> {
     // `$SHELL` is an absolute path (`/bin/zsh`); match on the binary.
     let name = Path::new(shell).file_name().and_then(|n| n.to_str())?;
@@ -119,6 +132,7 @@ fn rc_path_for_shell(shell: &str, home: &Path) -> Option<PathBuf> {
 /// `$HOME/…`, or as `~/…` — all three must be recognized by the
 /// idempotency check, and we emit the `$HOME/…` form ourselves. The
 /// preferred (emitted) form is always first.
+#[cfg(any(unix, test))]
 fn path_entry_forms(dir: &Path, home: &Path) -> Vec<String> {
     let abs = dir.display().to_string();
     match dir.strip_prefix(home) {
@@ -136,6 +150,7 @@ fn path_entry_forms(dir: &Path, home: &Path) -> Vec<String> {
 /// shell expansion. `$` is rejected even though the emitted line
 /// uses `$HOME`/`$PATH` — those tokens are added by us, never
 /// sourced from `dir`. Non-UTF-8 paths are refused outright.
+#[cfg(any(unix, test))]
 fn path_is_shell_safe(dir: &Path) -> bool {
     match dir.to_str() {
         Some(s) => !s
@@ -149,6 +164,7 @@ fn path_is_shell_safe(dir: &Path) -> bool {
 /// Emits the `$HOME/…` form when possible so the rc line stays
 /// portable across machines. The caller must have already gated
 /// `dir` through [`path_is_shell_safe`].
+#[cfg(any(unix, test))]
 fn path_export_block(dir: &Path, home: &Path) -> String {
     // `path_entry_forms` always ends with the absolute form, so the
     // vec is never empty; if that invariant ever breaks, fall back to
@@ -165,6 +181,7 @@ fn path_export_block(dir: &Path, home: &Path) -> String {
 /// string edge on both sides. A raw substring check would wrongly
 /// treat `…/.claudepot/bin` as present inside `…/.claudepot/bin-old`
 /// or `…/.claudepot/bin/sub`.
+#[cfg(any(unix, test))]
 fn contains_path_entry(body: &str, entry: &str) -> bool {
     if entry.is_empty() {
         return false;
@@ -203,6 +220,7 @@ fn contains_path_entry(body: &str, entry: &str) -> bool {
 /// This is a deliberately shallow shell-syntax model, not a parser:
 /// the idempotency check it backs is best-effort, and the cost of a
 /// miss is at worst a duplicate `export` line, never breakage.
+#[cfg(any(unix, test))]
 fn is_path_assignment(line: &str) -> bool {
     let mut t = line.trim_start();
     if t.starts_with('#') {
@@ -235,6 +253,7 @@ fn is_path_assignment(line: &str) -> bool {
 ///
 /// Best-effort: a `#` or `;` *inside* a quoted value would need a
 /// real shell parser to handle, and is not a real-world rc shape.
+#[cfg(any(unix, test))]
 fn path_assignment_value(line: &str) -> &str {
     let t = line.trim_start();
     let mut value = match t.find('=') {
@@ -256,6 +275,7 @@ fn path_assignment_value(line: &str) -> &str {
 /// [`RC_MARKER`], not a mention in a comment or unrelated variable,
 /// and not a trailing inline comment or command on the assignment
 /// line — so nothing incidental can suppress a real append.
+#[cfg(any(unix, test))]
 fn body_has_wrapper_dir(body: &str, dir: &Path, home: &Path) -> bool {
     let forms = path_entry_forms(dir, home);
     body.lines()

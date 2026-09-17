@@ -135,6 +135,12 @@ pub mod codes {
     /// The renderer asked for a locale outside `SUPPORTED`.
     pub const PREFERENCES_UNSUPPORTED_LOCALE: &str = "preferences.unsupported_locale";
     /// macOS refused the Dock activation-policy change.
+    ///
+    /// Emitted only from the macOS arm of the command, so it is dead on
+    /// other builds — allowed there and only there, for the reason
+    /// `AGENTS_NO_SCHEDULER_ADAPTER` gives: `codes::ALL` locks the code
+    /// set for every build. Found by the first Windows clippy run.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub const PREFERENCES_SET_ACTIVATION_POLICY_FAILED: &str =
         "preferences.set_activation_policy_failed";
     /// The windowing layer refused to change the main window's
@@ -427,6 +433,11 @@ pub mod codes {
     /// The destination filesystem would not hold 0600, so the export
     /// was refused rather than written world-readable. A refusal, not
     /// an I/O failure: the remedy is a different filesystem.
+    ///
+    /// The check is a Unix mode check, so non-Unix builds never emit
+    /// this; the allowance is scoped to them for the same reason as
+    /// `PREFERENCES_SET_ACTIVATION_POLICY_FAILED`.
+    #[cfg_attr(not(unix), allow(dead_code))]
     pub const SESSION_EXPORT_PERMISSIONS_NOT_ENFORCED: &str =
         "session_export.permissions_not_enforced";
     /// A memory command arrived with an empty `project_root`.

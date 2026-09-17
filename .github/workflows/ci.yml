@@ -189,8 +189,12 @@ jobs:
       # The tauri crate was compiled and tested here but never linted, so
       # a clippy regression in src-tauri — including a Windows-only arm no
       # macOS machine compiles — could land on a green run. It was clean
-      # when this step was added. It runs after the test step because that
-      # step stages the CLI sidecar tauri-build validates.
+      # on macOS when this step was added and had never been run on
+      # Windows, where its first run found 26 errors in the Windows build
+      # of claudepot-core (2026-09-18); scripts/preflight.sh now runs the
+      # same lints through x86_64-pc-windows-gnu when mingw-w64 is there.
+      # It runs after the test step because that step stages the CLI
+      # sidecar tauri-build validates.
       - name: Clippy (tauri crate)
         if: ${{ !cancelled() && matrix.os != 'ubuntu-latest' }}
         run: cargo clippy --all-targets -p claudepot-tauri -- -D warnings

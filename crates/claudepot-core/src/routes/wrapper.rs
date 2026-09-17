@@ -63,12 +63,14 @@ fn assert_managed(path: &Path) -> Result<(), RouteError> {
 /// get an unsupported-platform error so a route can't be persisted
 /// in `installed_on_cli=true` while no wrapper actually exists.
 pub fn write_wrapper(route: &Route) -> Result<PathBuf, RouteError> {
+    // The tail expression on non-Unix hosts, where the block below is
+    // compiled out — so no `return`, which clippy flags as needless.
     #[cfg(not(unix))]
     {
-        let _ = route; // suppress unused warning on Windows
-        return Err(RouteError::Io(std::io::Error::other(
+        let _ = route;
+        Err(RouteError::Io(std::io::Error::other(
             "CLI wrappers require a POSIX shell — Windows .cmd wrappers are a follow-up",
-        )));
+        )))
     }
     #[cfg(unix)]
     {
@@ -308,14 +310,6 @@ fn set_executable(path: &Path) -> Result<(), RouteError> {
     let mut perms = std::fs::metadata(path)?.permissions();
     perms.set_mode(0o700);
     std::fs::set_permissions(path, perms)?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn set_executable(_path: &Path) -> Result<(), RouteError> {
-    // Windows: chmod doesn't apply. The .cmd extension carries
-    // executability at the shell level. Phase-1 MVP is Unix-first;
-    // Windows wrappers land later.
     Ok(())
 }
 

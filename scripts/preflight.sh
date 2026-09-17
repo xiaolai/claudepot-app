@@ -105,6 +105,31 @@ step "clippy (tauri crate)"
 cargo clippy --all-targets -p claudepot-tauri -- -D warnings
 ok "tauri clippy"
 
+# The same lints over the Windows arms, which a macOS build compiles
+# out. CI's windows-latest leg runs the tauri step above, and it failed
+# the first time it ran (2026-09-18) on 26 items no local command had
+# ever compiled: helpers only Unix code calls, and three lints in
+# Windows-only blocks. `x86_64-pc-windows-gnu` with mingw-w64 builds
+# ring's C code, which the msvc target cannot do from macOS; the cfg
+# gates that decide dead code are the same on both targets. Without the
+# toolchain this says so and moves on — CI still runs the real thing.
+if command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1 &&
+   rustup target list --installed 2>/dev/null | grep -qx x86_64-pc-windows-gnu; then
+  step "clippy (Windows arms, x86_64-pc-windows-gnu)"
+  cargo clippy --target x86_64-pc-windows-gnu --all-targets \
+    -p claudepot-core -p claudepot-cli -p xtask -- -D warnings
+  # tauri-build validates the staged sidecar for the target triple.
+  cargo build --target x86_64-pc-windows-gnu -p claudepot-cli
+  mkdir -p src-tauri/binaries
+  cp target/x86_64-pc-windows-gnu/debug/claudepot.exe \
+    src-tauri/binaries/claudepot-cli-x86_64-pc-windows-gnu.exe
+  cargo clippy --target x86_64-pc-windows-gnu --all-targets -p claudepot-tauri -- -D warnings
+  ok "Windows clippy"
+else
+  printf '\033[1;33m! Windows clippy SKIPPED — needs mingw-w64 (brew install mingw-w64)\n' >&2
+  printf '  and `rustup target add x86_64-pc-windows-gnu`. CI will run it.\033[0m\n' >&2
+fi
+
 if [ "$rust_only" -eq 0 ]; then
   step "frontend install"
   pnpm install --frozen-lockfile

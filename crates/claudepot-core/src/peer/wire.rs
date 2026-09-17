@@ -23,6 +23,17 @@
 //! `/compact` arrives as literal text in the transcript. A surface that
 //! lets the user type a prompt must not imply commands work.
 
+//! ## Unix only, below the constants
+//!
+//! The frames and `encode_line` exist for the Unix-socket transport in
+//! `client`, and there is no other: on Windows `send_prompt` refuses
+//! with `UnsupportedPlatform` before anything is encoded. So they are
+//! compiled for Unix only — a Windows build that carried them would
+//! carry code nothing can call, which is what `clippy -D warnings`
+//! reported the first time CI linted this crate there. `Priority` and
+//! the constants stay unconditional: the refusal path names `Priority`
+//! in its signature, and callers on every platform read the protocol pin.
+
 use serde::Serialize;
 
 /// The only `peerProtocol` this client speaks. CC publishes its value
@@ -63,6 +74,7 @@ pub enum Priority {
 /// `Debug` is hand-written for the same reason as `KeyFile`'s: this
 /// carries the peer token, and a derive is what turns a future
 /// `?frame` into a credential in the log.
+#[cfg(unix)]
 #[derive(Serialize)]
 pub(crate) struct AuthFrame<'a> {
     #[serde(rename = "type")]
@@ -70,6 +82,7 @@ pub(crate) struct AuthFrame<'a> {
     pub token: &'a str,
 }
 
+#[cfg(unix)]
 impl std::fmt::Debug for AuthFrame<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AuthFrame")
@@ -79,6 +92,7 @@ impl std::fmt::Debug for AuthFrame<'_> {
     }
 }
 
+#[cfg(unix)]
 impl<'a> AuthFrame<'a> {
     pub fn new(token: &'a str) -> Self {
         Self {
@@ -88,6 +102,7 @@ impl<'a> AuthFrame<'a> {
     }
 }
 
+#[cfg(unix)]
 #[derive(Debug, Serialize)]
 pub(crate) struct UserBody<'a> {
     pub role: &'static str,
@@ -103,6 +118,7 @@ pub(crate) struct UserBody<'a> {
 /// number to next. With it, CC drops the message on mismatch. A silent
 /// misdelivery is the worst outcome this module could produce, so the
 /// field that prevents it is not optional here.
+#[cfg(unix)]
 #[derive(Debug, Serialize)]
 pub(crate) struct UserFrame<'a> {
     #[serde(rename = "type")]
@@ -113,6 +129,7 @@ pub(crate) struct UserFrame<'a> {
     pub priority: Priority,
 }
 
+#[cfg(unix)]
 impl<'a> UserFrame<'a> {
     pub fn new(session_id: &'a str, content: &'a str, priority: Priority, uuid: String) -> Self {
         Self {
@@ -166,6 +183,7 @@ impl<'a> UserFrame<'a> {
 /// Verified against Claude Code 2.1.250 (2026-08-28); the
 /// `peer messaging inbox` row in `crates/xtask/cc-upstream-watch.md`
 /// re-checks it.
+#[cfg(unix)]
 pub(crate) fn encode_line<T: Serialize>(frame: &T) -> Result<Vec<u8>, serde_json::Error> {
     let mut buf = serde_json::to_vec(frame)?;
     buf.push(b'\n');
@@ -176,6 +194,7 @@ pub(crate) fn encode_line<T: Serialize>(frame: &T) -> Result<Vec<u8>, serde_json
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     #[test]
     fn auth_frame_matches_cc_shape() {
         let line = encode_line(&AuthFrame::new("deadbeef")).unwrap();
@@ -185,6 +204,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn user_frame_carries_session_id_and_role() {
         let frame = UserFrame::new("sess-1", "hello", Priority::Next, "u-1".into());
@@ -212,6 +232,7 @@ mod tests {
         assert_eq!(Priority::default(), Priority::Next);
     }
 
+    #[cfg(unix)]
     #[test]
     fn every_line_ends_with_exactly_one_newline() {
         let line = encode_line(&AuthFrame::new("t")).unwrap();

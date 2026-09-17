@@ -649,6 +649,7 @@ fn substitute(template: &str, values: &BTreeMap<String, String>) -> String {
 mod tests {
     use super::*;
     use crate::templates::registry::TemplateRegistry;
+    #[cfg(unix)]
     use tempfile::TempDir;
 
     fn morning() -> Blueprint {

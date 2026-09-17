@@ -1026,15 +1026,14 @@ pub async fn agents_dry_run_artifact(id: String) -> Result<String, ErrorDto> {
     {
         let (timer, service) = claudepot_core::agent::scheduler::systemd::render_units(agent)
             .map_err(ErrorDto::from)?;
-        return Ok(format!(
+        Ok(format!(
             "# {} ===== timer ======\n{}\n# ===== service =====\n{}",
             agent.id, timer, service
-        ));
+        ))
     }
     #[cfg(target_os = "windows")]
     {
-        return claudepot_core::agent::scheduler::schtasks::render_xml(agent)
-            .map_err(ErrorDto::from);
+        claudepot_core::agent::scheduler::schtasks::render_xml(agent).map_err(ErrorDto::from)
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {

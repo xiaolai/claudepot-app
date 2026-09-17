@@ -1136,8 +1136,9 @@ pub async fn login_and_reimport_with_progress(
 
 /// Test-only seam: same as [`login_and_reimport_with_progress`] but
 /// accepts an explicit `claude` binary path so the integration test
-/// can point at a controllable stub. Not re-exported publicly.
-#[cfg(test)]
+/// can point at a controllable stub. Not re-exported publicly. Unix
+/// only, like the one test that calls it — its stub is a shell script.
+#[cfg(all(test, unix))]
 pub(crate) async fn login_and_reimport_with_progress_test_binary(
     store: &AccountStore,
     account_id: Uuid,

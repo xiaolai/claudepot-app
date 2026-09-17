@@ -68,16 +68,27 @@ exceptions.
   something that validates paths, the literal needs the same `#[cfg]`
   the behaviour does.
 - **Typecheck `#[cfg]`-gated code you cannot run.** Writing a
-  Windows-only arm from macOS is writing code no local command compiles:
-  `cargo check --target x86_64-pc-windows-msvc` does not get there
-  (`ring`'s build script needs a Windows C toolchain), and the validator
-  hosts in AGENTS.md check *pushed commits*, not a working tree. So a
-  typo reaches CI and costs a full matrix run — a first draft of that
-  Windows test used `Priority::Normal`, a variant that does not exist.
+  Windows-only arm from macOS is writing code the default local build
+  never compiles: `cargo check --target x86_64-pc-windows-msvc` does not
+  get there (`ring`'s build script needs a Windows C toolchain), and the
+  validator hosts in AGENTS.md check *pushed commits*, not a working
+  tree. So a typo reaches CI and costs a full matrix run — a first draft
+  of that Windows test used `Priority::Normal`, a variant that does not
+  exist.
 
-  Temporarily delete the `#[cfg]`, run `cargo check --tests`, then put it
-  back. The body is compiled against the real types, which catches every
-  wrong name, path and arity. It does not prove the *platform* behaviour
+  **The `x86_64-pc-windows-gnu` target does get there**, given
+  mingw-w64 (`brew install mingw-w64`, `rustup target add
+  x86_64-pc-windows-gnu`): it builds `ring` with the mingw compiler, and
+  the `cfg(windows)` / `cfg(unix)` gates that decide what compiles are
+  the same on both Windows targets. `scripts/preflight.sh` runs clippy
+  through it for core, cli, xtask and the tauri crate whenever the
+  toolchain is present. It found 26 errors on its first run
+  (2026-09-18) — the whole Windows lint surface had never been compiled
+  by anyone before CI's tauri clippy step reached it.
+
+  Without that toolchain: temporarily delete the `#[cfg]`, run
+  `cargo check --tests`, then put it back. The body is compiled against
+  the real types, which catches every wrong name, path and arity. It does not prove the *platform* behaviour
   — only CI does that — but it removes the class of failure that is pure
   spelling.
 - **A `#[cfg]` arm does not only need to compile — its absence must not

@@ -40,6 +40,10 @@ use std::path::PathBuf;
 /// [`enriched_path`] filters to existing ones, while
 /// [`crate::fs_utils::find_claude_binary`] joins a filename onto
 /// each and probes for the file.
+///
+/// Not built for Windows: both callers take their Windows branch
+/// before reaching it, and every entry is a Unix path.
+#[cfg(not(target_os = "windows"))]
 pub fn tool_dirs() -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = Vec::new();
     let home = dirs::home_dir();
@@ -118,6 +122,7 @@ pub fn enriched_path() -> OsString {
 mod tests {
     use super::*;
 
+    #[cfg(not(target_os = "windows"))]
     #[test]
     fn test_tool_dirs_is_priority_ordered() {
         let dirs = tool_dirs();
@@ -143,6 +148,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_os = "windows"))]
     #[test]
     fn test_tool_dirs_omits_system_dirs() {
         // System dirs are already on the inherited minimal PATH;

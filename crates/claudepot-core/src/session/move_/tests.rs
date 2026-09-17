@@ -150,6 +150,7 @@ impl Fixture {
         }
     }
 
+    #[cfg(unix)]
     fn read_history(&self) -> String {
         fs::read_to_string(self.history_jsonl_path()).unwrap_or_default()
     }
