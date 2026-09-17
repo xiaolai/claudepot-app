@@ -27,9 +27,10 @@
 //!   to a denied tool call. It is the reason this feature can be built
 //!   at all: the failure mode is "walk to the machine".
 //!
-//! - **The wait must end before CC's does.** CC clamps a hook timeout to
-//!   `UQ_ = 300_000` ms and kills the process at it; a killed
-//!   `PreToolUse` hook blocks the tool call outright. So [`WAIT`] is
+//! - **The wait must end before CC's does.** CC kills a command hook at
+//!   its configured `timeout` — 2.1.274 applies the value as written
+//!   (2.1.241 also clamped it to 300 s) — and a killed hook blocks the
+//!   tool call outright. So [`WAIT`] is
 //!   held strictly under the [`HOOK_TIMEOUT_SECS`] we install, and the
 //!   hook exits by itself. Being killed is the one path that does not
 //!   fall through, so we never take it.
@@ -39,6 +40,13 @@
 //!   `settings.json` by a crash, a hand-edit, or an uninstall would
 //!   otherwise pause every permission prompt on the machine for two
 //!   minutes each. See [`store::gate`].
+//!
+//! - **A headless run is not asked.** Since CC 2.1.268 the hook also
+//!   fires in `claude -p` and SDK sessions, where there is no prompt to
+//!   fall back to: silence there is a *denial*, and waiting [`WAIT`]
+//!   first only delays it — once per blocked tool call, in runs nobody
+//!   is watching. So such a session is let through at once, which is
+//!   what it got before the hook existed. See [`headless_run`].
 //!
 //! - **One writer per file.** A request and its decision are two files,
 //!   not two fields of one. The hook writes only the request; the
@@ -101,6 +109,48 @@ pub fn now_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+/// Entrypoints Claude Code treats as having nobody at a prompt — its
+/// own `/resume` filter uses exactly this set. `claude -p` registers as
+/// `kind: "interactive"` with `entrypoint: "sdk-cli"` (measured on
+/// 2.1.274), so `kind` cannot tell a headless run apart; this can.
+pub const HEADLESS_ENTRYPOINTS: &[&str] = &["sdk-cli", "sdk-ts", "sdk-py"];
+
+/// Is `session_id` a live headless run (`claude -p`, the SDK)?
+///
+/// Looked up in CC's live-session registry, because the hook payload
+/// carries no such flag. Anything short of a positive match — no
+/// registry, no record yet, an unreadable file — answers `false`, which
+/// keeps today's behaviour of waiting for the phone. When two live
+/// processes share the id (a `-p --resume` beside the interactive
+/// session), one headless match is enough: the cost of that is an
+/// interactive prompt drawn at the machine without the phone's chance,
+/// the direction this module always fails in.
+pub fn headless_run(session_id: &str) -> bool {
+    use crate::session_live::registry;
+    is_headless_session(
+        &registry::default_sessions_dir(),
+        &registry::SysinfoCheck::new(),
+        session_id,
+    )
+}
+
+/// [`headless_run`] with the registry and process table injected.
+pub fn is_headless_session(
+    sessions_dir: &Path,
+    check: &dyn crate::session_live::registry::ProcessCheck,
+    session_id: &str,
+) -> bool {
+    let Ok(outcome) = crate::session_live::registry::poll_dir(sessions_dir, check) else {
+        return false;
+    };
+    outcome.live.iter().any(|r| {
+        r.session_id == session_id
+            && r.entrypoint
+                .as_deref()
+                .is_some_and(|e| HEADLESS_ENTRYPOINTS.contains(&e))
+    })
 }
 
 /// What CC hands the hook on stdin.
@@ -449,6 +499,57 @@ pub mod store {
 
 #[cfg(test)]
 mod tests {
+    // ── headless runs ─────────────────────────────────────────────
+
+    struct AllRunning;
+    impl crate::session_live::registry::ProcessCheck for AllRunning {
+        fn is_running(&self, _pid: u32) -> bool {
+            true
+        }
+    }
+
+    fn registry_with(records: &[(u32, &str, Option<&str>)]) -> tempfile::TempDir {
+        let dir = tempfile::TempDir::new().unwrap();
+        for (pid, session, entrypoint) in records {
+            let mut rec = serde_json::json!({
+                "pid": pid,
+                "sessionId": session,
+                "cwd": "/p",
+                "startedAt": 1,
+                "kind": "interactive",
+            });
+            if let Some(e) = entrypoint {
+                rec["entrypoint"] = serde_json::json!(e);
+            }
+            std::fs::write(dir.path().join(format!("{pid}.json")), rec.to_string()).unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn a_print_mode_session_is_headless() {
+        // The shape `claude -p` registers with on 2.1.274: interactive
+        // kind, SDK entrypoint.
+        let dir = registry_with(&[(11, "s-print", Some("sdk-cli")), (12, "s-cli", Some("cli"))]);
+        assert!(is_headless_session(dir.path(), &AllRunning, "s-print"));
+        assert!(!is_headless_session(dir.path(), &AllRunning, "s-cli"));
+    }
+
+    #[test]
+    fn an_unknown_or_unmarked_session_keeps_waiting_for_the_phone() {
+        let dir = registry_with(&[(11, "s-old", None)]);
+        assert!(!is_headless_session(dir.path(), &AllRunning, "s-old"));
+        assert!(!is_headless_session(dir.path(), &AllRunning, "s-missing"));
+        let nowhere = dir.path().join("absent");
+        assert!(!is_headless_session(&nowhere, &AllRunning, "s-old"));
+    }
+
+    #[test]
+    fn one_headless_process_sharing_the_id_is_enough() {
+        let dir = registry_with(&[(11, "s", Some("cli")), (12, "s", Some("sdk-py"))]);
+        assert!(is_headless_session(dir.path(), &AllRunning, "s"));
+    }
+
     use super::store;
     use super::*;
 

@@ -178,8 +178,13 @@ its `allow` is what `bypassPermissions` used to be: no prompt, and no
 2–3 s classifier round trip per call (the classifier request is absent
 from the debug log). Subagents report the parent's `cwd` and are
 covered; a protected-path write (`.claude/probe.txt`) went through.
-Headless `claude -p` does **not** consult either hook — it denies —
-which is why the first probe, run headless, said the hook never fired.
+On 2.1.259, headless `claude -p` consulted neither hook and simply
+denied — which is why the first probe, run headless, said the hook
+never fired. **That changed for `PermissionRequest` in 2.1.268**
+("Fixed PermissionRequest hooks not firing in `--print` mode"): in
+2.1.274 a session that cannot draw a prompt asks the hook and denies
+only if the hook stays silent. `PreToolUse` in `-p` has not been
+re-measured since.
 
 Five properties hold it together:
 

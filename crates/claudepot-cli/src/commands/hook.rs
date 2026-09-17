@@ -72,6 +72,12 @@ pub async fn permission_request_cmd() -> Result<()> {
         return Ok(());
     };
 
+    // `claude -p` and the SDK have no prompt to fall back to, so
+    // silence there is a denial and waiting only delays it.
+    if approval::headless_run(&input.session_id) {
+        return Ok(());
+    }
+
     let dir = store::dir();
     let started = now_ms();
     store::sweep(&dir, started);

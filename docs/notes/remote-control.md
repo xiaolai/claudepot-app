@@ -778,7 +778,7 @@ drawing a prompt, in a process CC started itself. No peer message, no
 keystroke injection, no laundering — the reasoning in `panel::ask`
 stays correct and stays enforced.
 
-Five properties hold it together:
+Six properties hold it together:
 
 - **Silence is the fall-through.** CC's decision union is `allow` or
   `deny` and has no "ask" arm, so a hook that prints nothing leaves the
@@ -787,6 +787,16 @@ Five properties hold it together:
   phone — degrades to *exactly today's behaviour*. That is what makes
   the feature safe to add at all: the worst case is walking to the
   machine.
+- **A headless run is let through at once.** Since CC 2.1.268 the hook
+  also fires in `claude -p` and the SDK, where there is no machine
+  prompt: silence there is a denial, and the full wait would only delay
+  it — per blocked tool call, in scheduled runs nobody watches. So
+  `approval::headless_run` looks the session up in CC's live registry
+  and skips the wait when its `entrypoint` is `sdk-cli` / `sdk-ts` /
+  `sdk-py`, the set CC's own `/resume` filter uses. (`claude -p`
+  registers as `kind: "interactive"`, so `kind` cannot tell.) Approving
+  a headless run from the phone would be a new capability, not a fix,
+  and is deliberately not offered.
 - **It is armed only while `remote serve` is up.** The hook is installed
   on start and revoked on stop (SIGINT **and** SIGTERM — `kill` and
   every process supervisor send the latter, so handling only Ctrl-C
@@ -798,11 +808,13 @@ Five properties hold it together:
   not the preference. Without it a killed server would leave every
   permission prompt on the machine pausing for the full wait with
   nothing able to answer.
-- **The wait ends before CC's does.** CC clamps a hook timeout to
-  `UQ_ = 300_000` ms and *kills* the process at it — and a killed hook
-  blocks the tool call, the one outcome that does not fall through. So
-  `WAIT` (110 s) sits under `HOOK_TIMEOUT_SECS` (120 s) sits under the
-  clamp, and there is a test asserting the ordering.
+- **The wait ends before CC's does.** CC *kills* a command hook at its
+  configured `timeout`, and a killed hook blocks the tool call, the one
+  outcome that does not fall through. So `WAIT` (110 s) sits under
+  `HOOK_TIMEOUT_SECS` (120 s), and there is a test asserting the
+  ordering. 2.1.241 also clamped the timeout to 300 s; 2.1.274 applies
+  it as written, which leaves the ordering above as the one that
+  matters.
 - **One writer per file.** A request and its decision are two files, not
   two fields of one: the hook writes only the request, the server only
   the decision. Atomic rename is crash-safety, not concurrency-safety —
