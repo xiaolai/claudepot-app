@@ -55,11 +55,12 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 
 /// Claude Code's own reference placeholders, embedded directly in the
-/// prompt text: `[Image #3]`, `[Pasted text #1 +42 lines]`. Kept
-/// byte-compatible with CC's `parseReferences`, and stripped because
+/// prompt text: `[Image #3]`, `[Audio #2]`, `[Pasted text #1 +42 lines]`.
+/// Kept byte-compatible with CC's `parseReferences` (2.1.274 added
+/// `Audio`), and stripped because
 /// they leak an internal encoding into the UI.
 static CC_REF_PLACEHOLDER: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\[(?:Pasted text|Image|\.\.\.Truncated text) #\d+(?: \+\d+ lines)?\.*\]")
+    Regex::new(r"\[(?:Pasted text|Image|Audio|\.\.\.Truncated text) #\d+(?: \+\d+ lines)?\.*\]")
         .expect("static regex")
 });
 

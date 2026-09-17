@@ -90,6 +90,11 @@
     "want": "and the rest"
   },
   {
+    "name": "cc audio placeholder is removed (CC 2.1.274)",
+    "raw": "[Audio #2] transcribe this",
+    "want": "transcribe this"
+  },
+  {
     "name": "the real prompt this session started from",
     "raw": "## User Input\n\n```text\ndev-docs/remote-panel-plan.md 3\n```\n\nArguments are space-separated:\n\n- **Plan files** — one or more paths.",
     "want": "User Input dev-docs/remote-panel-plan.md 3 Arguments are space-separated: Plan files — one or more paths."

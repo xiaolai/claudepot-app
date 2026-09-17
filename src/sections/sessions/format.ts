@@ -71,7 +71,7 @@ export const bestTimestampMs = sessionEventMs;
  * is a change there plus a new vector.
  */
 const CC_REF_PLACEHOLDER_RE =
-  /\[(?:Pasted text|Image|\.\.\.Truncated text) #\d+(?: \+\d+ lines)?\.*\]/g;
+  /\[(?:Pasted text|Image|Audio|\.\.\.Truncated text) #\d+(?: \+\d+ lines)?\.*\]/g;
 
 /**
  * Turn a raw `first_user_prompt` into a clean single-line title.
