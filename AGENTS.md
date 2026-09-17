@@ -617,19 +617,31 @@ truth — is in
 `TranscriptRisk::scan_incomplete` is load-bearing: a scan that failed
 must never render as "nothing is scheduled for deletion".
 
-**There is a second destroying key, and Claudepot does not model it.**
+**There is a second key, and Claudepot models half of it on purpose.**
 `desktopSessionCleanupPeriodDays` (CC 2.1.248+, schema
-`int().nonnegative().optional()`, re-seen in 2.1.274) is the retention
-ceiling for transcripts created or last written by a desktop-host
-surface (Claude Desktop, Cowork), **which are exempt from the
-`cleanupPeriodDays` sweep entirely**. Three consequences: its `0`
-default means "keep forever", the exact opposite of `cleanupPeriodDays`
-rejecting `0`, so a control reusing this pane's validation would be
-wrong; `TranscriptRisk` counts all of `projects/` and therefore
-**over**-reports risk for desktop-written transcripts (the safe
-direction, but a real gap); and CC's suppression check loops over both
-keys, while `cleanup_suppressed` models one. The row in
-`crates/xtask/cc-upstream-watch.md` carries the full measurement.
+`int().nonnegative().optional()`, default `0` = no ceiling) is the
+retention ceiling for transcripts CC exempts from the `cleanupPeriodDays`
+sweep: those whose `entrypoint` is `claude-desktop`, `claude-desktop-3p`
+or `local-agent` (read from the file's head or tail), those with a
+`<uuid>.desktop-released.json` sidecar still in grace, and empty
+transcripts with no session folder. Re-read in the 2.1.274 binary on
+2026-09-17.
+
+- **Suppression is modelled.** A rejected value for this key suppresses
+  cleanup exactly as a bad `cleanupPeriodDays` does, and
+  `cleanup_suppressed` folds both keys; `desktop_key_rejected` names the
+  desktop key as the cause only when `cleanupPeriodDays` itself parsed.
+  Its `0` is legal — the opposite of `cleanupPeriodDays` — which is why
+  the two are separate matches, not a shared helper.
+- **The exemption is not modelled, and must stay that way.** CC turns it
+  off entirely when a policy-layer `cleanupPeriodDays` exists, when an
+  admin governs retention, when the settings have errors, and under
+  HIPAA or ZDR — none of which Claudepot can observe. A classifier built
+  on file evidence alone would mark transcripts safe that CC then
+  deletes: the first under-warning error on the only setting that
+  destroys data. So `TranscriptRisk` over-reports for exempt transcripts,
+  which is the safe direction. Measured cost here: none of 3,548
+  transcripts is desktop-host, sidecar-marked or empty.
 
 Boot check at `src-tauri/src/retention_boot_check.rs` emits **at most
 one** bell entry, choosing between two conditions core guarantees

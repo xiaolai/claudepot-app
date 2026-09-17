@@ -149,8 +149,8 @@ describe("RetentionPane", () => {
       report({
         swept: {
           dirs: [
-            { rel: "file-history", what: "file edit history", kind: "content", entries: 412, already_deletable: 91 },
-            { rel: "uploads", what: "files you uploaded", kind: "content", entries: 7, already_deletable: 0 },
+            { id: "fileHistory", rel: "file-history", what: "file edit history", kind: "content", entries: 412, already_deletable: 91 },
+            { id: "uploads", rel: "uploads", what: "files you uploaded", kind: "content", entries: 7, already_deletable: 0 },
           ],
           cache_dirs_skipped: 7,
         },
@@ -161,6 +161,26 @@ describe("RetentionPane", () => {
     expect(screen.getByText(/91 past the cutoff/i)).toBeInTheDocument();
     // The directories it chose NOT to count are stated, not implied.
     expect(screen.getByText(/7 further directories/i)).toBeInTheDocument();
+  });
+
+  // Core's `what` is English. Interpolating it put English into the
+  // Chinese pane, so the row reads the catalog by id — and only falls
+  // back to the wire text for an id the catalog does not know yet.
+  it("describes a swept directory from the catalog, not the wire text", async () => {
+    retentionReportMock.mockResolvedValue(
+      report({
+        swept: {
+          dirs: [
+            { id: "fileHistory", rel: "file-history", what: "WIRE TEXT", kind: "content", entries: 3, already_deletable: 0 },
+            { id: "notInCatalog", rel: "brand-new", what: "fallback prose", kind: "content", entries: 1, already_deletable: 0 },
+          ],
+        },
+      }),
+    );
+    render(<RetentionPane pushToast={toast()} />);
+    expect(await screen.findByText(/file edit history — 3 in file-history/)).toBeInTheDocument();
+    expect(screen.queryByText(/WIRE TEXT/)).toBeNull();
+    expect(screen.getByText(/fallback prose — 1 in brand-new/)).toBeInTheDocument();
   });
 
   // design.md render-if-nonzero: a machine with nothing else on the

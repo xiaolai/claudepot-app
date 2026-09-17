@@ -430,14 +430,28 @@
       "bodyCount": "Claude Code is skipping cleanup right now, so nothing is being deleted — {{num}} transcripts are currently kept. Setting a window <strong>re-enables deletion</strong>: everything older than {{label}} goes the next time Claude Code starts. This cannot be undone.",
       "confirm": "Set window and re-enable deletion"
     },
-    "scopeNote": "cleanupPeriodDays is not only a transcript setting — Claude Code ages out around twenty directories under ~/.claude on the same timer, including tasks, file-history, shell-snapshots and backups. Claudepot counts conversations, the part that cannot be regenerated; the others are not shown here.",
+    "scopeNote": "cleanupPeriodDays is not only a transcript setting — Claude Code ages out more than thirty other locations under ~/.claude on the same timer. The counts above are conversations only, the part that cannot be regenerated; other directories that hold your work are listed below when they have anything in them.",
     "swept": {
       "title": "Also on this timer",
       "lead": "cleanupPeriodDays is not only a transcript setting. Claude Code ages out these directories on the same schedule:",
       "row": "{{what}} — {{entries}} in {{dir}}",
       "rowAtRisk": "{{what}} — {{entries}} in {{dir}}, {{deletable}} past the cutoff",
       "skipped": "{{count}} further directories hold only caches and diagnostics; Claudepot does not count those.",
-      "incomplete": "Part of this could not be read, so these counts are a floor."
+      "incomplete": "Part of this could not be read, so these counts are a floor.",
+      "what": {
+        "tasks": "background task state",
+        "fileHistory": "file edit history",
+        "uploads": "files you uploaded",
+        "shares": "shared conversations",
+        "dumpPrompts": "exported prompts (kept at most 3 days)",
+        "shellSnapshots": "shell environment snapshots",
+        "backups": "settings backups",
+        "plans": "saved plans",
+        "todos": "to-do lists",
+        "usageReports": "usage insight reports",
+        "feedbackDrafts": "unsent feedback drafts (kept at most 30 days)",
+        "tinyMemory": "per-project tiny_memory files"
+      }
     }
   },
   "health": {

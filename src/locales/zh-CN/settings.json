@@ -426,14 +426,28 @@
       "bodyCount": "Claude Code 目前正跳过清理，因此没有任何内容被删除——当前保留着 {{num}} 份对话记录。设置保留时长会<strong>重新启用删除</strong>：早于 {{label}} 的内容将在 Claude Code 下次启动时被清除。此操作无法撤销。",
       "confirm": "设置并重新启用删除"
     },
-    "scopeNote": "cleanupPeriodDays 并不只是对话记录的设置——Claude Code 会按同一时限清理 ~/.claude 下约二十个目录，包括 tasks、file-history、shell-snapshots 和 backups。Claudepot 统计的是无法再生的对话记录，其余目录不在此处显示。",
+    "scopeNote": "cleanupPeriodDays 并不只是对话记录的设置——Claude Code 会按同一时限清理 ~/.claude 下另外三十多个位置。上面的数字只统计无法再生的对话记录；其他存有你的内容的目录，只要有内容，就会列在下方。",
     "swept": {
       "title": "同一时限下的其他数据",
       "lead": "cleanupPeriodDays 并不只是对话记录的设置。Claude Code 会按同一时限清理这些目录：",
       "row": "{{what}} —— {{dir}} 中有 {{entries}} 项",
       "rowAtRisk": "{{what}} —— {{dir}} 中有 {{entries}} 项，其中 {{deletable}} 项已过期",
       "skipped": "另有 {{count}} 个目录只存放缓存与诊断数据，Claudepot 不统计它们。",
-      "incomplete": "其中一部分无法读取，因此这些数字只是下限。"
+      "incomplete": "其中一部分无法读取，因此这些数字只是下限。",
+      "what": {
+        "tasks": "后台任务状态",
+        "fileHistory": "文件编辑历史",
+        "uploads": "你上传的文件",
+        "shares": "分享的对话",
+        "dumpPrompts": "导出的提示词（最多保留 3 天）",
+        "shellSnapshots": "shell 环境快照",
+        "backups": "设置备份",
+        "plans": "保存的计划",
+        "todos": "待办清单",
+        "usageReports": "用量分析报告",
+        "feedbackDrafts": "未发送的反馈草稿（最多保留 30 天）",
+        "tinyMemory": "各项目的 tiny_memory 文件"
+      }
     }
   },
   "health": {

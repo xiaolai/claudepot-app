@@ -85,8 +85,11 @@ export interface TranscriptRisk {
  *  other than `projects/`. Counted in the unit CC deletes: files for
  *  some directories, immediate subdirectories for others. */
 export interface SweptDir {
+  /** Stable key for `settings:retention.swept.what.<id>`. */
+  id: string;
   rel: string;
-  /** Prose for a reader — "file edit history", not "file-history". */
+  /** Core's English prose — "file edit history", not "file-history".
+   *  The pane shows the catalog entry for `id` and falls back to this. */
   what: string;
   kind: "content" | "cache";
   entries: number;

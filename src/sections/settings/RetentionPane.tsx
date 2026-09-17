@@ -3,7 +3,7 @@ import { Trans, useTranslation } from "react-i18next";
 import { api } from "../../api";
 import { i18n } from "../../lib/i18n";
 import { formatNumber } from "../../lib/intl";
-import type { RetentionReport } from "../../api/cc-retention";
+import type { RetentionReport, SweptDir } from "../../api/cc-retention";
 import { Button } from "../../components/primitives/Button";
 import { SectionLabel } from "../../components/primitives/SectionLabel";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
@@ -201,6 +201,20 @@ function RiskSummary({ report }: { report: RetentionReport }) {
   );
 }
 
+/** The catalog's description of a swept directory, keyed by the row's
+ *  stable id. Core ships English, and interpolating it would put English
+ *  into a Chinese pane; the fallback covers a row core adds before the
+ *  catalog does (`cc_sweep`'s own test keeps that from shipping). Typed
+ *  `t()` rejects computed keys, hence the cast — the same one
+ *  `lib/notifications/labels.ts` uses. */
+function sweptWhat(d: SweptDir): string {
+  const key = `retention.swept.what.${d.id}`;
+  if (!i18n.exists(key, { ns: "settings" })) return d.what;
+  return (i18n.t as unknown as (k: string, o?: object) => string)(key, {
+    ns: "settings",
+  });
+}
+
 /** Everything else `cleanupPeriodDays` ages out. The counts above are
  *  conversations only; without this the pane names the gap in prose but
  *  never quantifies it, which is a smaller version of the same
@@ -230,13 +244,13 @@ function SweptPanel({ swept }: { swept: RetentionReport["swept_elsewhere"] }) {
           >
             {d.already_deletable > 0
               ? t("retention.swept.rowAtRisk", {
-                  what: d.what,
+                  what: sweptWhat(d),
                   dir: d.rel,
                   entries: formatNumber(d.entries),
                   deletable: formatNumber(d.already_deletable),
                 })
               : t("retention.swept.row", {
-                  what: d.what,
+                  what: sweptWhat(d),
                   dir: d.rel,
                   entries: formatNumber(d.entries),
                 })}

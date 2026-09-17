@@ -279,7 +279,11 @@ pub struct RetentionState {
 /// a `<uuid>.desktop-released.json` sidecar (`reason: "delete"` releases
 /// it now, `"archive"` releases it once the sidecar itself ages past the
 /// cutoff), otherwise an `entrypoint` of `claude-desktop`,
-/// `claude-desktop-3p` or `local-agent` found in the file's head or tail.
+/// `claude-desktop-3p` or `local-agent` (`local_agent` normalised) found
+/// in the file's first or last 64 KB. An **empty** transcript with no
+/// session folder beside it is kept by the same pass, whatever wrote it,
+/// and an `agent-*` file is released when its parent session's sidecar
+/// says so.
 ///
 /// These counts ignore all of that, so every desktop-written transcript
 /// is reported as at risk when CC will not touch it. That is deliberate,
@@ -291,42 +295,39 @@ pub struct RetentionState {
 /// here is over-warning; that change would introduce the first
 /// under-warning one, on the only CC setting that destroys user data.
 ///
+/// Re-read against the 2.1.274 binary on 2026-09-17 (`Le()` / `vTr()` in
+/// the retention chunk): the disabling conditions are unchanged — a
+/// policy-layer `cleanupPeriodDays`, admin-governed retention, settings
+/// errors, HIPAA, ZDR — so the reasoning above still holds.
+///
 /// Measured cost of the current bias on the reference machine
-/// (2026-08-28, CC 2.1.250): **zero** — no `.desktop-released.json`
-/// sidecar and no `entrypoint` field exists in any of its 2,145
-/// transcripts. It is non-zero only for someone running Claude Desktop
-/// or Cowork against the same `~/.claude`.
+/// (2026-09-17): **zero**. Of its 3,548 transcripts, 2,834 carry an
+/// `entrypoint` and none is desktop-host; no `.desktop-released.json`
+/// sidecar and no empty transcript exists. It is non-zero only for
+/// someone running Claude Desktop or Cowork against the same
+/// `~/.claude`.
 ///
 /// # `cleanupPeriodDays` is not a transcript setting
 ///
-/// It is a global TTL. Verified against the 2.1.233 binary's cleanup
-/// module (every one of these is a sweep function gated on the same
-/// cutoff): `projects`, `tasks`, `shell-snapshots`, `backups`,
-/// `file-history`, `dump-prompts`, `session-env`, `uploads`, `shares`,
-/// `plans`, `telemetry`, `traces`, `debug`, `usage-data`,
-/// `feedback-bundles`, `feedback/drafts`, `startup-perf`,
-/// `mcp-discovery-cache`, `jobs`, `daemon/*`, `skills/.staging`.
-///
-/// CC 2.1.117's changelog announced three of those as an addition; the
-/// binary shows the set is far larger, which is why this note cites the
-/// binary and not the release note.
+/// It is a global TTL: the 2.1.274 binary's cleanup orchestrator runs 42
+/// sweep functions on the same cutoff, over `projects` and some three
+/// dozen other locations. [`crate::cc_sweep::SWEPT`] is the list, with
+/// the unit each one deletes in and the few that carry a shorter cap of
+/// their own. CC 2.1.117's changelog announced three of them as an
+/// addition, which is why this note cites the binary and not the
+/// release note.
 ///
 /// **This struct deliberately counts only `projects/`.** Transcripts are
-/// the irreplaceable part and the only part the pane can describe
-/// honestly — most of the rest is cache or diagnostics, and guessing at
-/// which of `file-history` or `dump-prompts` a given user would mourn
-/// would produce either false alarm or false reassurance.
+/// the irreplaceable part and the only part the pane can describe in a
+/// sentence. `cc_sweep` counts the rest separately, and only the rows it
+/// classifies as content, so neither half guesses at the other's
+/// meaning.
 ///
-/// The cost of that choice is that every count here is a **floor for
-/// the setting**, exact only for conversations. Callers must therefore
+/// The consequence is that every count here is a **floor for the
+/// setting**, exact only for conversations. Callers must therefore
 /// scope their reassurance: "no saved conversations are scheduled for
 /// deletion" is true, "nothing is scheduled for deletion" is not. See
 /// `retention.risk.nothing` / `retention.scopeNote` in the catalog.
-///
-/// Widening this to a full accounting is real work (20 directories,
-/// different file types, different meanings) and would change the
-/// pane's model from "transcripts" to "everything CC ages out" — a
-/// redesign, not a count. Tracked as a watchlist row.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TranscriptRisk {
     /// Top-level `projects/<slug>/*.jsonl|*.cast` files — everything CC
@@ -414,7 +415,7 @@ pub fn report(now_ms: i64, horizon_days: i64) -> RetentionReport {
     } else {
         Some(now_ms.saturating_sub(state.effective_days.saturating_mul(MS_PER_DAY)))
     };
-    let swept_elsewhere = crate::cc_sweep::scan_swept_in(&claude_config_dir(), cutoff);
+    let swept_elsewhere = crate::cc_sweep::scan_swept_in(&claude_config_dir(), now_ms, cutoff);
     RetentionReport {
         state,
         risk,
