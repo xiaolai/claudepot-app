@@ -120,6 +120,10 @@ use std::path::{Path, PathBuf};
 /// refusing it costs a badge rather than a wrong number.
 const MAX_ROSTER_BYTES: u64 = 1024 * 1024;
 
+/// CC's own bound (`8388608` in 2.1.274), quoted in the refusal so the
+/// message cannot be read as CC's rule.
+const CC_QUARANTINE_BYTES: u64 = 8 * 1024 * 1024;
+
 /// The `proto` range this build knows how to read. CC 2.1.251 pins its
 /// own accepted range to `[1, 1]`, and this must not be wider: an
 /// earlier revision gated on `p <= MAX` alone, which accepted `proto:
@@ -233,7 +237,7 @@ pub fn read_daemon_status_at(path: &Path, procs: &dyn ProcessCheck) -> DaemonSta
             parse_status: DaemonParseStatus::Failed {
                 reason: format!(
                     "roster.json is {} bytes, past the {MAX_ROSTER_BYTES}-byte bound \
-                     CC quarantines its own roster at",
+                     Claudepot reads (CC quarantines its own roster at {CC_QUARANTINE_BYTES})",
                     meta.len()
                 ),
             },
