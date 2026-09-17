@@ -98,7 +98,7 @@ pub struct PriceTable {
 /// rate correction reach users who already hold a cache file. Editing
 /// [`crate::session_live::pricing::RATE_TIERS`] without bumping this
 /// leaves those users on the old numbers for up to a day.
-const RATES_VERIFIED_AT: &str = "2026-07-25";
+const RATES_VERIFIED_AT: &str = "2026-09-17";
 
 /// Cache TTL — how old a cached table can be before we trigger a
 /// background refresh. Anthropic rate changes are infrequent and
@@ -257,10 +257,12 @@ const ANTHROPIC_PRICING_URL: &str = "https://www.anthropic.com/pricing";
 /// predictable text shape — `"Claude <Model> <version?> ... Input
 /// $X.XX / MTok ... Output $Y.YY / MTok ...`. We extract the model
 /// id and the two base rates via a forgiving regex, then *derive*
-/// cache-write / cache-read from Anthropic's fixed formulas
-/// (input × 1.25 and input × 0.1). That derivation is authoritative
-/// per Anthropic's own cache documentation and sidesteps brittle
-/// parsing of the secondary rows.
+/// cache-write / cache-read with
+/// [`crate::session_live::pricing::derived_cache_rates`], which scales
+/// each model's own bundled multipliers. They are not one fixed
+/// formula: Fable 5.1 and Mythos 5.1 read cache at 0.025× input, the
+/// rest at 0.1×. Deriving still sidesteps brittle parsing of the
+/// secondary rows.
 /// Overlay scraped rates onto the bundled table as a floor: `bundled()`
 /// provides an entry for every current model, and each scraped rate
 /// overrides its bundled counterpart. The result therefore covers at
@@ -410,11 +412,13 @@ fn scrape_family(flat: &str, prefix: &str) -> Option<(String, ModelRates)> {
     let tail = &flat[start..];
     let window = &tail[..tail.len().min(2000)];
     let (input, output) = extract_two_dollar_rates(window)?;
+    let (cache_write, cache_read) =
+        crate::session_live::pricing::derived_cache_rates(&model_id, input);
     let rates = ModelRates {
         input_per_mtok: input,
         output_per_mtok: output,
-        cache_write_per_mtok: input * 1.25,
-        cache_read_per_mtok: input * 0.10,
+        cache_write_per_mtok: cache_write,
+        cache_read_per_mtok: cache_read,
     };
     Some((model_id, rates))
 }
@@ -579,15 +583,38 @@ mod tests {
         // scraper going quiet is invisible in production because the
         // bundled table silently covers for it.
         let html = "claude-opus-5 $5.00 / MTok $25.00 / MTok \
-                    claude-sonnet-5 $3.00 / MTok $15.00 / MTok \
+                    claude-sonnet-5 $2.00 / MTok $10.00 / MTok \
                     claude-haiku-4-5 $1.00 / MTok $5.00 / MTok \
-                    claude-fable-5 $10.00 / MTok $50.00 / MTok";
+                    claude-fable-5-1 $10.00 / MTok $50.00 / MTok";
         let out = parse_pricing_html(html).unwrap();
         assert_eq!(out.len(), SCRAPED_FAMILIES.len());
         assert_eq!(out.get("claude-opus-5").unwrap().input_per_mtok, 5.0);
-        assert_eq!(out.get("claude-sonnet-5").unwrap().output_per_mtok, 15.0);
+        assert_eq!(out.get("claude-sonnet-5").unwrap().output_per_mtok, 10.0);
         assert_eq!(out.get("claude-haiku-4-5").unwrap().input_per_mtok, 1.0);
-        assert_eq!(out.get("claude-fable-5").unwrap().output_per_mtok, 50.0);
+        assert_eq!(out.get("claude-fable-5-1").unwrap().output_per_mtok, 50.0);
+    }
+
+    #[test]
+    fn a_scrape_that_matches_the_bundle_records_no_change() {
+        // The page shows only input and output; the cache columns are
+        // derived. A fixed 0.1× read multiplier turned Fable 5.1's
+        // unchanged $10/$50 into a "change" to a $1 cache read, logged
+        // to pricing-history.json and then preferred over the bundled
+        // $0.25 from that day on.
+        let html = "claude-fable-5-1 $10.00 / MTok $50.00 / MTok \
+                    claude-sonnet-4-6 $3.00 / MTok $15.00 / MTok";
+        let scraped = parse_pricing_html(html).unwrap();
+        let bundled = bundled().models;
+        assert_eq!(scraped["claude-fable-5-1"], bundled["claude-fable-5-1"]);
+        // $3 × 0.10 is 0.30000000000000004, not 0.3 — the scale-from-
+        // bundled derivation keeps that from reading as a change too.
+        assert_eq!(scraped["claude-sonnet-4-6"], bundled["claude-sonnet-4-6"]);
+        let mut log = history::HistoryFile::default();
+        let changed = history::record_scrape(&mut log, &scraped, &bundled, (2026, 9, 17));
+        assert!(
+            changed.is_empty(),
+            "recorded a change that did not happen: {changed:?}"
+        );
     }
 
     #[test]

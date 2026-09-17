@@ -775,22 +775,35 @@ mod tests {
 
     #[test]
     fn a_session_is_priced_at_the_rate_in_force_when_it_ran() {
-        // Same tokens, same model, two sides of Sonnet 5's
-        // introductory-window boundary. Before the dated book both
-        // scored identically, which silently rewrote the older figure
-        // every time a price moved.
-        let prices = rates_for_test();
+        // Same tokens, same model, two sides of a rate change. Before
+        // the dated book both scored identically, which silently
+        // rewrote the older figure every time a price moved. No bundled
+        // model has a dated change, so the change comes from an
+        // observation — which is how a real book acquires one.
+        let mut history = crate::pricing::history::HistoryFile::default();
+        assert!(history.observe(
+            "claude-opus-5",
+            &crate::pricing::ModelRates {
+                input_per_mtok: 7.0,
+                output_per_mtok: 35.0,
+                cache_write_per_mtok: 8.75,
+                cache_read_per_mtok: 0.7,
+            },
+            None,
+            (2026, 10, 1),
+        ));
+        let prices = PriceBook::with_history(history);
         let tokens = TokenUsage {
             input: 1_000_000,
             output: 0,
             cache_creation: 0,
             cache_read: 0,
         };
-        let during = aggregate_from_rows(
+        let before = aggregate_from_rows(
             vec![row(
                 "/p",
-                ms_on("2026-08-15"),
-                vec!["claude-sonnet-5"],
+                ms_on("2026-09-15"),
+                vec!["claude-opus-5"],
                 tokens.clone(),
             )],
             &prices,
@@ -799,15 +812,15 @@ mod tests {
         let after = aggregate_from_rows(
             vec![row(
                 "/p",
-                ms_on("2026-09-15"),
-                vec!["claude-sonnet-5"],
+                ms_on("2026-10-15"),
+                vec!["claude-opus-5"],
                 tokens,
             )],
             &prices,
             TimeWindow::open(),
         );
-        assert!((during.rows[0].cost_usd.unwrap() - 2.0).abs() < 1e-9);
-        assert!((after.rows[0].cost_usd.unwrap() - 3.0).abs() < 1e-9);
+        assert!((before.rows[0].cost_usd.unwrap() - 5.0).abs() < 1e-9);
+        assert!((after.rows[0].cost_usd.unwrap() - 7.0).abs() < 1e-9);
     }
 
     #[test]

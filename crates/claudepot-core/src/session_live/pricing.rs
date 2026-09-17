@@ -10,11 +10,13 @@
 //! # Rates are dated
 //!
 //! Each model carries a list of [`RatePeriod`]s rather than one rate,
-//! and [`resolve_rates_on`] takes the day the usage happened. A
-//! session from the Sonnet 5 introductory window scores at $2/$10; the
-//! same session's tokens spent in September score at $3/$15. Scoring
-//! everything at today's rate silently rewrites the past every time
-//! Anthropic changes a price.
+//! and [`resolve_rates_on`] takes the day the usage happened, so a
+//! price change re-scores only the usage after it. Scoring everything
+//! at today's rate silently rewrites the past every time Anthropic
+//! changes a price. No bundled model has more than one period today —
+//! Sonnet 5's announced 2026-09-01 increase was cancelled (see its
+//! entry) — but observed changes from [`crate::pricing::history`]
+//! land as later periods, and those are resolved the same way.
 //!
 //! # Resolution
 //!
@@ -142,6 +144,40 @@ pub fn rates_for(model: &str) -> Option<ModelRates> {
     resolve_rates_on(model, today_utc()).map(|r| r.rates)
 }
 
+/// Cache-write and cache-read rates for `model` at an input rate of
+/// `input_per_million_usd`, as `(write, read)`.
+///
+/// For sources that see only input and output — the live pricing
+/// scrape, and the history observations it writes. The multipliers
+/// are a property of the model, not a constant: Fable 5.1 and Mythos
+/// 5.1 read cache at 0.025× input where the rest read at 0.1×, and a
+/// fixed 0.1× turned a scrape of Fable 5.1's unchanged $10 input into
+/// a recorded "change" to a $1 cache read. So a listed model is scaled
+/// from its own bundled entry, and only an unlisted one gets
+/// Anthropic's standard 1.25× / 0.1×.
+///
+/// Scaled as `bundled × (input / bundled_input)` rather than through a
+/// ratio, so an unchanged input returns the bundled figures
+/// bit-for-bit — history dedup compares with `==`.
+pub fn derived_cache_rates(model: &str, input_per_million_usd: f64) -> (f64, f64) {
+    let input = input_per_million_usd;
+    let key = canonicalize_model_id(model);
+    let listed = periods_for_id(&key)
+        .and_then(|p| p.last())
+        .map(|p| p.rates)
+        .filter(|r| r.input_per_million_usd > 0.0);
+    match listed {
+        Some(r) => {
+            let scale = input / r.input_per_million_usd;
+            (
+                r.cache_write_per_million_usd * scale,
+                r.cache_read_per_million_usd * scale,
+            )
+        }
+        None => (input * 1.25, input * 0.10),
+    }
+}
+
 /// Today in UTC. Anthropic publishes rate-change dates without a
 /// timezone; UTC is the least surprising reading and keeps the
 /// boundary from moving with the user's locale.
@@ -172,16 +208,23 @@ pub fn ymd_from_ms(ts_ms: i64) -> Option<Ymd> {
 /// showed as "unpriced" in the Cost dashboard.
 ///
 /// Ids inside a group share a rate *and its whole history*. Split a
-/// group the moment one member's price diverges: Sonnet 5 and Sonnet
-/// 4.6 shared a group until Sonnet 5's introductory window made their
-/// histories differ.
+/// group the moment one member's price diverges.
 ///
 /// Periods are listed oldest-first and must stay that way;
 /// `periods_are_sorted_oldest_first` enforces it.
 ///
-/// Rates verified against Anthropic's published model pricing on
-/// 2026-07-25 (USD per million tokens; `cache_read` = 0.1× input,
-/// `cache_write` = 1.25× input, per Anthropic's cache multipliers).
+/// Rates verified against Anthropic's published model pricing
+/// (platform.claude.com/docs/en/about-claude/pricing) and Claude Code
+/// 2.1.274's own `pricing_tiers` table on 2026-09-17. USD per million
+/// tokens; `cache_write` is the 5-minute write (1.25× input), and
+/// `cache_read` is 0.1× input **except** on Fable 5.1 and Mythos 5.1,
+/// where it is 0.025×.
+///
+/// Claude 3.x ids (`claude-3-5-haiku`, `claude-3-7-sonnet`, …) are
+/// deliberately absent. Their `claude-<generation>-<family>` naming
+/// puts no family where [`FAMILY_CURRENT`] looks for one, so listing
+/// them would need a fake `claude-3-` family; unlisted, they render
+/// `—`, which is honest for models retired from the first-party API.
 ///
 /// **Known gap:** fast mode bills Opus 5 and Opus 4.8 at $10/$50
 /// rather than $5/$25, and CC's transcripts carry no fast-mode marker,
@@ -211,11 +254,13 @@ const RATE_TIERS: &[(&[&str], &[RatePeriod])] = &[
             },
         }],
     ),
-    // Opus 4.1 — the retired $15 / $75 tier. Deprecated, retiring
-    // 2026-08-05, but transcripts from its era are still on disk and
-    // scoring them at the current Opus rate understates them 3×.
+    // Opus 4.1 / Opus 4 — the retired $15 / $75 tier. Transcripts
+    // from their era are still on disk, and scoring them at the
+    // current Opus rate understates them 3×. `claude-opus-4` is what
+    // `claude-opus-4-20250514` canonicalizes to; `claude-opus-4-0` is
+    // the alias Claude Code keys its own table on.
     (
-        &["claude-opus-4-1"],
+        &["claude-opus-4-1", "claude-opus-4", "claude-opus-4-0"],
         &[RatePeriod {
             starts: None,
             rates: ModelRates {
@@ -226,37 +271,34 @@ const RATE_TIERS: &[(&[&str], &[RatePeriod])] = &[
             },
         }],
     ),
-    // Sonnet 5 — introductory $2 / $10 through 2026-08-31, standard
-    // $3 / $15 from 2026-09-01. This is the price history the dated
-    // table exists for: before it, we baked the standard rate so the
-    // figure wouldn't under-report *later*, which meant over-reporting
-    // every session run during the introductory window.
+    // Sonnet 5 — $2 / $10, flat. It launched calling that an
+    // introductory price with an increase to $3 / $15 on 2026-09-01;
+    // Anthropic made $2 / $10 the standard price instead, and the
+    // pricing page says the increase "will not occur". This table
+    // carried the cancelled period for a while, over-reporting every
+    // Sonnet 5 session after that date by half.
+    // `sonnet_5_keeps_its_price_past_the_cancelled_increase` holds it.
     (
         &["claude-sonnet-5"],
-        &[
-            RatePeriod {
-                starts: None,
-                rates: ModelRates {
-                    input_per_million_usd: 2.0,
-                    output_per_million_usd: 10.0,
-                    cache_read_per_million_usd: 0.2,
-                    cache_write_per_million_usd: 2.5,
-                },
+        &[RatePeriod {
+            starts: None,
+            rates: ModelRates {
+                input_per_million_usd: 2.0,
+                output_per_million_usd: 10.0,
+                cache_read_per_million_usd: 0.2,
+                cache_write_per_million_usd: 2.5,
             },
-            RatePeriod {
-                starts: Some((2026, 9, 1)),
-                rates: ModelRates {
-                    input_per_million_usd: 3.0,
-                    output_per_million_usd: 15.0,
-                    cache_read_per_million_usd: 0.3,
-                    cache_write_per_million_usd: 3.75,
-                },
-            },
-        ],
+        }],
     ),
-    // Sonnet 4.6 / 4.5 — $3 / $15 throughout, no introductory window.
+    // Sonnet 4.6 / 4.5 / 4 — $3 / $15 throughout. `claude-sonnet-4`
+    // and `claude-sonnet-4-0` as for Opus 4 above.
     (
-        &["claude-sonnet-4-6", "claude-sonnet-4-5"],
+        &[
+            "claude-sonnet-4-6",
+            "claude-sonnet-4-5",
+            "claude-sonnet-4",
+            "claude-sonnet-4-0",
+        ],
         &[RatePeriod {
             starts: None,
             rates: ModelRates {
@@ -276,6 +318,24 @@ const RATE_TIERS: &[(&[&str], &[RatePeriod])] = &[
                 input_per_million_usd: 10.0,
                 output_per_million_usd: 50.0,
                 cache_read_per_million_usd: 1.0,
+                cache_write_per_million_usd: 12.5,
+            },
+        }],
+    ),
+    // Fable 5.1 / Mythos 5.1 — the same $10 / $50, but cache reads at
+    // $0.25 (0.025× input, not 0.1×). A group of its own because only
+    // the cache-read rate differs, which is exactly the difference an
+    // input-only comparison cannot see: before this entry, 5.1 fell
+    // back to Fable 5 as a family estimate and every cache read — the
+    // bulk of a long session's tokens — was scored at 4× its price.
+    (
+        &["claude-fable-5-1", "claude-mythos-5-1"],
+        &[RatePeriod {
+            starts: None,
+            rates: ModelRates {
+                input_per_million_usd: 10.0,
+                output_per_million_usd: 50.0,
+                cache_read_per_million_usd: 0.25,
                 cache_write_per_million_usd: 12.5,
             },
         }],
@@ -307,9 +367,12 @@ const FAMILY_CURRENT: &[(&str, &str)] = &[
     ("claude-opus-", "claude-opus-5"),
     ("claude-sonnet-", "claude-sonnet-5"),
     ("claude-haiku-", "claude-haiku-4-5"),
-    ("claude-fable-", "claude-fable-5"),
-    // Mythos shares Fable's specs and pricing but has its own family.
-    ("claude-mythos-", "claude-fable-5"),
+    // Fable 5.1 has been the default Fable model since Claude Code
+    // 2.1.257, so an unlisted Fable is priced like it.
+    ("claude-fable-", "claude-fable-5-1"),
+    // Mythos tracks Fable's pricing generation for generation, and has
+    // its own family prefix.
+    ("claude-mythos-", "claude-mythos-5-1"),
 ];
 
 /// Claude Code's placeholder in a transcript's `model` field for an
@@ -492,10 +555,10 @@ mod tests {
 
     // ── Exact rate lookup ──────────────────────────────────────────
 
-    /// A day inside the Sonnet 5 introductory window.
-    const DURING_INTRO: Ymd = (2026, 7, 25);
-    /// The first day the Sonnet 5 standard rate applies.
-    const AFTER_INTRO: Ymd = (2026, 9, 1);
+    /// An ordinary day to resolve flat rates on.
+    const DAY: Ymd = (2026, 7, 25);
+    /// The day Sonnet 5's cancelled increase was scheduled to start.
+    const CANCELLED_INCREASE: Ymd = (2026, 9, 1);
 
     fn exact_on(model: &str, on: Ymd) -> ModelRates {
         let r = resolve_rates_on(model, on).unwrap();
@@ -511,7 +574,7 @@ mod tests {
     fn exact_rates_for_known_ids() {
         // Current-generation Opus is $5 / $25 (the standard tier), not
         // the retired $15 / $75.
-        let opus = exact_on("claude-opus-5", DURING_INTRO);
+        let opus = exact_on("claude-opus-5", DAY);
         assert_eq!(opus.input_per_million_usd, 5.0);
         assert_eq!(opus.output_per_million_usd, 25.0);
         for id in [
@@ -520,33 +583,74 @@ mod tests {
             "claude-opus-4-6",
             "claude-opus-4-5",
         ] {
-            assert_eq!(exact_on(id, DURING_INTRO), opus);
+            assert_eq!(exact_on(id, DAY), opus);
         }
 
-        let son = exact_on("claude-sonnet-4-6", DURING_INTRO);
+        let son = exact_on("claude-sonnet-4-6", DAY);
         assert_eq!(son.input_per_million_usd, 3.0);
         assert_eq!(son.output_per_million_usd, 15.0);
-        assert_eq!(exact_on("claude-sonnet-4-5", DURING_INTRO), son);
+        for id in ["claude-sonnet-4-5", "claude-sonnet-4", "claude-sonnet-4-0"] {
+            assert_eq!(exact_on(id, DAY), son);
+        }
 
-        let fable = exact_on("claude-fable-5", DURING_INTRO);
+        let fable = exact_on("claude-fable-5", DAY);
         assert_eq!(fable.input_per_million_usd, 10.0);
         assert_eq!(fable.output_per_million_usd, 50.0);
-        assert_eq!(exact_on("claude-mythos-5", DURING_INTRO), fable);
+        assert_eq!(fable.cache_read_per_million_usd, 1.0);
+        assert_eq!(exact_on("claude-mythos-5", DAY), fable);
 
-        let hai = exact_on("claude-haiku-4-5", DURING_INTRO);
+        let hai = exact_on("claude-haiku-4-5", DAY);
         assert_eq!(hai.input_per_million_usd, 1.0);
         assert_eq!(hai.output_per_million_usd, 5.0);
     }
 
     #[test]
+    fn fable_5_1_reads_cache_at_a_quarter_dollar() {
+        // Same input and output as Fable 5, so only the cache-read
+        // rate tells them apart — and it is the rate a long session
+        // spends most of its tokens on.
+        let fable_5_1 = exact_on("claude-fable-5-1", DAY);
+        assert_eq!(fable_5_1.input_per_million_usd, 10.0);
+        assert_eq!(fable_5_1.output_per_million_usd, 50.0);
+        assert_eq!(fable_5_1.cache_read_per_million_usd, 0.25);
+        assert_eq!(fable_5_1.cache_write_per_million_usd, 12.5);
+        assert_eq!(exact_on("claude-mythos-5-1", DAY), fable_5_1);
+        assert_ne!(fable_5_1, exact_on("claude-fable-5", DAY));
+    }
+
+    #[test]
+    fn derived_cache_rates_follow_each_models_own_multipliers() {
+        // An unchanged input reproduces the bundled figures exactly —
+        // not approximately — for every listed model, because history
+        // dedup compares with `==`.
+        for id in priced_model_ids() {
+            let r = exact_on(id, DAY);
+            assert_eq!(
+                derived_cache_rates(id, r.input_per_million_usd),
+                (r.cache_write_per_million_usd, r.cache_read_per_million_usd),
+                "{id}"
+            );
+        }
+        // Fable 5.1 keeps its quarter-rate reads when its input moves.
+        assert_eq!(derived_cache_rates("claude-fable-5-1", 20.0), (25.0, 0.5));
+        // An unlisted model gets the standard multipliers.
+        assert_eq!(derived_cache_rates("claude-fable-9", 10.0), (12.5, 1.0));
+    }
+
+    #[test]
     fn retired_opus_keeps_its_own_higher_rate() {
-        // Opus 4.1 billed at $15 / $75. Folding it into the current
-        // Opus tier would understate every transcript from its era 3×.
-        let old = exact_on("claude-opus-4-1", DURING_INTRO);
+        // Opus 4.1 and Opus 4 billed at $15 / $75. Folding them into
+        // the current Opus tier would understate every transcript from
+        // their era 3×.
+        let old = exact_on("claude-opus-4-1", DAY);
         assert_eq!(old.input_per_million_usd, 15.0);
         assert_eq!(old.output_per_million_usd, 75.0);
-        let current = exact_on("claude-opus-5", DURING_INTRO);
+        let current = exact_on("claude-opus-5", DAY);
         assert_ne!(old, current);
+        // The API's dated id for Opus 4 canonicalizes onto this tier
+        // rather than falling through to the current Opus estimate.
+        assert_eq!(exact_on("claude-opus-4-20250514", DAY), old);
+        assert_eq!(exact_on("claude-opus-4-0", DAY), old);
     }
 
     #[test]
@@ -559,34 +663,50 @@ mod tests {
     // ── Price history ──────────────────────────────────────────────
 
     #[test]
-    fn sonnet_5_prices_at_the_introductory_rate_inside_the_window() {
-        let intro = exact_on("claude-sonnet-5", DURING_INTRO);
-        assert_eq!(intro.input_per_million_usd, 2.0);
-        assert_eq!(intro.output_per_million_usd, 10.0);
+    fn sonnet_5_keeps_its_price_past_the_cancelled_increase() {
+        // Launched as "introductory $2/$10 through 2026-08-31", then
+        // made the standard price; the $3/$15 increase never happened.
+        // The table carried it anyway and scored every later Sonnet 5
+        // session at 1.5× — this pins the day before, the day of, and
+        // well after.
+        let before = exact_on("claude-sonnet-5", (2026, 8, 31));
+        assert_eq!(before.input_per_million_usd, 2.0);
+        assert_eq!(before.output_per_million_usd, 10.0);
+        assert_eq!(exact_on("claude-sonnet-5", CANCELLED_INCREASE), before);
+        assert_eq!(exact_on("claude-sonnet-5", (2027, 3, 14)), before);
     }
 
-    #[test]
-    fn sonnet_5_prices_at_the_standard_rate_after_the_window() {
-        let standard = exact_on("claude-sonnet-5", AFTER_INTRO);
-        assert_eq!(standard.input_per_million_usd, 3.0);
-        assert_eq!(standard.output_per_million_usd, 15.0);
-        // ...and every day after, not just the boundary day.
-        assert_eq!(exact_on("claude-sonnet-5", (2027, 3, 14)), standard);
+    /// Two periods with a change on 2026-10-01, shaped like an
+    /// observed rate change merged over a bundled opening period.
+    fn dated_periods() -> [RatePeriod; 2] {
+        let at = |input: f64| ModelRates {
+            input_per_million_usd: input,
+            output_per_million_usd: input * 5.0,
+            cache_read_per_million_usd: input / 10.0,
+            cache_write_per_million_usd: input * 1.25,
+        };
+        [
+            RatePeriod {
+                starts: None,
+                rates: at(5.0),
+            },
+            RatePeriod {
+                starts: Some((2026, 10, 1)),
+                rates: at(7.0),
+            },
+        ]
     }
 
     #[test]
     fn the_period_boundary_is_the_first_day_of_the_new_rate() {
-        // 2026-08-31 is the last introductory day; 2026-09-01 is the
-        // first standard day. An off-by-one here misprices a whole day
-        // of usage.
-        assert_eq!(
-            exact_on("claude-sonnet-5", (2026, 8, 31)).input_per_million_usd,
-            2.0
-        );
-        assert_eq!(
-            exact_on("claude-sonnet-5", (2026, 9, 1)).input_per_million_usd,
-            3.0
-        );
+        // 2026-09-30 is the last old day; 2026-10-01 is the first new
+        // one. An off-by-one here misprices a whole day of usage.
+        let periods = dated_periods();
+        let input_on = |on| rate_on(&periods, on).unwrap().input_per_million_usd;
+        assert_eq!(input_on((2026, 9, 30)), 5.0);
+        assert_eq!(input_on((2026, 10, 1)), 7.0);
+        // ...and every day after, not just the boundary day.
+        assert_eq!(input_on((2027, 3, 14)), 7.0);
     }
 
     #[test]
@@ -734,8 +854,8 @@ mod tests {
         // `claude-opus-4-9` isn't in the table yet; the family fallback
         // returns the current Opus rate until a release updates the
         // baked table — and marks it as an estimate.
-        let future = estimated_on("claude-opus-4-9", DURING_INTRO);
-        assert_eq!(future, exact_on("claude-opus-5", DURING_INTRO));
+        let future = estimated_on("claude-opus-4-9", DAY);
+        assert_eq!(future, exact_on("claude-opus-5", DAY));
     }
 
     #[test]
@@ -744,37 +864,29 @@ mod tests {
         // to fall back too — this is what broke when Opus 5 shipped and
         // only `claude-opus-4-*` ids were listed.
         assert_eq!(
-            estimated_on("claude-opus-6", DURING_INTRO),
-            exact_on("claude-opus-5", DURING_INTRO)
+            estimated_on("claude-opus-6", DAY),
+            exact_on("claude-opus-5", DAY)
         );
         assert_eq!(
-            estimated_on("claude-sonnet-6", DURING_INTRO),
-            exact_on("claude-sonnet-5", DURING_INTRO)
-        );
-    }
-
-    #[test]
-    fn a_family_estimate_is_still_dated() {
-        // The estimate borrows the stand-in model's rate *for that
-        // day*, not its rate today — otherwise an estimate would leak
-        // today's price into a historical figure.
-        assert_eq!(
-            estimated_on("claude-sonnet-6", DURING_INTRO).input_per_million_usd,
-            2.0
-        );
-        assert_eq!(
-            estimated_on("claude-sonnet-6", AFTER_INTRO).input_per_million_usd,
-            3.0
+            estimated_on("claude-sonnet-6", DAY),
+            exact_on("claude-sonnet-5", DAY)
         );
     }
 
     #[test]
-    fn mythos_falls_back_to_the_fable_tier() {
-        // Mythos shares Fable's specs and pricing but has its own
-        // family prefix, so it needs its own FAMILY_CURRENT entry.
+    fn fable_and_mythos_estimate_from_their_current_generation() {
+        // The current Fable is 5.1, whose cache reads cost a quarter of
+        // Fable 5's. Estimating an unlisted Fable from Fable 5 would
+        // put the old cache rate on the newest model.
         assert_eq!(
-            estimated_on("claude-mythos-6", DURING_INTRO),
-            exact_on("claude-fable-5", DURING_INTRO)
+            estimated_on("claude-fable-6", DAY),
+            exact_on("claude-fable-5-1", DAY)
+        );
+        // Mythos has its own family prefix, so it needs its own
+        // FAMILY_CURRENT entry.
+        assert_eq!(
+            estimated_on("claude-mythos-6", DAY),
+            exact_on("claude-mythos-5-1", DAY)
         );
     }
 
@@ -783,7 +895,7 @@ mod tests {
         // `claude-opus-` spans the current tier and retired Opus 4.1.
         // An unlisted Opus must land on the current $5/$25 rate, not on
         // whichever tier happens to be declared first.
-        let est = estimated_on("claude-opus-7", DURING_INTRO);
+        let est = estimated_on("claude-opus-7", DAY);
         assert_eq!(est.input_per_million_usd, 5.0);
     }
 
@@ -799,7 +911,7 @@ mod tests {
             "claude-opus",
         ] {
             assert!(rates_for(id).is_none(), "{id} should not resolve");
-            assert!(resolve_rates_on(id, DURING_INTRO).is_none());
+            assert!(resolve_rates_on(id, DAY).is_none());
         }
     }
 

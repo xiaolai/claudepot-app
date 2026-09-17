@@ -22,102 +22,87 @@ import type { PriceBookSnapshotDto, PriceTableDto } from "./types";
  * from Rust so this file also documents the shape; the shared vectors
  * below are what actually keep the two implementations honest.
  */
-const BOOK: PriceBookSnapshotDto = {
-  models: {
-    "claude-opus-5": [
-      {
-        starts: null,
-        input_per_mtok: 5,
-        output_per_mtok: 25,
-        cache_write_per_mtok: 6.25,
-        cache_read_per_mtok: 0.5,
-      },
-    ],
-    "claude-opus-4-8": [
-      {
-        starts: null,
-        input_per_mtok: 5,
-        output_per_mtok: 25,
-        cache_write_per_mtok: 6.25,
-        cache_read_per_mtok: 0.5,
-      },
-    ],
-    "claude-opus-4-1": [
-      {
-        starts: null,
-        input_per_mtok: 15,
-        output_per_mtok: 75,
-        cache_write_per_mtok: 18.75,
-        cache_read_per_mtok: 1.5,
-      },
-    ],
-    "claude-sonnet-5": [
-      {
-        starts: null,
-        input_per_mtok: 2,
-        output_per_mtok: 10,
-        cache_write_per_mtok: 2.5,
-        cache_read_per_mtok: 0.2,
-      },
-      {
-        starts: [2026, 9, 1],
-        input_per_mtok: 3,
-        output_per_mtok: 15,
-        cache_write_per_mtok: 3.75,
-        cache_read_per_mtok: 0.3,
-      },
-    ],
-    "claude-sonnet-4-6": [
-      {
-        starts: null,
-        input_per_mtok: 3,
-        output_per_mtok: 15,
-        cache_write_per_mtok: 3.75,
-        cache_read_per_mtok: 0.3,
-      },
-    ],
-    "claude-haiku-4-5": [
-      {
-        starts: null,
-        input_per_mtok: 1,
-        output_per_mtok: 5,
-        cache_write_per_mtok: 1.25,
-        cache_read_per_mtok: 0.1,
-      },
-    ],
-    "claude-fable-5": [
-      {
-        starts: null,
-        input_per_mtok: 10,
-        output_per_mtok: 50,
-        cache_write_per_mtok: 12.5,
-        cache_read_per_mtok: 1,
-      },
-    ],
-    "claude-mythos-5": [
-      {
-        starts: null,
-        input_per_mtok: 10,
-        output_per_mtok: 50,
-        cache_write_per_mtok: 12.5,
-        cache_read_per_mtok: 1,
-      },
-    ],
-  },
-  family_current: {
-    "claude-opus-": "claude-opus-5",
-    "claude-sonnet-": "claude-sonnet-5",
-    "claude-haiku-": "claude-haiku-4-5",
-    "claude-fable-": "claude-fable-5",
-    "claude-mythos-": "claude-fable-5",
-  },
-};
+const BOOK: PriceBookSnapshotDto = (() => {
+  const flat = (
+    input: number,
+    output: number,
+    cacheWrite: number,
+    cacheRead: number,
+  ) => [
+    {
+      starts: null,
+      input_per_mtok: input,
+      output_per_mtok: output,
+      cache_write_per_mtok: cacheWrite,
+      cache_read_per_mtok: cacheRead,
+    },
+  ];
+  const opus = flat(5, 25, 6.25, 0.5);
+  const opusRetired = flat(15, 75, 18.75, 1.5);
+  const sonnet4 = flat(3, 15, 3.75, 0.3);
+  const fable5 = flat(10, 50, 12.5, 1);
+  const fable51 = flat(10, 50, 12.5, 0.25);
+  return {
+    models: {
+      "claude-opus-5": opus,
+      "claude-opus-4-8": opus,
+      "claude-opus-4-7": opus,
+      "claude-opus-4-6": opus,
+      "claude-opus-4-5": opus,
+      "claude-opus-4-1": opusRetired,
+      "claude-opus-4": opusRetired,
+      "claude-opus-4-0": opusRetired,
+      "claude-sonnet-5": flat(2, 10, 2.5, 0.2),
+      "claude-sonnet-4-6": sonnet4,
+      "claude-sonnet-4-5": sonnet4,
+      "claude-sonnet-4": sonnet4,
+      "claude-sonnet-4-0": sonnet4,
+      "claude-haiku-4-5": flat(1, 5, 1.25, 0.1),
+      "claude-fable-5": fable5,
+      "claude-mythos-5": fable5,
+      "claude-fable-5-1": fable51,
+      "claude-mythos-5-1": fable51,
+    },
+    family_current: {
+      "claude-opus-": "claude-opus-5",
+      "claude-sonnet-": "claude-sonnet-5",
+      "claude-haiku-": "claude-haiku-4-5",
+      "claude-fable-": "claude-fable-5-1",
+      "claude-mythos-": "claude-mythos-5-1",
+    },
+  };
+})();
 
 const TABLE: PriceTableDto = {
   models: {},
   source: { kind: "bundled", timestamp: "2026-07-25", url: "" },
   last_fetch_error: null,
   book: BOOK,
+};
+
+/**
+ * The same book after an observed change: Opus 5 at $7 input from
+ * 2026-10-01. No bundled model has a dated change, so this is the shape
+ * a dated book actually arrives in — history merged into the snapshot.
+ */
+const DATED_TABLE: PriceTableDto = {
+  ...TABLE,
+  book: {
+    ...BOOK,
+    models: {
+      ...BOOK.models,
+      "claude-opus-5": [
+        ...BOOK.models["claude-opus-5"],
+        {
+          starts: [2026, 10, 1],
+          input_per_mtok: 7,
+          output_per_mtok: 35,
+          cache_write_per_mtok: 8.75,
+          cache_read_per_mtok: 0.7,
+        },
+      ],
+    },
+  },
 };
 
 describe("shared rate-resolution vectors", () => {
@@ -133,6 +118,7 @@ describe("shared rate-resolution vectors", () => {
       on: Ymd;
       expect: "exact" | "family_estimate" | "unpriced";
       input_per_mtok?: number;
+      cache_read_per_mtok?: number;
     }[];
   };
 
@@ -151,6 +137,12 @@ describe("shared rate-resolution vectors", () => {
       expect(got!.confidence).toBe(v.expect);
       if (v.input_per_mtok !== undefined) {
         expect(got!.rates.input_per_mtok).toBeCloseTo(v.input_per_mtok, 9);
+      }
+      if (v.cache_read_per_mtok !== undefined) {
+        expect(got!.rates.cache_read_per_mtok).toBeCloseTo(
+          v.cache_read_per_mtok,
+          9,
+        );
       }
     });
   }
@@ -201,12 +193,27 @@ describe("costFromUsage", () => {
 
   it("prices the same usage differently across a rate change", () => {
     const usage = { input: 1_000_000, output: 0 };
-    const during = costFromUsage(TABLE, "claude-sonnet-5", usage, [
-      2026, 8, 15,
+    const before = costFromUsage(DATED_TABLE, "claude-opus-5", usage, [
+      2026, 9, 30,
     ]);
-    const after = costFromUsage(TABLE, "claude-sonnet-5", usage, [2026, 9, 15]);
-    expect(during!.usd).toBeCloseTo(2, 9);
-    expect(after!.usd).toBeCloseTo(3, 9);
+    const after = costFromUsage(DATED_TABLE, "claude-opus-5", usage, [
+      2026, 10, 1,
+    ]);
+    expect(before!.usd).toBeCloseTo(5, 9);
+    expect(after!.usd).toBeCloseTo(7, 9);
+  });
+
+  it("dates a family estimate by the stand-in's rate on that day", () => {
+    const usage = { input: 1_000_000, output: 0 };
+    const before = costFromUsage(DATED_TABLE, "claude-opus-7", usage, [
+      2026, 9, 30,
+    ]);
+    const after = costFromUsage(DATED_TABLE, "claude-opus-7", usage, [
+      2026, 10, 1,
+    ]);
+    expect(before).toEqual({ usd: 5, confidence: "family_estimate" });
+    expect(after!.usd).toBeCloseTo(7, 9);
+    expect(after!.confidence).toBe("family_estimate");
   });
 
   it("treats absent cache fields as zero", () => {
@@ -240,20 +247,20 @@ describe("costFromUsage", () => {
 describe("sessionCostEstimate", () => {
   it("prices from the session's own timestamp", () => {
     const usage = { input: 1_000_000, output: 0 };
-    const during = sessionCostEstimate(
-      TABLE,
-      ["claude-sonnet-5"],
+    const before = sessionCostEstimate(
+      DATED_TABLE,
+      ["claude-opus-5"],
       usage,
-      Date.parse("2026-08-15T12:00:00Z"),
+      Date.parse("2026-09-30T23:59:59.999Z"),
     );
     const after = sessionCostEstimate(
-      TABLE,
-      ["claude-sonnet-5"],
+      DATED_TABLE,
+      ["claude-opus-5"],
       usage,
-      Date.parse("2026-09-15T12:00:00Z"),
+      Date.parse("2026-10-01T00:00:00Z"),
     );
-    expect(during!.usd).toBeCloseTo(2, 9);
-    expect(after!.usd).toBeCloseTo(3, 9);
+    expect(before!.usd).toBeCloseTo(5, 9);
+    expect(after!.usd).toBeCloseTo(7, 9);
   });
 
   it("falls back to today's rate when the session has no timestamp", () => {

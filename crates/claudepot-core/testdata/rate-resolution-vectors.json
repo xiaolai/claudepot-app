@@ -16,7 +16,15 @@
     "history), so they stay stable regardless of what a given machine",
     "has scraped. Add a vector whenever you add a resolution rule.",
     "",
-    "expect: 'exact' | 'family_estimate' | 'unpriced'"
+    "Every model the bundled table prices must be named by at least one",
+    "'exact' vector (book.rs :: every_bundled_model_has_an_exact_vector),",
+    "which is what forces the hand-built book in costs.test.ts to grow",
+    "with the Rust table rather than silently lag it.",
+    "",
+    "expect: 'exact' | 'family_estimate' | 'unpriced'",
+    "input_per_mtok, cache_read_per_mtok: asserted when present. Fable 5.1",
+    "differs from Fable 5 only in its cache-read rate, so a model whose",
+    "multipliers are unusual needs cache_read_per_mtok to be pinned at all."
   ],
   "vectors": [
     {
@@ -24,11 +32,33 @@
       "model": "claude-opus-5",
       "on": [2026, 7, 25],
       "expect": "exact",
+      "input_per_mtok": 5.0,
+      "cache_read_per_mtok": 0.5
+    },
+    {
+      "name": "Opus 4.8 shares the current Opus tier",
+      "model": "claude-opus-4-8",
+      "on": [2026, 7, 25],
+      "expect": "exact",
       "input_per_mtok": 5.0
     },
     {
-      "name": "older Opus shares the current Opus tier",
-      "model": "claude-opus-4-8",
+      "name": "Opus 4.7 shares the current Opus tier",
+      "model": "claude-opus-4-7",
+      "on": [2026, 7, 25],
+      "expect": "exact",
+      "input_per_mtok": 5.0
+    },
+    {
+      "name": "Opus 4.6 shares the current Opus tier",
+      "model": "claude-opus-4-6",
+      "on": [2026, 7, 25],
+      "expect": "exact",
+      "input_per_mtok": 5.0
+    },
+    {
+      "name": "Opus 4.5 shares the current Opus tier",
+      "model": "claude-opus-4-5",
       "on": [2026, 7, 25],
       "expect": "exact",
       "input_per_mtok": 5.0
@@ -38,39 +68,70 @@
       "model": "claude-opus-4-1",
       "on": [2026, 7, 25],
       "expect": "exact",
+      "input_per_mtok": 15.0,
+      "cache_read_per_mtok": 1.5
+    },
+    {
+      "name": "retired Opus 4's dated API id prices at the retired tier",
+      "model": "claude-opus-4-20250514",
+      "on": [2026, 7, 25],
+      "expect": "exact",
       "input_per_mtok": 15.0
     },
     {
-      "name": "Sonnet 5 inside the introductory window",
+      "name": "Opus 4's alias prices at the retired tier",
+      "model": "claude-opus-4-0",
+      "on": [2026, 7, 25],
+      "expect": "exact",
+      "input_per_mtok": 15.0
+    },
+    {
+      "name": "Sonnet 5 resolves exactly",
       "model": "claude-sonnet-5",
       "on": [2026, 7, 25],
       "expect": "exact",
-      "input_per_mtok": 2.0
+      "input_per_mtok": 2.0,
+      "cache_read_per_mtok": 0.2
     },
     {
-      "name": "Sonnet 5 on the last introductory day",
-      "model": "claude-sonnet-5",
-      "on": [2026, 8, 31],
-      "expect": "exact",
-      "input_per_mtok": 2.0
-    },
-    {
-      "name": "Sonnet 5 on the first standard day",
+      "name": "Sonnet 5 keeps its price on the day its cancelled increase was due",
       "model": "claude-sonnet-5",
       "on": [2026, 9, 1],
       "expect": "exact",
-      "input_per_mtok": 3.0
+      "input_per_mtok": 2.0
     },
     {
-      "name": "Sonnet 5 long after the window",
+      "name": "Sonnet 5 keeps its price long after that day",
       "model": "claude-sonnet-5",
       "on": [2027, 3, 14],
+      "expect": "exact",
+      "input_per_mtok": 2.0
+    },
+    {
+      "name": "Sonnet 4.6 resolves exactly",
+      "model": "claude-sonnet-4-6",
+      "on": [2026, 7, 25],
+      "expect": "exact",
+      "input_per_mtok": 3.0,
+      "cache_read_per_mtok": 0.3
+    },
+    {
+      "name": "Sonnet 4.5 shares the Sonnet 4.6 tier",
+      "model": "claude-sonnet-4-5",
+      "on": [2026, 7, 25],
       "expect": "exact",
       "input_per_mtok": 3.0
     },
     {
-      "name": "Sonnet 4.6 is flat across the same dates",
-      "model": "claude-sonnet-4-6",
+      "name": "retired Sonnet 4's dated API id resolves exactly",
+      "model": "claude-sonnet-4-20250514",
+      "on": [2026, 7, 25],
+      "expect": "exact",
+      "input_per_mtok": 3.0
+    },
+    {
+      "name": "Sonnet 4's alias resolves exactly",
+      "model": "claude-sonnet-4-0",
       "on": [2026, 7, 25],
       "expect": "exact",
       "input_per_mtok": 3.0
@@ -80,21 +141,40 @@
       "model": "claude-haiku-4-5",
       "on": [2026, 7, 25],
       "expect": "exact",
-      "input_per_mtok": 1.0
+      "input_per_mtok": 1.0,
+      "cache_read_per_mtok": 0.1
     },
     {
       "name": "Fable 5 resolves exactly",
       "model": "claude-fable-5",
       "on": [2026, 7, 25],
       "expect": "exact",
-      "input_per_mtok": 10.0
+      "input_per_mtok": 10.0,
+      "cache_read_per_mtok": 1.0
     },
     {
-      "name": "Mythos 5 shares the Fable tier exactly",
+      "name": "Mythos 5 shares the Fable 5 tier exactly",
       "model": "claude-mythos-5",
       "on": [2026, 7, 25],
       "expect": "exact",
-      "input_per_mtok": 10.0
+      "input_per_mtok": 10.0,
+      "cache_read_per_mtok": 1.0
+    },
+    {
+      "name": "Fable 5.1 reads cache at a quarter dollar",
+      "model": "claude-fable-5-1",
+      "on": [2026, 7, 25],
+      "expect": "exact",
+      "input_per_mtok": 10.0,
+      "cache_read_per_mtok": 0.25
+    },
+    {
+      "name": "Mythos 5.1 shares the Fable 5.1 tier exactly",
+      "model": "claude-mythos-5-1",
+      "on": [2026, 7, 25],
+      "expect": "exact",
+      "input_per_mtok": 10.0,
+      "cache_read_per_mtok": 0.25
     },
     {
       "name": "a snapshot-dated id canonicalizes to its undated row",
@@ -132,25 +212,27 @@
       "input_per_mtok": 5.0
     },
     {
-      "name": "a family estimate is still dated (intro window)",
+      "name": "an unlisted Sonnet estimates from Sonnet 5",
       "model": "claude-sonnet-6",
-      "on": [2026, 7, 25],
+      "on": [2026, 9, 1],
       "expect": "family_estimate",
       "input_per_mtok": 2.0
     },
     {
-      "name": "a family estimate is still dated (after the window)",
-      "model": "claude-sonnet-6",
-      "on": [2026, 9, 1],
+      "name": "an unlisted Fable estimates from Fable 5.1, cache rate included",
+      "model": "claude-fable-6",
+      "on": [2026, 7, 25],
       "expect": "family_estimate",
-      "input_per_mtok": 3.0
+      "input_per_mtok": 10.0,
+      "cache_read_per_mtok": 0.25
     },
     {
-      "name": "Mythos falls back to the Fable tier",
+      "name": "an unlisted Mythos estimates from Mythos 5.1",
       "model": "claude-mythos-6",
       "on": [2026, 7, 25],
       "expect": "family_estimate",
-      "input_per_mtok": 10.0
+      "input_per_mtok": 10.0,
+      "cache_read_per_mtok": 0.25
     },
     {
       "name": "a non-Claude model is unpriced",
@@ -179,6 +261,12 @@
     {
       "name": "a Bedrock-form id is unpriced rather than mis-matched",
       "model": "us.anthropic.claude-sonnet-4-5-v1:0",
+      "on": [2026, 7, 25],
+      "expect": "unpriced"
+    },
+    {
+      "name": "a Claude 3.x id is unpriced rather than guessed",
+      "model": "claude-3-5-haiku-20241022",
       "on": [2026, 7, 25],
       "expect": "unpriced"
     }

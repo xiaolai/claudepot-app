@@ -112,7 +112,7 @@ impl PriceBook {
     ) -> Self {
         for (id, table_rates) in current {
             let believed = self.resolve(id, on).map(|r| r.rates);
-            let live = crate::pricing::history::to_live_rates(table_rates);
+            let live = crate::pricing::history::to_live_rates(id, table_rates);
             if believed == Some(live) {
                 continue;
             }
@@ -290,8 +290,29 @@ mod tests {
     use super::*;
     use crate::pricing::ModelRates as TableRates;
 
-    const DURING_INTRO: Ymd = (2026, 7, 25);
-    const AFTER_INTRO: Ymd = (2026, 9, 1);
+    const DAY: Ymd = (2026, 7, 25);
+    /// First day of the observed Opus 5 change in [`observed_change`].
+    const CHANGE_DAY: Ymd = (2026, 10, 1);
+
+    /// A book whose history says Opus 5 moved from $5 to $7 input on
+    /// [`CHANGE_DAY`]. No bundled model has a dated change, so a dated
+    /// book is built the way a real one gets its later periods: from
+    /// an observation.
+    fn observed_change() -> PriceBook {
+        let mut history = HistoryFile::default();
+        assert!(history.observe(
+            "claude-opus-5",
+            &TableRates {
+                input_per_mtok: 7.0,
+                output_per_mtok: 35.0,
+                cache_write_per_mtok: 8.75,
+                cache_read_per_mtok: 0.7,
+            },
+            None,
+            CHANGE_DAY,
+        ));
+        PriceBook::with_history(history)
+    }
 
     fn usage(input: u64, output: u64) -> TokenUsage {
         TokenUsage {
@@ -305,7 +326,7 @@ mod tests {
     #[test]
     fn a_listed_model_resolves_exactly() {
         let book = PriceBook::bundled_only();
-        let r = book.resolve("claude-opus-5", DURING_INTRO).unwrap();
+        let r = book.resolve("claude-opus-5", DAY).unwrap();
         assert_eq!(r.confidence, RateConfidence::Exact);
         assert_eq!(r.rates.input_per_million_usd, 5.0);
     }
@@ -313,7 +334,7 @@ mod tests {
     #[test]
     fn an_unlisted_model_resolves_as_a_family_estimate() {
         let book = PriceBook::bundled_only();
-        let r = book.resolve("claude-opus-7", DURING_INTRO).unwrap();
+        let r = book.resolve("claude-opus-7", DAY).unwrap();
         assert_eq!(r.confidence, RateConfidence::FamilyEstimate);
         assert_eq!(r.rates.input_per_million_usd, 5.0);
     }
@@ -321,24 +342,69 @@ mod tests {
     #[test]
     fn a_model_from_no_priced_family_is_unpriced() {
         let book = PriceBook::bundled_only();
-        assert!(book.resolve("gpt-4", DURING_INTRO).is_none());
-        assert!(book.cost("gpt-4", DURING_INTRO, &usage(1, 1)).is_none());
+        assert!(book.resolve("gpt-4", DAY).is_none());
+        assert!(book.cost("gpt-4", DAY, &usage(1, 1)).is_none());
     }
 
     #[test]
     fn the_same_session_prices_differently_across_a_rate_change() {
-        // The whole point of the dated book: one million Sonnet 5
-        // input tokens cost $2 during the introductory window and $3
-        // after it, and neither figure rewrites the other.
-        let book = PriceBook::bundled_only();
+        // The whole point of the dated book: one million input tokens
+        // cost $5 before the change and $7 from it, and neither figure
+        // rewrites the other.
+        let book = observed_change();
         let before = book
-            .cost("claude-sonnet-5", DURING_INTRO, &usage(1_000_000, 0))
+            .cost("claude-opus-5", (2026, 9, 30), &usage(1_000_000, 0))
             .unwrap();
         let after = book
-            .cost("claude-sonnet-5", AFTER_INTRO, &usage(1_000_000, 0))
+            .cost("claude-opus-5", CHANGE_DAY, &usage(1_000_000, 0))
             .unwrap();
-        assert!((before.usd - 2.0).abs() < 1e-9);
-        assert!((after.usd - 3.0).abs() < 1e-9);
+        assert!((before.usd - 5.0).abs() < 1e-9);
+        assert!((after.usd - 7.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_stale_derived_cache_rate_in_history_does_not_override_the_bundle() {
+        // What an earlier build logged the first time a scrape saw
+        // Fable 5.1: the real $10/$50, plus a cache read it computed as
+        // 0.1× input. The page never showed that $1 — so it must not
+        // displace the bundled $0.25 from the day it was logged.
+        let mut history = HistoryFile::default();
+        assert!(history.observe(
+            "claude-fable-5-1",
+            &TableRates {
+                input_per_mtok: 10.0,
+                output_per_mtok: 50.0,
+                cache_write_per_mtok: 12.5,
+                cache_read_per_mtok: 1.0,
+            },
+            None,
+            (2026, 9, 1),
+        ));
+        let book = PriceBook::with_history(history);
+        let r = book.resolve("claude-fable-5-1", (2026, 9, 17)).unwrap();
+        assert_eq!(r.confidence, RateConfidence::Exact);
+        assert_eq!(r.rates.cache_read_per_million_usd, 0.25);
+        assert_eq!(
+            book.snapshot().models["claude-fable-5-1"]
+                .last()
+                .unwrap()
+                .cache_read_per_mtok,
+            0.25
+        );
+    }
+
+    #[test]
+    fn a_family_estimate_is_still_dated() {
+        // The estimate borrows the stand-in model's rate *for that
+        // day*, not its rate today — otherwise an estimate would leak
+        // today's price into a historical figure.
+        let book = observed_change();
+        let before = book.resolve("claude-opus-7", (2026, 9, 30)).unwrap();
+        let after = book.resolve("claude-opus-7", CHANGE_DAY).unwrap();
+        assert_eq!(before.confidence, RateConfidence::FamilyEstimate);
+        assert_eq!(after.confidence, RateConfidence::FamilyEstimate);
+        assert_eq!(before.rates.input_per_million_usd, 5.0);
+        assert_eq!(after.rates.input_per_million_usd, 7.0);
     }
 
     #[test]
@@ -397,7 +463,7 @@ mod tests {
             cache_creation: 1_000_000,
         };
         // Opus 5: $5 in + $25 out + $0.50 cache-read + $6.25 cache-write.
-        let c = book.cost("claude-opus-5", DURING_INTRO, &u).unwrap();
+        let c = book.cost("claude-opus-5", DAY, &u).unwrap();
         assert!((c.usd - 36.75).abs() < 1e-9);
     }
 
@@ -437,6 +503,10 @@ mod tests {
         expect: String,
         #[serde(default)]
         input_per_mtok: Option<f64>,
+        /// Asserted when present. Fable 5.1 differs from Fable 5 only
+        /// here, so an input-only vector cannot tell them apart.
+        #[serde(default)]
+        cache_read_per_mtok: Option<f64>,
     }
 
     fn vectors_path() -> std::path::PathBuf {
@@ -445,11 +515,37 @@ mod tests {
             .join("rate-resolution-vectors.json")
     }
 
-    #[test]
-    fn shared_vectors_match_this_implementation() {
+    fn load_vectors() -> VectorFile {
         let raw = std::fs::read_to_string(vectors_path())
             .expect("rate-resolution-vectors.json must exist");
-        let file: VectorFile = serde_json::from_str(&raw).expect("vectors must parse");
+        serde_json::from_str(&raw).expect("vectors must parse")
+    }
+
+    #[test]
+    fn every_bundled_model_has_an_exact_vector() {
+        // `src/costs.test.ts` runs the same vectors against a book it
+        // builds by hand. A model added here with no vector would pass
+        // on both sides while the hand-built book never learned of it —
+        // requiring a vector is what makes that book keep up.
+        let file = load_vectors();
+        let covered: std::collections::BTreeSet<String> = file
+            .vectors
+            .iter()
+            .filter(|v| v.expect == "exact")
+            .map(|v| canonicalize_model_id(&v.model))
+            .collect();
+        let missing: Vec<&str> = rates::priced_model_ids()
+            .filter(|id| !covered.contains(*id))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "bundled models with no exact vector: {missing:?}"
+        );
+    }
+
+    #[test]
+    fn shared_vectors_match_this_implementation() {
+        let file = load_vectors();
         assert!(!file.vectors.is_empty(), "fixture must not be empty");
         let book = PriceBook::bundled_only();
         for v in &file.vectors {
@@ -471,6 +567,14 @@ mod tests {
                             "{}: expected ${expected}/MTok in, got ${}",
                             v.name,
                             got.rates.input_per_million_usd
+                        );
+                    }
+                    if let Some(expected) = v.cache_read_per_mtok {
+                        assert!(
+                            (got.rates.cache_read_per_million_usd - expected).abs() < 1e-9,
+                            "{}: expected ${expected}/MTok cache read, got ${}",
+                            v.name,
+                            got.rates.cache_read_per_million_usd
                         );
                     }
                 }
@@ -510,8 +614,8 @@ mod tests {
                 cache_read_per_mtok: 0.7,
             },
         );
-        let book = PriceBook::bundled_only().with_current_rates(&current, DURING_INTRO);
-        let r = book.resolve("claude-opus-5", DURING_INTRO).unwrap();
+        let book = PriceBook::bundled_only().with_current_rates(&current, DAY);
+        let r = book.resolve("claude-opus-5", DAY).unwrap();
         assert_eq!(r.rates.input_per_million_usd, 7.0);
     }
 
@@ -527,7 +631,7 @@ mod tests {
                 cache_read_per_mtok: 0.5,
             },
         );
-        let folded = PriceBook::bundled_only().with_current_rates(&current, DURING_INTRO);
+        let folded = PriceBook::bundled_only().with_current_rates(&current, DAY);
         assert_eq!(
             folded.snapshot(),
             PriceBook::bundled_only().snapshot(),
@@ -571,8 +675,8 @@ mod tests {
                 cache_read_per_mtok: 1.2,
             },
         );
-        let book = PriceBook::bundled_only().with_current_rates(&current, DURING_INTRO);
-        let r = book.resolve("claude-opus-9", DURING_INTRO).unwrap();
+        let book = PriceBook::bundled_only().with_current_rates(&current, DAY);
+        let r = book.resolve("claude-opus-9", DAY).unwrap();
         assert_eq!(r.confidence, RateConfidence::Exact);
         assert_eq!(r.rates.input_per_million_usd, 12.0);
         assert!(book.snapshot().models.contains_key("claude-opus-9"));
@@ -589,28 +693,20 @@ mod tests {
 
     #[test]
     fn resolve_at_ms_uses_the_timestamps_own_day() {
-        let book = PriceBook::bundled_only();
-        let intro_ms = "2026-08-15T12:00:00Z"
-            .parse::<chrono::DateTime<chrono::Utc>>()
-            .unwrap()
-            .timestamp_millis();
-        let after_ms = "2026-09-15T12:00:00Z"
-            .parse::<chrono::DateTime<chrono::Utc>>()
-            .unwrap()
-            .timestamp_millis();
-        assert_eq!(
-            book.resolve_at_ms("claude-sonnet-5", intro_ms)
+        let book = observed_change();
+        let at = |ts: &str| {
+            let ms = ts
+                .parse::<chrono::DateTime<chrono::Utc>>()
+                .unwrap()
+                .timestamp_millis();
+            book.resolve_at_ms("claude-opus-5", ms)
                 .unwrap()
                 .rates
-                .input_per_million_usd,
-            2.0
-        );
-        assert_eq!(
-            book.resolve_at_ms("claude-sonnet-5", after_ms)
-                .unwrap()
-                .rates
-                .input_per_million_usd,
-            3.0
-        );
+                .input_per_million_usd
+        };
+        // The last millisecond before the change and the first one of
+        // it, so a timezone slip in the day conversion shows up here.
+        assert_eq!(at("2026-09-30T23:59:59.999Z"), 5.0);
+        assert_eq!(at("2026-10-01T00:00:00Z"), 7.0);
     }
 }

@@ -263,9 +263,10 @@ impl HistoryFile {
     /// This used to drop any observation dated before the *last*
     /// bundled period start, meaning to protect documented windows from
     /// a scrape's imprecise date. It protected the wrong thing: a model
-    /// with a **scheduled future** period — Sonnet 5's standard rate
-    /// starting 2026-09-01 — put the floor in the future, so every
-    /// observation about *today* was silently discarded. Recording a
+    /// with a **scheduled future** period — as Sonnet 5 carried for an
+    /// announced 2026-09-01 increase, later cancelled — put the floor in
+    /// the future, so every observation about *today* was silently
+    /// discarded. Recording a
     /// rate change and then ignoring it is worse than either trusting
     /// or refusing it outright.
     ///
@@ -279,7 +280,7 @@ impl HistoryFile {
             let Some(day) = o.day() else { continue };
             let period = RatePeriod {
                 starts: Some(day),
-                rates: to_live_rates(&o.rates),
+                rates: to_live_rates(model_id, &o.rates),
             };
             // An observation on the same day as an existing period
             // replaces it rather than creating an ambiguous duplicate.
@@ -302,14 +303,28 @@ fn rates_equal(a: &ModelRates, b: &ModelRates) -> bool {
 }
 
 /// Bridge the dashboard's `*_per_mtok` shape to the rate table's
-/// `*_per_million_usd` shape. Same numbers, two struct definitions
-/// that predate each other.
-pub(crate) fn to_live_rates(r: &ModelRates) -> crate::session_live::pricing::ModelRates {
+/// `*_per_million_usd` shape for `model_id`.
+///
+/// Input and output are taken as given. The two cache columns are
+/// **re-derived** from the model's own multipliers rather than read:
+/// every table that reaches here — a scrape, the cache file it wrote,
+/// an observation it logged — only ever *saw* input and output, and
+/// the cache figures beside them were computed. Builds before the
+/// per-model derivation computed Fable 5.1's cache read as 0.1× input
+/// ($1) and logged that as an observed change; reading the stored
+/// column would let that record override the bundled $0.25 on every
+/// install that scraped once. Re-deriving makes such a record inert.
+pub(crate) fn to_live_rates(
+    model_id: &str,
+    r: &ModelRates,
+) -> crate::session_live::pricing::ModelRates {
+    let (write, read) =
+        crate::session_live::pricing::derived_cache_rates(model_id, r.input_per_mtok);
     crate::session_live::pricing::ModelRates {
         input_per_million_usd: r.input_per_mtok,
         output_per_million_usd: r.output_per_mtok,
-        cache_read_per_million_usd: r.cache_read_per_mtok,
-        cache_write_per_million_usd: r.cache_write_per_mtok,
+        cache_read_per_million_usd: read,
+        cache_write_per_million_usd: write,
     }
 }
 
@@ -410,7 +425,7 @@ mod tests {
     fn bundled_flat(input: f64) -> Vec<RatePeriod> {
         vec![RatePeriod {
             starts: None,
-            rates: to_live_rates(&rates(input)),
+            rates: to_live_rates("m", &rates(input)),
         }]
     }
 
@@ -511,23 +526,25 @@ mod tests {
 
     #[test]
     fn an_observation_refines_the_current_window_without_touching_a_scheduled_change() {
-        // Sonnet 5's shape: an open window now, a documented change on
-        // 2026-09-01. An observation today must land between them —
-        // the old "ignore anything before the last bundled start" rule
-        // put the floor in the *future* and threw this away.
+        // A scheduled price change: an open window now, a documented
+        // change on 2026-09-01 (the shape Sonnet 5 had before its
+        // increase was cancelled). An observation today must land
+        // between them — the old "ignore anything before the last
+        // bundled start" rule put the floor in the *future* and threw
+        // this away.
         let mut f = HistoryFile::default();
-        f.observe("claude-sonnet-5", &rates(9.0), None, (2026, 8, 15));
+        f.observe("m", &rates(9.0), None, (2026, 8, 15));
         let bundled = vec![
             RatePeriod {
                 starts: None,
-                rates: to_live_rates(&rates(2.0)),
+                rates: to_live_rates("m", &rates(2.0)),
             },
             RatePeriod {
                 starts: Some((2026, 9, 1)),
-                rates: to_live_rates(&rates(3.0)),
+                rates: to_live_rates("m", &rates(3.0)),
             },
         ];
-        let periods = f.effective_periods("claude-sonnet-5", &bundled);
+        let periods = f.effective_periods("m", &bundled);
         let starts: Vec<_> = periods.iter().map(|p| p.starts).collect();
         assert_eq!(
             starts,
@@ -549,11 +566,11 @@ mod tests {
         let bundled = vec![
             RatePeriod {
                 starts: None,
-                rates: to_live_rates(&rates(2.0)),
+                rates: to_live_rates("m", &rates(2.0)),
             },
             RatePeriod {
                 starts: Some((2026, 9, 1)),
-                rates: to_live_rates(&rates(3.0)),
+                rates: to_live_rates("m", &rates(3.0)),
             },
         ];
         let periods = f.effective_periods("m", &bundled);
