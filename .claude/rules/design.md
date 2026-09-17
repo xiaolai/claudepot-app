@@ -293,6 +293,15 @@ modal that won't dismiss. Its four-modifier combo makes accidental
 firing while typing a non-issue. Any *further* exception needs the
 same treatment: written here, not just commented at the call site.
 
+**A suppression is not a shortcut, and the gate does not apply to one.**
+`useWebviewChromeGuard` listens for the webview's reload keys (F5, ⌘/⌃R,
+⌘/⌃⇧R) in a release build and cancels them — ungated, because a focused
+field is exactly where a page reload costs the most, and cancelling a
+key the webview would have eaten takes nothing from the person typing.
+It fires no action and opens no surface, so it is not an exception to
+the rule above; it is outside it. Anything that *does* something on a
+keypress still goes through `isShortcutContextBlocked()`.
+
 **Bindings live in one table.** `src/lib/shortcutBindings.ts` is the
 list; `ShortcutsModal` renders from it and `cargo xtask verify-docs`
 asserts every `key` in it is compared against somewhere in `src/`.

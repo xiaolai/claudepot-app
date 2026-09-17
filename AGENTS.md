@@ -641,6 +641,54 @@ because it is one. `useWindowPin` is the renderer half —
 optimistic, reverting on a rejected call, and following
 `cp-prefs-changed` like every other reader of that file.
 
+**A packaged build has no reload affordance, and the guard is in the
+renderer because the ErrorBoundary's Reload must keep working.**
+`useWebviewChromeGuard` cancels the keys a webview reads as reload — F5
+and its Ctrl/Shift hard-reload variants, ⌘R / ⌃R, ⌘⇧R / ⌃⇧R — and
+suppresses the native context menu, which is where Reload lives on all
+three platforms, for any target that is not an editable field or the
+element holding a live selection (Copy / Paste / Look Up are what that
+menu is for in an app). Off in dev, where reload and Inspect Element are
+the loop.
+
+A reload here is a browser artifact: no address bar, no tab to restore,
+and nothing on screen saying the window is disposable — while it
+discards every piece of state that lives only in the renderer, an open
+modal and a half-typed secret included. But `location.reload()` is
+deliberately untouched: guarding the *input* is what leaves the
+ErrorBoundary's recovery button working, and it is also why this is not
+Tauri's navigation handler, which sees a reload and cannot tell a
+keypress from the app's own decision.
+
+Four details are load-bearing:
+
+- **It cancels and never stops propagation**, so ⌘R still reaches the
+  section handler that refreshes the list. Only Accounts and Projects
+  pass one — on the other eight sections the documented ⌘R does nothing,
+  which is how the key was reaching the webview at all.
+- **It is deliberately not behind `isShortcutContextBlocked()`.** A
+  suppression is not a shortcut: a focused field is where a reload costs
+  the most, and cancelling a keystroke the webview would have eaten
+  takes nothing from the person typing.
+- **Capture phase**, so a modal or palette input that calls
+  `stopPropagation` on its own keydown cannot hide the key from it. The
+  context-menu half is the opposite — bubble phase on `document`, after
+  React's root handlers, so every app context menu (account card,
+  project row, session row) keeps the `preventDefault` it already does.
+- **The exposure differs per platform, and only part of it is closed
+  from here.** On macOS ⌘R appears never to have reached the webview
+  at all: wry's `performKeyEquivalent` hands the key to the app menu,
+  and `app_menu.rs` binds no accelerator on View items on purpose —
+  read from that key path rather than measured, so treat the context
+  menu as the Mac story and the keys as belt-and-braces. On WebView2 F5 / Ctrl+R /
+  Ctrl+Shift+R are *browser accelerator keys*, on by default; wry can
+  turn them off (`with_browser_accelerator_keys`) and Tauri 2.11 does
+  not expose it, so the keydown is the only layer the renderer has —
+  and whether Chromium lets a page cancel those is **not verified**.
+  WebView2's own context menu is likewise still native. Closing either
+  properly means `with_webview` plus `ICoreWebView2Settings3`, which no
+  machine here can behaviourally test.
+
 ## Pricing (Activities → Cost, and every "on API" figure)
 
 Cost figures answer "what would pay-per-call have cost me". Rates are

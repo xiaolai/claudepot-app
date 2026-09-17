@@ -53,6 +53,7 @@ import { useNavigationBridges } from "./hooks/useNavigationBridges";
 import { useNotificationClickRouter } from "./hooks/useNotificationClickRouter";
 import { useShellShortcuts } from "./hooks/useShellShortcuts";
 import { useTrafficLightSync } from "./hooks/useTrafficLightSync";
+import { useWebviewChromeGuard } from "./hooks/useWebviewChromeGuard";
 import { useTrayBridge } from "./hooks/useTrayBridge";
 import { api } from "./api";
 import type { LiveSessionSummary, RunningOpInfo } from "./types";
@@ -208,6 +209,13 @@ function AppShell() {
 
   const openPalette = useCallback(() => setShowPalette(true), []);
   const openShortcuts = useCallback(() => setShowShortcuts(true), []);
+
+  // Release only: the webview's reload keys and its native context
+  // menu, neither of which belongs to a packaged app. It sits here
+  // rather than in main.tsx on purpose — the ErrorBoundary's Reload
+  // button is the way out of a crashed renderer, and the fallback it
+  // renders replaces this subtree, guard included.
+  useWebviewChromeGuard();
 
   // ⌘, / ⌘K / ⌘/ / ⌃⌥⌘L / ⌘⇧L. (⌘1..⌘9 lives in useSection.)
   useShellShortcuts({
