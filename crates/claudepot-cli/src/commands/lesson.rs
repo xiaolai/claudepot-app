@@ -395,15 +395,17 @@ pub fn compile_cmd(ctx: &AppContext, args: CompileArgs) -> Result<()> {
 
     if !args.write {
         if ctx.json {
-            return print_json(&serde_json::json!({ "proposed": spec, "block": spec.render() }));
+            return print_json(&serde_json::json!({ "proposed": spec, "block": spec.render()? }));
         }
         println!("Proposed guard for lesson {}:\n", args.id);
-        println!("{}", spec.render());
+        println!("{}", spec.render()?);
         println!(
             "Run with --write to add it to {}.",
             staged.script_path.display()
         );
-        println!("(It will be kept only if it does NOT fire on the current clean tree.)");
+        println!(
+            "(It will be kept only if it fires on its witness and does NOT fire on the current clean tree.)"
+        );
         return Ok(());
     }
 

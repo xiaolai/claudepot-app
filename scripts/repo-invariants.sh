@@ -235,11 +235,39 @@ for script in $referenced; do
   fi
 done
 
+# ── The local preflight runs every gate CI runs ─────────────────────
+# scripts/preflight.sh is documented as "run the CI gate locally before
+# you push", and for months it was missing verify-docs, all five
+# `check:*` gates with their self-tests, the panel job and the web job —
+# each added to a workflow and never to the script. Every gate command a
+# workflow runs must therefore appear, verbatim, in preflight.sh.
+# Test invocations are exempt on purpose: preflight runs the whole
+# workspace where CI splits it across a matrix.
+ci_gate_cmds=$(grep -hoE 'cargo (xtask [a-z-]+|clippy [^#]*-D warnings|fmt [^#]*--check)|bash scripts/[A-Za-z0-9._-]+( --[a-z-]+)?|pnpm (exec )?tsc --noEmit|pnpm check:[a-z0-9:-]+' \
+  .github/workflows/ci.yml .github/workflows/ci-web.yml 2>/dev/null | sed 's/[[:space:]]*$//' | sort -u || true)
+if [ "$(printf '%s\n' "$ci_gate_cmds" | grep -c .)" -lt 10 ]; then
+  # A pattern that finds nothing reports "all mirrored" forever.
+  echo "::error::found fewer than 10 gate commands in the CI workflows — this guard's"
+  echo "  pattern no longer matches them, so it is checking nothing. Fix the pattern."
+  fail=1
+fi
+while IFS= read -r cmd; do
+  [ -n "$cmd" ] || continue
+  if ! grep -qF -- "$cmd" scripts/preflight.sh; then
+    echo "::error::CI runs \`$cmd\` but scripts/preflight.sh does not."
+    echo "  Add it to preflight.sh, so a local run catches what CI will."
+    echo
+    fail=1
+  fi
+done <<EOF
+$ci_gate_cmds
+EOF
+
 # ─── BEGIN claudepot-generated guards ───
 # guard: no-mktemp-d-windows-ci
 # mktemp -d under Git Bash on windows-latest returns POSIX /tmp paths; Rust resolves against current drive, creating foreign-path bugs. Use ${{ runner.temp }}, which GitHub Actions expands to native OS temp path.
 # compiled from lesson 8cd1c1e6-944e-4488-973f-e0bac7bd51a5
-violators=$(grep -rnE 'mktemp\s+-d' . --include='.github/workflows/*.yml' --include='.github/workflows/*.yaml' 2>/dev/null || true)
+violators=$(grep -rnE --include='*.yml' --include='*.yaml' -- '^[^#]*mktemp[[:space:]]+-d' '.github/workflows' 2>/dev/null || true)
 if [ -n "$(echo "$violators" | tr -d '[:space:]')" ]; then
   echo "::error::Workflow uses mktemp -d, which breaks on Windows (Git Bash returns POSIX /tmp). Replace with \${{ runner.temp }} in step env, then reference via \$TEMP_DIR or similar. See rules/paths.md for multi-OS path handling."
   echo "$violators"

@@ -178,6 +178,15 @@ jobs:
           cp "target/debug/claudepot$EXT" "src-tauri/binaries/claudepot-cli-$TRIPLE$EXT"
           cargo test -p claudepot-tauri
 
+      # The tauri crate was compiled and tested here but never linted, so
+      # a clippy regression in src-tauri — including a Windows-only arm no
+      # macOS machine compiles — could land on a green run. It was clean
+      # when this step was added. It runs after the test step because that
+      # step stages the CLI sidecar tauri-build validates.
+      - name: Clippy (tauri crate)
+        if: matrix.os != 'ubuntu-latest'
+        run: cargo clippy --all-targets -p claudepot-tauri -- -D warnings
+
   # grill X26: `--ignored` integration tests are normally locked out
   # of the default suite — they touch the real OS scheduler, hit
   # live LLMs, or otherwise depend on infra that the matrix runners

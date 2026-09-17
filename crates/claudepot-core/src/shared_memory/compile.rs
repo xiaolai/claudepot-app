@@ -18,7 +18,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::shared_memory::git;
-use crate::shared_memory::guard::{self, GuardError, GuardSpec};
+use crate::shared_memory::guard::{self, GuardError, GuardSpec, Witness};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CompileError {
@@ -83,6 +83,30 @@ pub enum CompileError {
          (it would block every push). Reverted. Pattern was: {pattern}"
     )]
     GuardFiresOnCleanTree { pattern: String },
+
+    #[error(
+        "model returned compilable=true but no witness — without one instance of the \
+         anti-pattern there is no way to show the guard can fire"
+    )]
+    MissingWitness,
+
+    #[error("witness path `{path}` must be a relative path inside the repository")]
+    UnsafeWitnessPath { path: String },
+
+    #[error("could not stage the witness in a scratch tree")]
+    StageWitness(#[source] std::io::Error),
+
+    #[error(
+        "the generated guard does not fire on its own witness — it could never catch the \
+         anti-pattern it was written for. Reverted. Pattern was: {pattern}"
+    )]
+    GuardCannotFire { pattern: String },
+
+    #[error("this guard spec predates witnesses and cannot be installed; recompile the lesson")]
+    NoWitness,
+
+    #[error("the witness probe itself failed (exit {status:?}): {stderr}")]
+    ProbeBroken { status: Option<i32>, stderr: String },
 }
 
 /// Ask the model to fill in a [`GuardSpec`] from a lesson. Structured
@@ -102,16 +126,21 @@ pub fn propose_guard(
         "include_globs":{"type":"array","items":{"type":"string"},"description":"file globs, e.g. *.rs"},
         "allow_substrings":{"type":"array","items":{"type":"string"},"description":"path substrings that are legitimate exceptions"},
         "message":{"type":"string","description":"what to print when it fires; tell the reader what to do"},
+        "witness_path":{"type":"string","description":"repo-relative path of a file the guard covers, matched by include_globs"},
+        "witness_line":{"type":"string","description":"one line of code exhibiting the anti-pattern exactly as it would be written in that file"},
         "compilable":{"type":"boolean","description":"false if this lesson cannot be a grep tripwire"}
       },
-      "required":["slug","rationale","detect_regex","message","compilable"]
+      "required":["slug","rationale","detect_regex","message","witness_path","witness_line","compilable"]
     }"#;
     let prompt = format!(
         "You turn an accepted engineering lesson into a grep-based CI tripwire.\n\n\
          LESSON: {claim}\nDIRECTIVE: {directive}\n\n\
          Produce a GuardSpec matching the schema. The detect_regex matches the ANTI-pattern \
          (its presence is the bug). It MUST NOT match already-correct code, because the codebase \
-         is currently clean. If the lesson is about human judgment, prose, or anything a grep \
+         is currently clean. include_globs are file-name globs; a directory prefix such as \
+         `.github/workflows/*.yml` is allowed, a wildcard directory is not. witness_path and \
+         witness_line are one concrete instance of the anti-pattern — the guard is rejected \
+         unless it fires on them. If the lesson is about human judgment, prose, or anything a grep \
          cannot detect, set compilable=false and leave detect_regex empty. Output ONLY the JSON object.\n\n\
          Schema: {schema}"
     );
@@ -169,7 +198,44 @@ pub fn propose_guard(
             .unwrap_or("guard fired")
             .to_string(),
         source_lesson_id: lesson_id.to_string(),
+        witness: Some(parse_witness(&v)?),
     })
+}
+
+fn parse_witness(v: &serde_json::Value) -> Result<Witness, CompileError> {
+    let field = |k: &str| {
+        v.get(k)
+            .and_then(|s| s.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    let (Some(path), Some(line)) = (field("witness_path"), field("witness_line")) else {
+        return Err(CompileError::MissingWitness);
+    };
+    safe_relative(&path)?;
+    Ok(Witness { path, line })
+}
+
+/// The witness path is model-controlled and is joined onto a scratch
+/// directory, so it must not be able to name anything outside it.
+fn safe_relative(path: &str) -> Result<PathBuf, CompileError> {
+    let p = Path::new(path);
+    let bad = path.contains('\0')
+        || p.is_absolute()
+        || p.components().any(|c| {
+            !matches!(
+                c,
+                std::path::Component::Normal(_) | std::path::Component::CurDir
+            )
+        })
+        || p.file_name().is_none();
+    if bad {
+        return Err(CompileError::UnsafeWitnessPath {
+            path: path.to_string(),
+        });
+    }
+    Ok(p.to_path_buf())
 }
 
 /// A guard spliced into its target script **in memory** — nothing on
@@ -188,6 +254,10 @@ pub struct StagedGuard {
     spliced: String,
     /// Kept for the false-positive error message.
     detect_regex: String,
+    /// The guard on its own, runnable in a scratch tree.
+    probe: String,
+    /// What the probe must fire on.
+    witness: Option<Witness>,
 }
 
 /// Locate `project`'s `scripts/repo-invariants.sh`, read it, and splice
@@ -199,11 +269,14 @@ pub fn stage_guard(project: &str, spec: &GuardSpec) -> Result<StagedGuard, Compi
         source: e,
     })?;
     let spliced = guard::splice_into_script(&original, spec).map_err(CompileError::Splice)?;
+    let probe = spec.witness_probe().map_err(CompileError::Splice)?;
     Ok(StagedGuard {
         script_path,
         original,
         spliced,
         detect_regex: spec.detect_regex.clone(),
+        probe,
+        witness: spec.witness.clone(),
     })
 }
 
@@ -215,7 +288,19 @@ impl StagedGuard {
     /// 2. Write the spliced script.
     /// 3. Re-run it; if the tree is no longer clean, the guard is wrong
     ///    by construction — restore the original and refuse to keep it.
+    /// 4. Plant the witness in a scratch tree and run the guard alone; if
+    ///    it does not fire there it can never fire — restore and refuse.
+    ///
+    /// Step 4 is checked first, before anything is written, because it
+    /// needs nothing from the real repository.
     pub fn install(&self) -> Result<(), CompileError> {
+        let witness = self.witness.as_ref().ok_or(CompileError::NoWitness)?;
+        if !self.fires_on(witness)? {
+            return Err(CompileError::GuardCannotFire {
+                pattern: self.detect_regex.clone(),
+            });
+        }
+
         // Baseline the script BEFORE adding the guard. If repo-invariants.sh
         // is already failing for an unrelated reason, we must not write the
         // guard and then blame it for a failure it didn't cause.
@@ -244,6 +329,33 @@ impl StagedGuard {
             });
         }
         Ok(())
+    }
+
+    fn fires_on(&self, witness: &Witness) -> Result<bool, CompileError> {
+        let rel = safe_relative(&witness.path)?;
+        let scratch = tempfile::tempdir().map_err(CompileError::StageWitness)?;
+        let file = scratch.path().join(rel);
+        if let Some(dir) = file.parent() {
+            std::fs::create_dir_all(dir).map_err(CompileError::StageWitness)?;
+        }
+        std::fs::write(&file, format!("{}\n", witness.line)).map_err(CompileError::StageWitness)?;
+        let out = std::process::Command::new("bash")
+            .arg("-c")
+            .arg(&self.probe)
+            .current_dir(scratch.path())
+            .output()
+            .map_err(CompileError::RunInvariants)?;
+        // 0 = clean, 1 = fired. Anything else is the probe breaking, and
+        // reading that as "fired" would pass exactly the guard this check
+        // exists to refuse.
+        match out.status.code() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            other => Err(CompileError::ProbeBroken {
+                status: other,
+                stderr: String::from_utf8_lossy(&out.stderr).trim().to_string(),
+            }),
+        }
     }
 }
 
@@ -403,6 +515,138 @@ mod tests {
         assert_eq!(v["a"], "line\nbreak");
         assert_eq!(v["b"], "quote\"here");
         assert_eq!(v["c"], "tab\tstop");
+    }
+
+    #[test]
+    fn a_proposal_without_a_witness_is_refused() {
+        let v = serde_json::json!({ "witness_path": "src/lib.rs" });
+        assert!(matches!(
+            parse_witness(&v),
+            Err(CompileError::MissingWitness)
+        ));
+        let v = serde_json::json!({ "witness_path": "  ", "witness_line": "x" });
+        assert!(matches!(
+            parse_witness(&v),
+            Err(CompileError::MissingWitness)
+        ));
+    }
+
+    #[test]
+    fn a_witness_path_cannot_name_anything_outside_the_scratch_tree() {
+        for bad in [
+            "/etc/passwd",
+            "../outside.rs",
+            "a/../../b.rs",
+            "",
+            "a/..",
+            "a\0b.rs",
+        ] {
+            assert!(
+                matches!(
+                    safe_relative(bad),
+                    Err(CompileError::UnsafeWitnessPath { .. })
+                ),
+                "{bad:?} was accepted"
+            );
+        }
+        for ok in ["src/lib.rs", "./.github/workflows/ci.yml", "Makefile"] {
+            assert!(safe_relative(ok).is_ok(), "{ok:?} was refused");
+        }
+    }
+
+    #[cfg(unix)]
+    fn staged(spec: &GuardSpec, script: &std::path::Path) -> StagedGuard {
+        StagedGuard {
+            script_path: script.to_path_buf(),
+            original: std::fs::read_to_string(script).unwrap(),
+            spliced: String::from("# would-be spliced script\n"),
+            detect_regex: spec.detect_regex.clone(),
+            probe: spec.witness_probe().unwrap(),
+            witness: spec.witness.clone(),
+        }
+    }
+
+    #[cfg(unix)]
+    fn spec(globs: &[&str], witness_path: &str) -> GuardSpec {
+        GuardSpec {
+            slug: "no-bare-unwrap".into(),
+            rationale: "r".into(),
+            detect_regex: r"\.unwrap\(\)".into(),
+            include_globs: globs.iter().map(|g| g.to_string()).collect(),
+            allow_substrings: vec![],
+            message: "m".into(),
+            source_lesson_id: "l".into(),
+            witness: Some(Witness {
+                path: witness_path.into(),
+                line: "let x = y.unwrap();".into(),
+            }),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_guard_that_cannot_reach_its_witness_is_refused_before_anything_is_written() {
+        // `*.yml` never reaches a `.rs` witness: exactly the shape of a
+        // guard that stays green forever.
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("repo-invariants.sh");
+        std::fs::write(&script, "untouched\n").unwrap();
+        let g = spec(&["*.yml"], "src/lib.rs");
+        let err = staged(&g, &script).install().unwrap_err();
+        assert!(matches!(err, CompileError::GuardCannotFire { .. }), "{err}");
+        assert_eq!(std::fs::read_to_string(&script).unwrap(), "untouched\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_guard_that_reaches_its_witness_passes_the_probe() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("repo-invariants.sh");
+        std::fs::write(&script, "untouched\n").unwrap();
+        for (globs, path) in [
+            (vec!["*.rs"], "src/lib.rs"),
+            (vec!["crates/**/*.rs"], "crates/core/src/lib.rs"),
+        ] {
+            let g = spec(&globs, path);
+            let w = g.witness.clone().unwrap();
+            assert!(staged(&g, &script).fires_on(&w).unwrap(), "{globs:?}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_probe_that_errors_is_not_mistaken_for_one_that_fired() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("repo-invariants.sh");
+        std::fs::write(&script, "untouched\n").unwrap();
+        let g = spec(&["*.rs"], "src/lib.rs");
+        let mut staged = staged(&g, &script);
+        staged.probe = "exit 2".into();
+        let w = g.witness.clone().unwrap();
+        assert!(matches!(
+            staged.fires_on(&w),
+            Err(CompileError::ProbeBroken {
+                status: Some(2),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn a_spec_from_before_witnesses_cannot_be_installed() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("repo-invariants.sh");
+        std::fs::write(&script, "untouched\n").unwrap();
+        let staged = StagedGuard {
+            script_path: script.clone(),
+            original: "untouched\n".into(),
+            spliced: String::new(),
+            detect_regex: "x".into(),
+            probe: "exit 1".into(),
+            witness: None,
+        };
+        assert!(matches!(staged.install(), Err(CompileError::NoWitness)));
+        assert_eq!(std::fs::read_to_string(&script).unwrap(), "untouched\n");
     }
 
     #[test]

@@ -9,8 +9,11 @@
 # clean local run and only turned up red in CI, mid-release. This script
 # runs the SAME checks CI does so that doesn't happen again.
 #
-# It mirrors .github/workflows/ci.yml's `Format / Clippy (Linux)` +
-# frontend jobs. It does NOT reproduce the cross-platform test matrix or
+# It mirrors every command .github/workflows/ci.yml runs in its lint,
+# frontend and panel jobs, plus ci-web.yml. repo-invariants.sh asserts
+# that, command by command: this file claimed to mirror CI for months
+# while missing verify-docs, all five `check:*` gates, the panel job and
+# the web job. It does NOT reproduce the cross-platform test matrix or
 # the Linux-specific clippy toolchain — only CI (or a PR) can. Treat a
 # green preflight as necessary, not sufficient: it catches the cheap,
 # common failures locally; the PR/CI run is still the source of truth.
@@ -40,11 +43,11 @@ rust_only=0
 step() { printf '\n\033[1;36m▶ %s\033[0m\n' "$1"; }
 ok()   { printf '\033[1;32m✓ %s\033[0m\n' "$1"; }
 
-# Mirror ci.yml's package set exactly (note: includes xtask).
 step "rustfmt --check"
-cargo fmt --check -p claudepot-core -p claudepot-cli -p xtask
+cargo fmt --all --check
 ok "formatting"
 
+# Mirror ci.yml's package set exactly (note: includes xtask).
 step "clippy --all-targets -D warnings"
 cargo clippy --all-targets -p claudepot-core -p claudepot-cli -p xtask -- -D warnings
 ok "clippy"
@@ -53,9 +56,17 @@ step "CC-parity fixtures"
 cargo xtask verify-cc-parity
 ok "cc-parity"
 
+step "docs match the code"
+cargo xtask verify-docs
+ok "verify-docs"
+
 step "architectural invariants (scripts/repo-invariants.sh)"
 bash scripts/repo-invariants.sh
 ok "invariants"
+
+step "hook installer self-test"
+bash scripts/install-hooks.sh --self-test
+ok "hook installer"
 
 step "workspace tests"
 # Isolate the data root for EVERY test binary. paths.rs's cfg(test) guard
@@ -86,14 +97,80 @@ CLAUDE_CONFIG_DIR="$CLAUDEPOT_TEST_CC_DIR" \
   cargo test --workspace
 ok "rust tests"
 
+# CI lints this crate on its macOS and Windows legs, after its test step
+# has staged the CLI sidecar tauri-build validates. `cargo test
+# --workspace` above builds that sidecar's source, and a dev checkout
+# already carries the staged copy from `pnpm tauri dev`.
+step "clippy (tauri crate)"
+cargo clippy --all-targets -p claudepot-tauri -- -D warnings
+ok "tauri clippy"
+
 if [ "$rust_only" -eq 0 ]; then
-  step "frontend typecheck + build"
+  step "frontend install"
+  pnpm install --frozen-lockfile
+  ok "frontend install"
+
+  step "locale catalogs"
+  pnpm check:catalogs
+  ok "catalogs"
+
+  # Every guard runs its self-test first, as CI does: a guard nobody has
+  # watched go red is indistinguishable from one that cannot.
+  step "CSS class coverage"
+  pnpm check:classes:self-test && pnpm check:classes
+  ok "classes"
+
+  step "switch accessible names"
+  pnpm check:a11y:self-test && pnpm check:a11y
+  ok "a11y"
+
+  step "reduced motion"
+  pnpm check:motion:self-test && pnpm check:motion
+  ok "motion"
+
+  step "contrast"
+  pnpm check:contrast:self-test && pnpm check:contrast
+  ok "contrast"
+
+  step "frontend typecheck"
+  pnpm tsc --noEmit
+  ok "typecheck"
+
+  step "frontend build"
   pnpm build
   ok "frontend build"
 
   step "frontend tests (vitest)"
   pnpm test
   ok "frontend tests"
+
+  step "panel: install, bundle is up to date, tests, renders"
+  (
+    cd panel
+    pnpm install --frozen-lockfile
+    pnpm build
+  )
+  if ! git diff --quiet -- crates/claudepot-core/src/remote/assets/panel; then
+    echo "The committed panel bundle does not match panel/. Run scripts/build-panel.sh and commit the result."
+    git --no-pager diff --stat -- crates/claudepot-core/src/remote/assets/panel
+    exit 1
+  fi
+  (
+    cd panel
+    pnpm test
+    pnpm check:render:self-test
+    pnpm check:render
+  )
+  ok "panel"
+
+  step "web: install, typecheck, tests"
+  (
+    cd web
+    pnpm install --frozen-lockfile
+    pnpm exec tsc --noEmit
+    pnpm test
+  )
+  ok "web"
 
   # Real-app geometry for Global → Config → Env Variables, measured over the
   # dev MCP bridge. vitest runs on jsdom, which has no layout engine, so
