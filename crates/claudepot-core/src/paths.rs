@@ -11,6 +11,29 @@ pub fn claude_config_dir() -> PathBuf {
         })
 }
 
+/// Where Claude Code reads admin-managed files: `managed-settings.json`,
+/// `managed-settings.d/` and `managed-mcp.json`.
+///
+/// A **system** directory, not the config dir, and `CLAUDE_CONFIG_DIR`
+/// does not move it — read from the 2.1.274 binary, which also has an
+/// internal override no public build sets. Claudepot read all three
+/// files from `~/.claude` until 2026-09-17, so Config → Effective
+/// settings never saw a real admin policy.
+pub fn managed_settings_dir() -> PathBuf {
+    #[cfg(target_os = "macos")]
+    {
+        PathBuf::from("/Library/Application Support/ClaudeCode")
+    }
+    #[cfg(target_os = "windows")]
+    {
+        PathBuf::from(r"C:\Program Files\ClaudeCode")
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        PathBuf::from("/etc/claude-code")
+    }
+}
+
 /// CC CLI credentials file path.
 pub fn claude_credentials_file() -> PathBuf {
     claude_config_dir().join(".credentials.json")

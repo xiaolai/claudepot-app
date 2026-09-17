@@ -6,8 +6,9 @@
 //!   remote  →  MDM  →  managed-file-composite  →  HKCU
 //! ```
 //!
-//! - `managed-file-composite` = `~/.claude/managed-settings.json` +
-//!   `~/.claude/managed-settings.d/*.json` merged alphabetically into
+//! - `managed-file-composite` = `managed-settings.json` +
+//!   `managed-settings.d/*.json` in [`crate::paths::managed_settings_dir`]
+//!   — a system directory, not `~/.claude` — merged alphabetically into
 //!   one composite before comparison.
 //! - "Empty" means an object with zero keys. Non-empty-but-schema-invalid
 //!   is **rejected** (plan §8.1 invalid-non-empty fallthrough) and
@@ -163,7 +164,8 @@ pub fn scan_managed_dir(dir: &std::path::Path) -> Vec<(String, Value)> {
     };
     for entry in rd.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        if !name.ends_with(".json") {
+        // CC's drop-in filter: `.json`, and not hidden.
+        if !name.ends_with(".json") || name.starts_with('.') {
             continue;
         }
         let Ok(bytes) = std::fs::read(entry.path()) else {
@@ -175,6 +177,48 @@ pub fn scan_managed_dir(dir: &std::path::Path) -> Vec<(String, Value)> {
         out.push((name, v));
     }
     out
+}
+
+/// The managed-settings file composite in `managed_dir`:
+/// `managed-settings.json` plus the `managed-settings.d/` drop-ins,
+/// merged. `None` when there is nothing, or nothing but empty objects —
+/// the resolver's own notion of an absent source.
+pub fn load_managed_composite(managed_dir: &std::path::Path) -> Option<Value> {
+    let base = load_managed_file(&managed_dir.join("managed-settings.json"))
+        .ok()
+        .flatten();
+    let drops = scan_managed_dir(&managed_dir.join("managed-settings.d"));
+    if base.is_none() && drops.is_empty() {
+        return None;
+    }
+    let composite = build_managed_composite(base.as_ref(), &drops);
+    is_non_empty_object(&composite).then_some(composite)
+}
+
+/// Is a managed-settings file composite in force in `managed_dir`?
+pub fn managed_composite_present(managed_dir: &std::path::Path) -> bool {
+    load_managed_composite(managed_dir).is_some()
+}
+
+/// Does `managed-mcp.json` at `path` put CC into enterprise MCP
+/// lockout?
+///
+/// CC's test is **presence**, not content (2.1.274: the enterprise
+/// loader's `check()` returns its `present` flag). Only a missing file —
+/// or, off Windows, a parent directory that cannot be searched — leaves
+/// lockout off. An empty `{}` locks out with zero servers, and a file
+/// that cannot be read or parsed "keeps exclusive control": CC fails
+/// closed, so this does too.
+pub fn managed_mcp_present(path: &std::path::Path) -> bool {
+    match std::fs::metadata(path) {
+        Ok(_) => true,
+        Err(e) => match e.kind() {
+            std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory => false,
+            #[cfg(not(target_os = "windows"))]
+            std::io::ErrorKind::PermissionDenied => false,
+            _ => true,
+        },
+    }
 }
 
 #[cfg(test)]
@@ -270,5 +314,46 @@ mod tests {
         let base = json!({"a": 1});
         let composite = build_managed_composite(Some(&base), &[]);
         assert_eq!(composite, json!({"a": 1}));
+    }
+
+    #[test]
+    fn managed_mcp_lockout_follows_presence_not_content() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let p = dir.path().join("managed-mcp.json");
+        assert!(!managed_mcp_present(&p), "missing file: no lockout");
+        for body in ["{}", "not json", r#"{"mcpServers":{}}"#, r#"{"x":1}"#] {
+            std::fs::write(&p, body).unwrap();
+            assert!(managed_mcp_present(&p), "{body:?} still locks out");
+        }
+        std::fs::remove_file(&p).unwrap();
+        std::fs::create_dir(&p).unwrap();
+        assert!(
+            managed_mcp_present(&p),
+            "not a regular file: CC fails closed"
+        );
+    }
+
+    #[test]
+    fn a_missing_parent_is_not_a_lockout() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("plain");
+        std::fs::write(&file, "x").unwrap();
+        // A path "through" a file: ENOTDIR, which CC reads as absent.
+        assert!(!managed_mcp_present(&file.join("managed-mcp.json")));
+        assert!(!managed_mcp_present(
+            &dir.path().join("nope").join("managed-mcp.json")
+        ));
+    }
+
+    #[test]
+    fn hidden_drop_ins_are_skipped() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("10-a.json"), r#"{"a":1}"#).unwrap();
+        std::fs::write(dir.path().join(".20-b.json"), r#"{"b":1}"#).unwrap();
+        let names: Vec<String> = scan_managed_dir(dir.path())
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
+        assert_eq!(names, vec!["10-a.json".to_string()]);
     }
 }

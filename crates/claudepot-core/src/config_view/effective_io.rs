@@ -42,7 +42,7 @@ pub fn load_effective_settings_input(cwd: &Path) -> EffectiveSettingsInput {
     // drop-in dir. Remote / MDM / HKCU remain extension points —
     // they contribute `None` here and callers can pass explicit
     // sources if they've got a cache/registry reader plugged in.
-    let composite = load_managed_composite(&home);
+    let composite = policy::load_managed_composite(&crate::paths::managed_settings_dir());
     let policy_sources = vec![
         PolicySource {
             origin: PolicyOrigin::Remote,
@@ -130,18 +130,6 @@ fn non_empty_or_none(v: Value) -> Option<Value> {
     }
 }
 
-fn load_managed_composite(home: &Path) -> Option<Value> {
-    let base = policy::load_managed_file(&home.join("managed-settings.json"))
-        .ok()
-        .flatten();
-    let drops = policy::scan_managed_dir(&home.join("managed-settings.d"));
-    if base.is_none() && drops.is_empty() {
-        return None;
-    }
-    let composite = policy::build_managed_composite(base.as_ref(), &drops);
-    non_empty_or_none(composite)
-}
-
 /// Load the MCP source bundle. The project chain walks from `cwd`
 /// upward until we hit the filesystem root OR a `.git` dir (whichever
 /// comes first — plan §6.4's stopping rule for project-related walks).
@@ -151,7 +139,8 @@ fn load_managed_composite(home: &Path) -> Option<Value> {
 /// `enabledMcpjsonServers` / `disabledMcpjsonServers` from the
 /// MERGED settings.
 pub fn load_mcp_bundle(cwd: &Path, effective_settings: Value) -> McpSourceBundle {
-    // Enterprise: ~/.claude/managed-mcp.json
+    // Enterprise: `managed-mcp.json` in the system managed-settings
+    // directory (`paths::managed_settings_dir`), not `~/.claude`.
     //
     // Audit fix for config_view/effective_io.rs:156 — drop entries
     // whose value isn't an object before returning enterprise
@@ -165,8 +154,9 @@ pub fn load_mcp_bundle(cwd: &Path, effective_settings: Value) -> McpSourceBundle
     // file without an outage.
     let mut problems: Vec<McpConfigProblem> = Vec::new();
 
-    let home = claude_config_dir();
-    let (enterprise_raw, enterprise_problem) = read_mcp_servers_obj(&home.join("managed-mcp.json"));
+    let enterprise_path = crate::paths::managed_settings_dir().join("managed-mcp.json");
+    let enterprise_present = policy::managed_mcp_present(&enterprise_path);
+    let (enterprise_raw, enterprise_problem) = read_mcp_servers_obj(&enterprise_path);
     problems.extend(enterprise_problem);
     let enterprise: BTreeMap<String, Value> = enterprise_raw
         .into_iter()
@@ -214,6 +204,7 @@ pub fn load_mcp_bundle(cwd: &Path, effective_settings: Value) -> McpSourceBundle
         local,
         plugin,
         enterprise,
+        enterprise_present,
         effective_settings,
         project_settings_enabled,
         problems,

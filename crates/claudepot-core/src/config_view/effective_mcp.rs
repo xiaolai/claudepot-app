@@ -40,8 +40,12 @@ pub struct McpSourceBundle {
     /// Plugin-provided MCP servers. Deduplicated by content hash when
     /// a manual server with the same content exists.
     pub plugin: BTreeMap<String, Value>,
-    /// Enterprise (managed-mcp.json). Non-empty → lockout.
+    /// Enterprise (managed-mcp.json) servers.
     pub enterprise: BTreeMap<String, Value>,
+    /// Whether `managed-mcp.json` exists at all. **This**, not a
+    /// non-empty `enterprise`, is CC's lockout test: an empty or broken
+    /// file still locks every other source out.
+    pub enterprise_present: bool,
     /// Settings that affect gating (enableAllProjectMcpServers, etc.).
     pub effective_settings: Value,
     /// Whether `projectSettings` is the enabled setting source per
@@ -62,6 +66,7 @@ impl Default for McpSourceBundle {
             local: BTreeMap::new(),
             plugin: BTreeMap::new(),
             enterprise: BTreeMap::new(),
+            enterprise_present: false,
             effective_settings: Value::Object(Default::default()),
             project_settings_enabled: true,
             problems: Vec::new(),
@@ -163,8 +168,9 @@ pub struct EffectiveMcpServer {
 
 /// Compute the effective MCP server view for a given simulation mode.
 pub fn compute(bundle: &McpSourceBundle, mode: McpSimulationMode) -> Vec<EffectiveMcpServer> {
-    // Enterprise lockout: non-empty enterprise → user/project/local suppressed.
-    let lockout = !bundle.enterprise.is_empty();
+    // Enterprise lockout: a present managed-mcp.json → user/project/local
+    // suppressed, whatever it lists.
+    let lockout = bundle.enterprise_present;
 
     // Per-server aggregation. Precedence (low → high): user, project (shallow→deep),
     // local, plugin. Enterprise supersedes everything when active.
@@ -478,6 +484,7 @@ mod tests {
                 servers: project,
             }],
             enterprise,
+            enterprise_present: true,
             ..Default::default()
         };
         let r = compute(&bundle, McpSimulationMode::Interactive);
@@ -490,6 +497,21 @@ mod tests {
         let ent = r.iter().find(|s| s.name == "e").unwrap();
         assert_eq!(ent.approval, ApprovalState::Approved);
         assert!(ent.blocked_by.is_none());
+    }
+
+    #[test]
+    fn an_empty_managed_mcp_file_still_locks_everything_else_out() {
+        // CC 2.1.274 locks out on presence: `{}` leaves no servers at
+        // all, not the user's.
+        let mut user = BTreeMap::new();
+        user.insert("u".to_string(), srv("u"));
+        let bundle = McpSourceBundle {
+            user,
+            enterprise_present: true,
+            ..Default::default()
+        };
+        let r = compute(&bundle, McpSimulationMode::Interactive);
+        assert!(!r.iter().any(|s| s.name == "u"));
     }
 
     #[test]
