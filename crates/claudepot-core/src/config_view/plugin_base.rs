@@ -5,8 +5,7 @@
 //!
 //! - Each plugin may contribute a `settings.json` (or inline
 //!   `manifest.settings`).
-//! - We strip each to the CC allowlist (currently just the `agent`
-//!   key).
+//! - We strip each to the CC allowlist ([`SETTINGS_ALLOWLIST`]).
 //! - Cross-plugin merge is **top-level shallow overwrite** — later
 //!   plugin's `agent` replaces earlier plugin's whole `agent` value.
 //! - The resulting base is then merged INTO the file-based settings
@@ -43,10 +42,16 @@ pub enum PluginSourceDisplay {
     Inline,
 }
 
-/// CC's strip-to-allowlist function. Only the `agent` top-level key is
-/// permitted in plugin-contributed settings at the time of writing
-/// (plan §6.7 / pluginLoader.ts).
-pub const SETTINGS_ALLOWLIST: &[&str] = &["agent"];
+/// The top-level keys CC keeps from a plugin's settings.
+///
+/// Read from the 2.1.274 binary: the plugin loader parses `settings.json`
+/// through `SE().pick(rWe).strip()` with `rWe = ["agent",
+/// "subagentStatusLine"]`. This list said `["agent"]` — right for 2.1.88,
+/// and wrong since `subagentStatusLine` joined, which dropped a key CC
+/// applies from the effective view. `bun parity-harness/dump.ts` against
+/// `case_04_plugin_base_agent` exercises it end to end; the watchlist row
+/// "plugin settings allowlist" re-checks it.
+pub const SETTINGS_ALLOWLIST: &[&str] = &["agent", "subagentStatusLine"];
 
 pub fn strip_to_allowlist(v: &Value, allow: &[&str]) -> Value {
     match v {
@@ -137,14 +142,21 @@ mod tests {
     }
 
     #[test]
-    fn strips_to_agent_only() {
+    fn strips_to_the_keys_cc_keeps() {
         let v = json!({
-            "agent": {"model": "opus"},
+            "agent": "reviewer",
+            "subagentStatusLine": {"type": "command", "command": "s.sh"},
             "theme": "should be dropped",
             "mcpServers": {"should-be-dropped": {}},
         });
         let s = strip_to_allowlist(&v, SETTINGS_ALLOWLIST);
-        assert_eq!(s, json!({"agent": {"model": "opus"}}));
+        assert_eq!(
+            s,
+            json!({
+                "agent": "reviewer",
+                "subagentStatusLine": {"type": "command", "command": "s.sh"},
+            })
+        );
     }
 
     #[test]
