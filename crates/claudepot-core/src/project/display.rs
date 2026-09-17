@@ -92,20 +92,17 @@ pub(crate) fn compute_dry_run_plan(
         }
     };
 
-    // P9 preview: would project-local settings.json rewrite? Check if
-    // the source project has a .claude/settings.json at all.
-    // Audit M13: in AlreadyMoved scenarios the old dir no longer
-    // exists (the rename happened externally); P9 then runs against
-    // the NEW dir. Check both so the dry-run reports "rewrite"
-    // instead of false "skip" in that case.
-    let would_rewrite_project_settings = Path::new(old_norm)
-        .join(".claude")
-        .join("settings.json")
-        .exists()
-        || Path::new(_new_norm)
-            .join(".claude")
-            .join("settings.json")
-            .exists();
+    // P9 preview: would a project-local settings file be rewritten?
+    // Checks each file P9 touches, in the old dir and — audit M13 — in
+    // the new one, since in AlreadyMoved scenarios the rename happened
+    // externally and P9 runs against the NEW dir.
+    let would_rewrite_project_settings = crate::project_config_rewrite::P9_SETTINGS_FILES
+        .iter()
+        .any(|name| {
+            [old_norm, _new_norm]
+                .iter()
+                .any(|root| Path::new(root).join(".claude").join(name).exists())
+        });
 
     // P10 preview: does the registry hold a project/local binding whose
     // projectPath matches the old path (root or descendant) under the
@@ -215,7 +212,7 @@ pub(crate) fn format_dry_run_plan(plan: &DryRunPlan, old_norm: &str, new_norm: &
 
     if plan.would_rewrite_project_settings {
         out.push_str(&format!(
-            "  {}. Rewrite project-local .claude/settings.json autoMemoryDirectory (P9)\n",
+            "  {}. Rewrite project-local .claude/settings{{,.local}}.json autoMemoryDirectory (P9)\n",
             step
         ));
         step += 1;

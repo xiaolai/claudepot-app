@@ -23,7 +23,7 @@ for the staleness detectors.
 | `history.jsonl` | abs path | P5 |
 | `~/.claude.json` `projects[<abs path>]` | abs path (map key) | P7 |
 | auto-memory dir | sanitized git-root path | P8 |
-| `<proj>/.claude/settings.json` `autoMemoryDirectory` | abs path (value) | P9 |
+| `<proj>/.claude/settings.local.json` `autoMemoryDirectory` (and the same key in `settings.json`, which CC 2.1.274 ignores there but P9 keeps from holding a dead path) | abs path (value) | P9 |
 | `plugins/installed_plugins.json` `projectPath` | abs path (field) | **P10** |
 
 Verified **not** path-keyed (safe across a move): `state.db` (keyed by

@@ -236,29 +236,49 @@ fn write_phase_snapshot(
 }
 
 // ---------------------------------------------------------------------------
-// Phase 9: project-local .claude/settings.json
+// Phase 9: project-local .claude/settings{,.local}.json
 // ---------------------------------------------------------------------------
 
-/// Rewrite `autoMemoryDirectory` inside `<new_path>/.claude/settings.json`
-/// if it is an absolute path that matches the old project path prefix.
+/// The project settings files P9 rewrites. `settings.local.json` is the
+/// one CC honours: 2.1.274 ignores `autoMemoryDirectory` in the
+/// checked-in `settings.json` ("for security"), and P9 covered only that
+/// one until this list existed. The checked-in file is still rewritten
+/// so it doesn't keep a dead path.
+pub const P9_SETTINGS_FILES: [&str; 2] = ["settings.local.json", "settings.json"];
+
+/// Rewrite `autoMemoryDirectory` inside each of [`P9_SETTINGS_FILES`]
+/// under `<new_path>/.claude/` when it is an absolute path that matches
+/// the old project path prefix.
 ///
 /// Paths using `~/` or relative paths are already path-portable across
 /// renames and need no rewrite. Only absolute paths anchored under
 /// `old_path` are migrated.
 ///
-/// Returns `true` if the file was rewritten, `false` otherwise (missing,
+/// Returns `true` if any file was rewritten, `false` otherwise (missing,
 /// no `autoMemoryDirectory`, or the value doesn't match the old path).
 pub fn rewrite_project_settings(
     new_project_path: &Path,
     old_path: &str,
     new_path: &str,
 ) -> Result<bool, ProjectError> {
-    let settings_path = new_project_path.join(".claude").join("settings.json");
+    let mut any = false;
+    for name in P9_SETTINGS_FILES {
+        let path = new_project_path.join(".claude").join(name);
+        any |= rewrite_settings_file(&path, old_path, new_path)?;
+    }
+    Ok(any)
+}
+
+fn rewrite_settings_file(
+    settings_path: &Path,
+    old_path: &str,
+    new_path: &str,
+) -> Result<bool, ProjectError> {
     if !settings_path.exists() {
         return Ok(false);
     }
 
-    let contents = fs::read_to_string(&settings_path).map_err(ProjectError::Io)?;
+    let contents = fs::read_to_string(settings_path).map_err(ProjectError::Io)?;
     let mut value: Value = match serde_json::from_str(&contents) {
         Ok(v) => v,
         Err(_) => return Ok(false), // malformed; don't touch
@@ -284,10 +304,10 @@ pub fn rewrite_project_settings(
     };
     *current = new_value;
 
-    write_config_atomic(&settings_path, &value)?;
+    write_config_atomic(settings_path, &value)?;
     tracing::info!(
         file = ?settings_path,
-        "P9 project-local settings.json autoMemoryDirectory rewritten"
+        "P9 project-local settings autoMemoryDirectory rewritten"
     );
     Ok(true)
 }
@@ -902,6 +922,24 @@ mod tests {
         let after: Value = serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
         assert_eq!(after["autoMemoryDirectory"], json!(mem_new));
         assert_eq!(after["other"], json!("keep"));
+    }
+
+    #[test]
+    fn p9_rewrites_the_local_settings_file_cc_actually_reads() {
+        let tmp = tempfile::tempdir().unwrap();
+        let proj = tmp.path().join("new");
+        fs::create_dir_all(proj.join(".claude")).unwrap();
+        let local = proj.join(".claude").join("settings.local.json");
+        #[cfg(unix)]
+        let (old, new, mem_old, mem_new) = ("/old/p", "/new/p", "/old/p/mem", "/new/p/mem");
+        #[cfg(windows)]
+        let (old, new, mem_old, mem_new) =
+            (r"C:\old\p", r"C:\new\p", r"C:\old\p\mem", r"C:\new\p\mem");
+        fs::write(&local, json!({"autoMemoryDirectory": mem_old}).to_string()).unwrap();
+
+        assert!(rewrite_project_settings(&proj, old, new).unwrap());
+        let after: Value = serde_json::from_str(&fs::read_to_string(&local).unwrap()).unwrap();
+        assert_eq!(after["autoMemoryDirectory"], json!(mem_new));
     }
 
     #[test]
