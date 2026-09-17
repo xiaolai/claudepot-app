@@ -26,6 +26,8 @@
     "check:motion:self-test": "node scripts/check-motion.mjs --self-test",
     "check:contrast": "node scripts/check-contrast.mjs",
     "check:contrast:self-test": "node scripts/check-contrast.mjs --self-test",
+    "check:inline-flow": "node scripts/check-inline-flow.mjs",
+    "check:inline-flow:self-test": "node scripts/check-inline-flow.mjs --self-test",
     "scan:untranslated": "node scripts/scan-untranslated.mjs",
     "screenshots": "node scripts/capture-screenshots.mjs"
   },

@@ -80,6 +80,9 @@ typescript
 # workflow step pointing at a file a fresh clone does not have.
 !/scripts/check-motion.mjs
 !/scripts/check-contrast.mjs
+# `check:inline-flow` — prose inside a flex/grid container keeps its
+# spaces. Invoked by ci.yml and preflight.sh, same rule as above.
+!/scripts/check-inline-flow.mjs
 # Its unit tests, which vitest DOES run in CI (`scripts/**/*.test.mjs` is in
 # vitest.config.ts's include). Leaving this ignored would put a test file in
 # the working tree that no other clone has and CI never sees — the same

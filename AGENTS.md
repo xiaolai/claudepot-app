@@ -79,6 +79,7 @@ pnpm check:a11y                      # every role="switch" has an accessible nam
 pnpm check:motion                    # the reduced-motion override reaches the primitives
 pnpm check:contrast                  # the prefers-contrast override is not lost to source order
 pnpm check:catalogs                  # en↔zh key / placeholder / <Trans> tag parity
+pnpm check:inline-flow               # prose inside a flex/grid container keeps its spaces
 pnpm check:envvar-layout             # needs a screen; CI runs its unit half only
 ```
 
@@ -94,12 +95,13 @@ changing a gate, and especially before relaxing one.
 | `check:classes` | does every `className` have a CSS rule behind it, and does every bare `input` / `textarea` draw chrome? Both are valid HTML and invisible to `tsc`. Refuses a vacuous pass under 100 defined / 100 used; `lucide*` is exempt |
 | `check:a11y` | does every `role="switch"` have an accessible name? Requires an aria attribute outright — the visible text beside a switch is not a label |
 | `check:motion` / `check:contrast` | do the `prefers-reduced-motion` and `prefers-contrast: more` overrides actually *reach* the primitives, which animate from inline styles? Both turn on source order inside `tokens.css` |
+| `check:inline-flow` | does text inside a flex or grid container keep its spaces? Each text run there becomes its own flex item and loses its edge white space, so `<Trans components>` rendered "clickReindexto" while `textContent` — all a render test sees — still had the spaces. Reads inline styles and single-class CSS rules; an unresolvable parent passes |
 | `check:catalogs` | en↔zh parity. "Orphan" is **cross-locale only** — it cannot see a key that no source file references, and a green run is not evidence there are none |
 | `check:envvar-layout` | does the env-var pane lay out at all? Drives the real app over the debug-only MCP bridge, so CI runs the pure `evaluate()` half instead |
 
-Five carry a `:self-test` that forces the assertions to fail
-(`check:classes`, `check:a11y`, `check:motion`, `check:contrast`, and
-the panel's `check:render`), `check-envvar-layout.mjs` takes
+Six carry a `:self-test` that forces the assertions to fail
+(`check:classes`, `check:a11y`, `check:motion`, `check:contrast`,
+`check:inline-flow`, and the panel's `check:render`), `check-envvar-layout.mjs` takes
 `--self-test`, and `check:catalogs` is exercised by pointing
 `CLAUDEPOT_LOCALES_DIR` at a fixture. A check nobody has watched fail
 is indistinguishable from one that cannot fail.

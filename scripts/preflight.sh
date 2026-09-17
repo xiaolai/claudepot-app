@@ -132,6 +132,10 @@ if [ "$rust_only" -eq 0 ]; then
   pnpm check:contrast:self-test && pnpm check:contrast
   ok "contrast"
 
+  step "inline flow"
+  pnpm check:inline-flow:self-test && pnpm check:inline-flow
+  ok "inline flow"
+
   step "frontend typecheck"
   pnpm tsc --noEmit
   ok "typecheck"

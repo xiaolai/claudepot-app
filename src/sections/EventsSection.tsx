@@ -890,11 +890,15 @@ function CardStream({ cards, loading, error, lastSeenId, onCardClick }: CardStre
   if (cards.length === 0) {
     return (
       <div style={emptyStyle}>
-        <Trans
-          ns="activities"
-          i18nKey="stream.empty"
-          components={{ em: <em /> }}
-        />
+        {/* One flex item, so the sentence keeps its spaces — see
+            scripts/check-inline-flow.mjs. */}
+        <span>
+          <Trans
+            ns="activities"
+            i18nKey="stream.empty"
+            components={{ em: <em /> }}
+          />
+        </span>
       </div>
     );
   }

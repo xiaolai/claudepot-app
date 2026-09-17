@@ -2,7 +2,8 @@
 
 Working notes, moved out of `AGENTS.md` on 2026-09-17. `AGENTS.md` is
 `@`-included into every session and states the rules in one line each;
-this file carries every gate here was written after a specific failure shipped green; this is the record of which one.
+this file carries the reasoning. Every gate here was written after a
+specific failure shipped green, and this is the record of which one.
 
 Read it before changing anything it covers. The one-liners say *what*;
 this says *why*, and why the obvious alternative is wrong — which is the
@@ -18,6 +19,7 @@ pnpm test:coverage                   # React with coverage report
 cd panel && pnpm check:render        # the built remote panel actually mounts
 pnpm check:classes                   # every className has a CSS rule behind it
 pnpm check:a11y                      # every role="switch" has an accessible name
+pnpm check:inline-flow               # prose inside a flex/grid container keeps its spaces
 ```
 
 `panel`'s render check answers a question `vite build` cannot: whether
@@ -176,6 +178,46 @@ inline style object satisfied its "contains an expression" test — so
 deleting `aria-label` from the real `SettingsSection` toggle still
 reported OK. Watched, on the actual file. It now requires an aria
 attribute outright, and both real regressions have been watched failing.
+
+**Text directly inside a flex or grid container loses its spaces, and
+`pnpm check:inline-flow` is the only thing that says so.** Each run of
+text there becomes its own anonymous flex item, and white space at the
+edge of an item is discarded. `<Trans components>` returns text, element,
+text as siblings, so the Activities empty state — catalog string "or
+click <em>Reindex</em> to backfill" — rendered as "or clickReindexto
+backfill". It had been like that in the committed screenshot since
+2026-09-05 and nobody saw it. `textContent` keeps the spaces, so a
+render test asserting on text passes, and `tsc` has no view of layout.
+
+Found by eye during a screenshot re-capture on 2026-09-18, then swept
+for as a class: a static pass over all 110 `<Trans>` call sites and a
+DOM pass over 37 views of the running app. Four sites, all fixed by one
+`<span>` wrapper, which is a single flex item inside which the text
+flows as a line again — the Activities empty state, the Providers form's
+"Enable <code>tool_reference</code> beta blocks" label, and two
+`.envvar-note` paragraphs. Those last two are flex **only through a CSS
+class**, which is why the check reads the stylesheets and not just
+inline styles; a check that read only `style=` would have found half.
+
+What it deliberately does not flag, because each was measured and would
+have been noise:
+
+- **Text beside an expression** — `Enable {name} blocks`. Contiguous
+  text runs are wrapped in one anonymous item, so those spaces survive.
+  The first draft flagged them anyway.
+- **Spacers** — `{" "}` (56 in `src/`) and a same-line
+  `<Glyph /> {label}` (38). Flex discards them too, but the rows that
+  hold them set a `gap`, which is the spacing the reader actually sees.
+  Three sat in resolvable flex parents; all three were invisible. A gate
+  that reports invisible things teaches people to ignore it.
+- **A parent it cannot resolve** — a component, a computed `className`,
+  a descendant or state selector. It misses those rather than guessing.
+
+`pnpm check:inline-flow:self-test` plants six defects (inline style,
+class rule, spread const, conditional `grid`, fragment) and nine
+lookalikes that must pass. The real run was watched red on all four
+sites before the fix and refuses a vacuous pass under 100 files or 20
+flex/grid classes.
 
 **The wide pass declares a width, and that is the whole trick.** jsdom
 has no layout, so a real `ResizeObserver` measurement is always zero and

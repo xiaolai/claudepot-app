@@ -840,11 +840,13 @@ function GatewayFields(props: {
           checked={props.enableToolSearch}
           onChange={(e) => props.setEnableToolSearch(e.target.checked)}
         />
-        <Trans
-          ns="providers"
-          i18nKey="form.toolSearchLabel"
-          components={{ code: <code /> }}
-        />
+        <span>
+          <Trans
+            ns="providers"
+            i18nKey="form.toolSearchLabel"
+            components={{ code: <code /> }}
+          />
+        </span>
         <span style={{ color: "var(--fg-faint)" }}>
           {t("form.toolSearchNote")}
         </span>

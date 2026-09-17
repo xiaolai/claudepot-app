@@ -280,6 +280,13 @@ jobs:
       - name: Palette meets the contrast it promises
         run: pnpm check:contrast:self-test && pnpm check:contrast
 
+      # Text placed directly in a flex/grid container is split into
+      # separate flex items, and each loses its edge spaces — "click
+      # Reindex to" rendered as "clickReindexto". textContent keeps the
+      # spaces, so no render test can see it.
+      - name: Prose in flex containers keeps its spaces
+        run: pnpm check:inline-flow:self-test && pnpm check:inline-flow
+
       # The production vite build catches failure classes tsc and
       # vitest don't (asset resolution, CSS shard syntax errors,
       # rollup-only module issues). Without this step the first

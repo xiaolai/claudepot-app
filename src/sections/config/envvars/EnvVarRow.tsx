@@ -103,20 +103,24 @@ export function EnvVarRow({
       ) : null}
       {resolved_source === "legacy_global" && legacy_global ? (
         <p className="envvar-note" data-tone="muted">
-          <Trans
-            ns="config"
-            i18nKey="envvars.legacyGlobalWins"
-            components={{ code: <code /> }}
-          />
+          <span>
+            <Trans
+              ns="config"
+              i18nKey="envvars.legacyGlobalWins"
+              components={{ code: <code /> }}
+            />
+          </span>
         </p>
       ) : null}
       {resolved_source === "settings_override" && legacy_global ? (
         <p className="envvar-note" data-tone="muted">
-          <Trans
-            ns="config"
-            i18nKey="envvars.legacyGlobalShadowed"
-            components={{ code: <code /> }}
-          />
+          <span>
+            <Trans
+              ns="config"
+              i18nKey="envvars.legacyGlobalShadowed"
+              components={{ code: <code /> }}
+            />
+          </span>
         </p>
       ) : null}
       {/* "No settings.json override" is deliberately NOT "CC default" —
