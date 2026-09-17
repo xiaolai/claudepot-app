@@ -617,7 +617,7 @@
     "off": "关闭",
     "custom": "自定义",
     "label": "提交与 PR 署名",
-    "hint": "控制 Claude 的署名是否出现在 git 提交和 pull request 上，以及内容是什么。关闭会在所有位置移除“Co-Authored-By”尾注和“Generated with Claude Code”行。",
+    "hint": "控制 Claude 的署名是否出现在 git 提交和 pull request 上，以及内容是什么。关闭会在所有位置移除“Co-Authored-By”尾注和“Generated with Claude Code”行。网页和 Remote Control 会话附加的 claude.ai 会话链接由另一个设置 attribution.sessionUrl 控制，这里不会改动它。",
     "modeAria": "署名模式",
     "commitLabel": "提交尾注",
     "prLabel": "Pull request 正文",

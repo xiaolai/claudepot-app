@@ -8,14 +8,14 @@ import { toastError } from "../../lib/i18n-error";
 // Settings → General → Claude Code behavior.
 //
 // Controls whether Claude's attribution lands on git commits and pull
-// requests, and what it says. Writes CC's user-level `attribution`
-// object plus the deprecated-but-still-honored `includeCoAuthoredBy`
-// guard in one atomic write (see
-// claudepot_core::attribution_settings — the guard is required because
-// CC's enhanced-PR path treats an empty `attribution.pr` as "not set").
+// requests, and what it says. Writes the two texts inside CC's user-level
+// `attribution` object plus the deprecated `includeCoAuthoredBy` guard in
+// one atomic write (see claudepot_core::attribution_settings — older CC
+// builds treated an empty `attribution.pr` as "not set" on the PR path).
+// Other keys in the object, `sessionUrl` among them, are left alone.
 //
 //   Default → CC's "Co-Authored-By" trailer + "Generated with Claude Code".
-//   Off     → nothing on commits or PRs.
+//   Off     → neither text on commits or PRs.
 //   Custom  → your own commit-trailer and PR-body text.
 //
 // Default/Off apply on click; Custom opens an editor and applies on Save.

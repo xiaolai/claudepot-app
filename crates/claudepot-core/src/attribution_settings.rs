@@ -2,12 +2,12 @@
 //! "Co-Authored-By" / "Generated with Claude Code" text lands on
 //! commits and PRs, and what it says.
 //!
-//! # CC's resolution model (verified against
-//! `~/github/claude_code_src/src/utils/attribution.ts`)
+//! # CC's resolution model (read from the 2.1.274 binary)
 //!
-//! Commit + non-enhanced PR text (`getAttributionTexts`, lines 82-97):
+//! Commit text, and the PR text in the attribution note CC gives the
+//! model:
 //! ```text
-//! if settings.attribution:
+//! if settings.attribution is an object:
 //!     commit = attribution.commit ?? defaultCommit   // "" stays ""
 //!     pr     = attribution.pr     ?? defaultPr
 //! else if settings.includeCoAuthoredBy === false:
@@ -16,29 +16,34 @@
 //!     defaults
 //! ```
 //!
-//! Enhanced PR body (`getEnhancedPRAttribution`, lines 316-327):
+//! The PR body CC writes itself:
 //! ```text
-//! if settings.attribution?.pr:            // TRUTHY — "" does NOT match
+//! if settings.attribution?.pr !== undefined:   // "" now matches
 //!     return attribution.pr
 //! if settings.includeCoAuthoredBy === false:
 //!     return ""
 //! ... otherwise builds the default enhanced attribution ...
 //! ```
 //!
-//! The enhanced path is the load-bearing subtlety: an empty
-//! `attribution.pr` is falsy, so it *falls through* and CC would still
-//! generate PR attribution — unless the deprecated `includeCoAuthoredBy
-//! === false` guard is also present. So turning attribution fully off
-//! requires **both** keys. `includeCoAuthoredBy` is deprecated but still
-//! honored, and here it is a correctness guard, not legacy cruft.
+//! That second path used to test `attribution?.pr` for *truthiness*
+//! (2.1.88), so an empty `pr` fell through and CC generated PR
+//! attribution anyway unless `includeCoAuthoredBy === false` was also
+//! set. 2.1.274 compares against `undefined` and needs no guard; the
+//! changelog never announced the change, so the guard is still written
+//! for the builds in between. It is harmless where it is not needed —
+//! with an object present the commit path never reads it.
 //!
-//! Empty `commit` needs no guard: `getAttributionTexts` uses nullish
-//! coalescing, so `""` is preserved as-is.
+//! The object is `.passthrough()` and carries more than the texts:
+//! `sessionUrl: false` (CC 2.1.183) is what keeps the `Claude-Session:`
+//! trailer and PR link off work from web and Remote Control sessions.
+//! Every write here therefore edits `commit` and `pr` **inside** the
+//! existing object rather than replacing it.
 //!
 //! # The three modes we write (one atomic `mutate_settings`)
 //!
-//! - **Default** → remove both `attribution` and `includeCoAuthoredBy`
-//!   (CC uses its default trailer).
+//! - **Default** → remove `includeCoAuthoredBy` and the two texts; the
+//!   `attribution` object goes only if nothing else is left in it (CC
+//!   uses its default trailer).
 //! - **Off** → `attribution = {commit:"", pr:""}` AND
 //!   `includeCoAuthoredBy = false` (suppresses every path).
 //! - **Custom{commit, pr}** → `attribution = {commit, pr}`; set
@@ -135,16 +140,12 @@ fn field_state(obj: &Map<String, JsonValue>, key: &str) -> FieldState {
 
 /// Resolve the current attribution state for display.
 ///
-/// Classification (respecting CC's per-field `?? default` fallback):
-/// - `attribution` absent, `includeCoAuthoredBy === false` → **Off**
-///   (legacy suppression form).
-/// - `attribution` absent otherwise → **Default**.
-/// - `attribution` present, both `commit` and `pr` present-and-empty →
-///   **Off** (both texts suppressed).
-/// - `attribution` present, both fields absent (an empty `{}`) →
-///   **Default** (CC fills both from its defaults).
-/// - anything else (a non-empty field, or a mix of absent/empty) →
-///   **Custom**.
+/// Classified from what CC would actually produce, per the model at the
+/// top of this file: the commit text from the commit path, the PR text
+/// from the path that writes PR bodies. Both suppressed → **Off**, both
+/// CC's defaults → **Default**, anything else → **Custom**. So
+/// `attribution:{}` is Default rather than Off (absent is not empty),
+/// and the deprecated key counts only where CC still reads it.
 pub fn resolve_attribution() -> AttributionState {
     let obj = read_user_settings_object();
     let include = obj
@@ -155,19 +156,24 @@ pub fn resolve_attribution() -> AttributionState {
     let commit = attribution.and_then(|a| string_field(a, "commit"));
     let pr = attribution.and_then(|a| string_field(a, "pr"));
 
-    let mode = match attribution {
-        None => {
-            if include == Some(false) {
-                AttributionModeKind::Off
-            } else {
-                AttributionModeKind::Default
-            }
-        }
-        Some(a) => match (field_state(a, "commit"), field_state(a, "pr")) {
-            (FieldState::Empty, FieldState::Empty) => AttributionModeKind::Off,
-            (FieldState::Absent, FieldState::Absent) => AttributionModeKind::Default,
-            _ => AttributionModeKind::Custom,
-        },
+    // What CC falls back to where a text is not set in the object.
+    let legacy = if include == Some(false) {
+        FieldState::Empty
+    } else {
+        FieldState::Absent
+    };
+    let commit_state = match attribution {
+        Some(a) => field_state(a, "commit"),
+        None => legacy,
+    };
+    let pr_state = match attribution.map(|a| field_state(a, "pr")) {
+        Some(FieldState::Absent) | None => legacy,
+        Some(state) => state,
+    };
+    let mode = match (commit_state, pr_state) {
+        (FieldState::Empty, FieldState::Empty) => AttributionModeKind::Off,
+        (FieldState::Absent, FieldState::Absent) => AttributionModeKind::Default,
+        _ => AttributionModeKind::Custom,
     };
 
     AttributionState {
@@ -179,27 +185,27 @@ pub fn resolve_attribution() -> AttributionState {
 }
 
 /// Apply the attribution mode in a single atomic write to
-/// `~/.claude/settings.json`. Preserves every unrelated key.
+/// `~/.claude/settings.json`. Preserves every unrelated key, including
+/// the ones inside `attribution` other than the two texts.
 pub fn set_attribution(mode: AttributionMode) -> Result<(), SettingsWriteError> {
     let anchor = Path::new("");
     // Borrow rather than move: `mutate_settings` re-runs its closure when an
     // external writer moves the file mid-edit, so it cannot consume `mode`.
     mutate_settings(SettingsLayer::User, anchor, move |map| match &mode {
         AttributionMode::Default => {
-            map.remove(ATTRIBUTION_KEY);
+            clear_texts(map);
             map.remove(INCLUDE_CO_AUTHORED_BY_KEY);
         }
         AttributionMode::Off => {
-            map.insert(ATTRIBUTION_KEY.to_string(), attribution_object("", ""));
+            set_texts(map, "", "");
             map.insert(
                 INCLUDE_CO_AUTHORED_BY_KEY.to_string(),
                 JsonValue::Bool(false),
             );
         }
         AttributionMode::Custom { commit, pr } => {
-            let pr_empty = pr.is_empty();
-            map.insert(ATTRIBUTION_KEY.to_string(), attribution_object(commit, pr));
-            if pr_empty {
+            set_texts(map, commit, pr);
+            if pr.is_empty() {
                 map.insert(
                     INCLUDE_CO_AUTHORED_BY_KEY.to_string(),
                     JsonValue::Bool(false),
@@ -211,11 +217,34 @@ pub fn set_attribution(mode: AttributionMode) -> Result<(), SettingsWriteError> 
     })
 }
 
-fn attribution_object(commit: &str, pr: &str) -> JsonValue {
-    let mut o = Map::new();
-    o.insert("commit".to_string(), JsonValue::String(commit.to_string()));
-    o.insert("pr".to_string(), JsonValue::String(pr.to_string()));
-    JsonValue::Object(o)
+/// Set both texts inside the existing `attribution` object, creating it
+/// if absent. A non-object value is CC-invalid and is replaced.
+fn set_texts(map: &mut Map<String, JsonValue>, commit: &str, pr: &str) {
+    let entry = map
+        .entry(ATTRIBUTION_KEY.to_string())
+        .or_insert_with(|| JsonValue::Object(Map::new()));
+    if !entry.is_object() {
+        *entry = JsonValue::Object(Map::new());
+    }
+    if let JsonValue::Object(o) = entry {
+        o.insert("commit".to_string(), JsonValue::String(commit.to_string()));
+        o.insert("pr".to_string(), JsonValue::String(pr.to_string()));
+    }
+}
+
+/// Remove both texts; drop the object only when nothing else is in it.
+fn clear_texts(map: &mut Map<String, JsonValue>) {
+    let keep = match map.get_mut(ATTRIBUTION_KEY) {
+        Some(JsonValue::Object(o)) => {
+            o.remove("commit");
+            o.remove("pr");
+            !o.is_empty()
+        }
+        _ => false,
+    };
+    if !keep {
+        map.remove(ATTRIBUTION_KEY);
+    }
 }
 
 #[cfg(test)]
@@ -321,6 +350,60 @@ mod tests {
         assert!(v.get("includeCoAuthoredBy").is_none());
         assert_eq!(v["keep"], JsonValue::from(2));
         assert_eq!(resolve_attribution().mode, AttributionModeKind::Default);
+    }
+
+    /// `attribution` is a passthrough object and carries more than the
+    /// two texts: `sessionUrl: false` is what keeps the `Claude-Session:`
+    /// trailer off commits from web and Remote Control sessions. Writing
+    /// the texts must not take it with them.
+    #[test]
+    fn custom_and_off_keep_the_rest_of_the_attribution_object() {
+        let (_t, _l) = isolated();
+        write_settings(r#"{"attribution":{"sessionUrl":false,"commit":"old","future":1}}"#);
+        set_attribution(AttributionMode::Custom {
+            commit: "c".to_string(),
+            pr: "p".to_string(),
+        })
+        .unwrap();
+        let v = read_settings();
+        assert_eq!(v["attribution"]["sessionUrl"], JsonValue::Bool(false));
+        assert_eq!(v["attribution"]["future"], JsonValue::from(1));
+        assert_eq!(v["attribution"]["commit"], JsonValue::from("c"));
+        assert_eq!(v["attribution"]["pr"], JsonValue::from("p"));
+
+        set_attribution(AttributionMode::Off).unwrap();
+        let v = read_settings();
+        assert_eq!(v["attribution"]["sessionUrl"], JsonValue::Bool(false));
+        assert_eq!(v["attribution"]["commit"], JsonValue::from(""));
+    }
+
+    #[test]
+    fn default_drops_only_the_texts_when_the_object_holds_more() {
+        let (_t, _l) = isolated();
+        write_settings(
+            r#"{"attribution":{"sessionUrl":false,"commit":"","pr":""},"includeCoAuthoredBy":false}"#,
+        );
+        set_attribution(AttributionMode::Default).unwrap();
+        let v = read_settings();
+        assert_eq!(
+            v["attribution"],
+            serde_json::json!({"sessionUrl": false}),
+            "the session-link choice survives a reset of the texts"
+        );
+        assert!(v.get("includeCoAuthoredBy").is_none());
+        assert_eq!(resolve_attribution().mode, AttributionModeKind::Default);
+    }
+
+    /// CC reads the deprecated key for a text the object leaves unset,
+    /// but only on the PR path: with an object present, the commit text
+    /// is `attribution.commit ?? default` regardless. So this file hides
+    /// PR text and keeps the default commit trailer — neither Default
+    /// nor Off.
+    #[test]
+    fn a_legacy_guard_beside_an_object_without_texts_is_custom() {
+        let (_t, _l) = isolated();
+        write_settings(r#"{"attribution":{"sessionUrl":false},"includeCoAuthoredBy":false}"#);
+        assert_eq!(resolve_attribution().mode, AttributionModeKind::Custom);
     }
 
     #[test]

@@ -623,7 +623,7 @@
     "off": "Off",
     "custom": "Custom",
     "label": "Commit & PR attribution",
-    "hint": "Whether Claude's attribution appears on git commits and pull requests, and what it says. Off removes the “Co-Authored-By” trailer and the “Generated with Claude Code” line everywhere.",
+    "hint": "Whether Claude's attribution appears on git commits and pull requests, and what it says. Off removes the “Co-Authored-By” trailer and the “Generated with Claude Code” line everywhere. The claude.ai session link that web and Remote Control sessions add is a separate setting, attribution.sessionUrl, and is left as it is.",
     "modeAria": "Attribution mode",
     "commitLabel": "Commit trailer",
     "prLabel": "Pull-request body",
