@@ -45,7 +45,7 @@ pub fn move_cmd(
         force_sync_conflict: force_conflict,
         cleanup_source_if_empty: cleanup_source,
         create_target_dir: create_target,
-        claude_json_path: claude_json_path(),
+        claude_json_path: Some(global_claude_json_target()),
     };
     let report = move_session(
         &config_dir,
@@ -72,8 +72,13 @@ pub fn adopt_orphan_cmd(ctx: &AppContext, orphan_slug: &str, target_cwd: &str) -
         bail!("target cwd does not exist: {target_cwd}");
     }
 
-    let report = adopt_orphan_project(&config_dir, orphan_slug, target, claude_json_path())
-        .with_context(|| format!("failed to adopt {orphan_slug} into {target_cwd}"))?;
+    let report = adopt_orphan_project(
+        &config_dir,
+        orphan_slug,
+        target,
+        Some(global_claude_json_target()),
+    )
+    .with_context(|| format!("failed to adopt {orphan_slug} into {target_cwd}"))?;
 
     if ctx.json {
         println!("{}", format_adopt_report_json(&report));

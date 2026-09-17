@@ -52,7 +52,7 @@ pub fn trash_list(ctx: &AppContext) -> Result<()> {
 pub fn trash_restore(ctx: &AppContext, entry_id: &str) -> Result<()> {
     let data_dir = paths::claudepot_data_dir();
     let config_dir = paths::claude_config_dir();
-    let claude_json = paths::claude_json_path();
+    let claude_json = Some(paths::global_claude_json_target());
     let history = config_dir.join("history.jsonl");
 
     let report = project_trash::restore(

@@ -24,7 +24,7 @@ use crate::output::{format_size, format_ts_ms, print_json, truncate_start};
 use crate::AppContext;
 use anyhow::{bail, Context, Result};
 use claudepot_core::paths;
-use claudepot_core::paths::claude_json_path;
+use claudepot_core::paths::global_claude_json_target;
 use claudepot_core::session::{read_session_detail, read_session_detail_at_path, SessionDetail};
 use claudepot_core::session_move::{
     adopt_orphan_project, detect_orphaned_projects, move_session, AdoptReport, MoveSessionOpts,

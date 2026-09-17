@@ -39,25 +39,19 @@ pub fn claude_credentials_file() -> PathBuf {
     claude_config_dir().join(".credentials.json")
 }
 
-/// CC's `.claude.json` state file. CC stores it at `$HOME/.claude.json`
-/// — a sibling of `~/.claude/`, not inside it. Central accessor so the
-/// CLI and the Tauri shell agree on the location. `None` when the home
-/// directory can't be resolved.
-pub fn claude_json_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".claude.json"))
-}
-
 /// The global user config CC actually reads, mirroring its
-/// `getGlobalClaudeFile` (`utils/env.ts:14-26`): the legacy
+/// `getGlobalClaudeFile` (re-read in 2.1.274): the legacy
 /// `<claude_config_dir>/.config.json` wins when present, otherwise
-/// `$CLAUDE_CONFIG_DIR/.claude.json`, otherwise `~/.claude.json`.
+/// `.claude.json` in `$CLAUDE_CONFIG_DIR`, otherwise in the home
+/// directory — named `.claude-custom-oauth.json` instead while
+/// `CLAUDE_CODE_CUSTOM_OAUTH_URL` is set.
 ///
-/// Distinct from [`claude_json_path`], which always names the home-directory
-/// sibling. That is the right answer for callers that mean "the file at
-/// `$HOME/.claude.json`" and the wrong one for callers that mean "the file CC
-/// will read" — with `CLAUDE_CONFIG_DIR` set, those are different files, and
-/// a reader that consults the wrong one reports "nothing set here" about a
-/// file CC is actively applying.
+/// It holds the `projects` map as well as account state, so everything
+/// that rewrites a project's entry uses it. There used to be a second
+/// helper naming `$HOME/.claude.json` unconditionally, and project
+/// rename, clean, remove, repair, trash and session moves all rewrote
+/// that file — leaving CC's real map stale under `CLAUDE_CONFIG_DIR`.
+/// It was deleted rather than kept for a caller that meant it.
 ///
 /// Returns the first candidate that exists; `None` when neither does.
 /// Use [`global_claude_json_target`] when you need the path regardless
@@ -102,11 +96,18 @@ pub fn global_claude_json_target() -> PathBuf {
     if legacy.is_file() {
         return legacy;
     }
+    // CC's `aj()`: a raw-truthy custom OAuth URL renames the file. Its
+    // other suffixes belong to internal builds (`c()` is "prod" here).
+    let name = if std::env::var_os("CLAUDE_CODE_CUSTOM_OAUTH_URL").is_some_and(|v| !v.is_empty()) {
+        ".claude-custom-oauth.json"
+    } else {
+        ".claude.json"
+    };
     std::env::var_os("CLAUDE_CONFIG_DIR")
         .map(PathBuf::from)
         .or_else(dirs::home_dir)
         .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join(".claude.json")
+        .join(name)
 }
 
 /// Claude Desktop data directory (macOS / Windows). Returns None on Linux.
@@ -320,14 +321,21 @@ mod tests {
     }
 
     #[test]
-    fn test_claude_json_path_is_home_sibling() {
+    fn a_custom_oauth_url_renames_the_global_config_file() {
         let _lock = lock_data_dir();
-        let result = claude_json_path();
-        if let Some(home) = dirs::home_dir() {
-            assert_eq!(result, Some(home.join(".claude.json")));
-        } else {
-            assert!(result.is_none());
-        }
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = tmp.path().join("config-dir");
+        std::fs::create_dir_all(&cfg).unwrap();
+        std::env::set_var("CLAUDE_CONFIG_DIR", &cfg);
+        std::env::set_var("CLAUDE_CODE_CUSTOM_OAUTH_URL", "https://auth.example.test");
+        assert_eq!(
+            global_claude_json_target(),
+            cfg.join(".claude-custom-oauth.json")
+        );
+        std::env::set_var("CLAUDE_CODE_CUSTOM_OAUTH_URL", "");
+        assert_eq!(global_claude_json_target(), cfg.join(".claude.json"));
+        std::env::remove_var("CLAUDE_CODE_CUSTOM_OAUTH_URL");
+        std::env::remove_var("CLAUDE_CONFIG_DIR");
     }
 
     /// The three-way resolution CC's `getGlobalClaudeFile` performs.

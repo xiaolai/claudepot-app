@@ -47,10 +47,10 @@ pub struct MoveArgs {
     pub old_path: PathBuf,
     pub new_path: PathBuf,
     pub config_dir: PathBuf,
-    /// Path to `~/.claude.json` (the config file, sibling to `~/.claude/`).
-    /// `None` skips Phase 7 entirely — useful for tests and for future
-    /// callers that want to opt out. CLI callers pass
-    /// `Some(home.join(".claude.json"))`.
+    /// CC's global config file, which holds the `projects` map. `None`
+    /// skips Phase 7 entirely — useful for tests and for future callers
+    /// that want to opt out. Production callers pass
+    /// `Some(paths::global_claude_json_target())`.
     pub claude_json_path: Option<PathBuf>,
     /// Directory for destructive-phase snapshots. Used by Phase 7 (and
     /// future P4-overwrite / P8). If `None`, snapshots go to

@@ -163,7 +163,7 @@ fn repair_paths() -> (
     Option<std::path::PathBuf>,
 ) {
     let config_dir = paths::claude_config_dir();
-    let claude_json_path = paths::claude_json_path();
+    let claude_json_path = Some(paths::global_claude_json_target());
     let state_root = paths::claudepot_repair_dir();
     let snapshots = Some(state_root.join("snapshots"));
     (config_dir, claude_json_path, snapshots, Some(state_root))

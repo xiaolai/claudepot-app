@@ -52,8 +52,8 @@ pub fn move_project(ctx: &AppContext, args: MoveArgs) -> Result<()> {
         gate_on_pending_journals(ignore_pending_journals)?;
     }
     let config_dir = paths::claude_config_dir();
-    // `~/.claude.json` is the sibling config file to `~/.claude/`.
-    let claude_json_path = paths::claude_json_path();
+    // The global config CC reads — it holds the `projects` map.
+    let claude_json_path = Some(paths::global_claude_json_target());
     // Default snapshot location per spec §6 — now rooted under
     // Claudepot's repair tree rather than `<config_dir>/claudepot/`.
     let snapshots_dir = Some(paths::claudepot_repair_dir().join("snapshots"));

@@ -74,6 +74,10 @@ pub struct DataDirFiles {
     /// Production functions that call `Connection::open` **without**
     /// reaching `apply_standard_pragmas`. See [`UnpragmadOpen`].
     pub unpragmad_opens: Vec<UnpragmadOpen>,
+    /// Production files that build CC's global config path themselves,
+    /// by joining `.claude.json` onto something. See
+    /// [`GlobalConfigVisitor`].
+    pub global_config_joins: BTreeSet<String>,
 }
 
 /// A `Connection::open` that never reaches `apply_standard_pragmas`.
@@ -163,10 +167,15 @@ pub fn scan(repo: &Path) -> Result<DataDirFiles> {
             .to_string_lossy()
             .into_owned();
         let mut p = PragmaVisitor {
-            file: rel,
+            file: rel.clone(),
             out: &mut v.out.unpragmad_opens,
         };
         p.visit_file(f);
+        let mut g = GlobalConfigVisitor { hit: false };
+        g.visit_file(f);
+        if g.hit {
+            v.out.global_config_joins.insert(rel);
+        }
     }
     Ok(v.out)
 }
@@ -501,9 +510,75 @@ impl<'ast> Visit<'ast> for PragmaVisitor<'_> {
     }
 }
 
+// ─── The global config file ─────────────────────────────────────────
+
+/// Finds `.join(".claude.json")` in production code.
+///
+/// CC reads its global config from one resolved file —
+/// `paths::global_claude_json_target` — and every copy of that
+/// resolution has been wrong: two dropped a branch, and a helper that
+/// always named `$HOME/.claude.json` sent project rename, trash, repair
+/// and the account swap to a file CC was not reading. The rule is the
+/// resolver, so building the name by hand is the finding.
+struct GlobalConfigVisitor {
+    hit: bool,
+}
+
+impl<'ast> Visit<'ast> for GlobalConfigVisitor {
+    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+        if !is_cfg_test(&node.attrs) {
+            syn::visit::visit_item_mod(self, node);
+        }
+    }
+
+    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        if !is_cfg_test(&node.attrs) {
+            syn::visit::visit_item_fn(self, node);
+        }
+    }
+
+    fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+        if !is_cfg_test(&node.attrs) {
+            syn::visit::visit_impl_item_fn(self, node);
+        }
+    }
+
+    fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
+        if node.method == "join" && node.args.len() == 1 {
+            if let syn::Expr::Lit(syn::ExprLit {
+                lit: syn::Lit::Str(s),
+                ..
+            }) = &node.args[0]
+            {
+                if s.value() == ".claude.json" {
+                    self.hit = true;
+                }
+            }
+        }
+        syn::visit::visit_expr_method_call(self, node);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_hand_built_global_config_path_is_found_outside_tests_only() {
+        let hit = |src: &str| {
+            let mut g = GlobalConfigVisitor { hit: false };
+            g.visit_file(&syn::parse_file(src).unwrap());
+            g.hit
+        };
+        assert!(hit(r#"fn p() -> PathBuf { home().join(".claude.json") }"#));
+        assert!(!hit(
+            r#"fn p() -> PathBuf { paths::global_claude_json_target() }"#
+        ));
+        assert!(!hit(
+            r#"#[cfg(test)] mod tests { fn p() { tmp.path().join(".claude.json"); } }"#
+        ));
+        assert!(!hit(r#"fn p() { dir.join("settings.json"); }"#));
+    }
 
     fn scan_src(src: &str) -> DataDirFiles {
         let f = syn::parse_file(src).expect("parse");

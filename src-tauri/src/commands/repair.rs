@@ -112,7 +112,7 @@ fn spawn_repair_op(
     // See `project_clean_start` for why this is an OS thread.
     spawn_op_thread(app, ops, op_id.clone(), move |sink, app, ops, op_id| {
         let cfg = paths::claude_config_dir();
-        let claude_json = dirs::home_dir().map(|h| h.join(".claude.json"));
+        let claude_json = Some(claudepot_core::paths::global_claude_json_target());
         let state_root = paths::claudepot_repair_dir();
         let snaps = Some(state_root.join("snapshots"));
         // Audit B3 fix: thread the repair-tree root through so the
@@ -195,7 +195,7 @@ pub async fn project_move_start(
     ops: State<'_, RunningOps>,
 ) -> Result<String, ErrorDto> {
     let cfg = paths::claude_config_dir();
-    let claude_json = dirs::home_dir().map(|h| h.join(".claude.json"));
+    let claude_json = Some(claudepot_core::paths::global_claude_json_target());
     let repair_root = paths::claudepot_repair_dir();
     let snaps = Some(repair_root.join("snapshots"));
     // Defensive: ignore `dry_run` from the DTO — this endpoint always

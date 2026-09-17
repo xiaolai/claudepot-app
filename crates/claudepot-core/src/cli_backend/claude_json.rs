@@ -1,4 +1,4 @@
-//! Rewrite the `oauthAccount` block in `~/.claude.json`.
+//! Rewrite the `oauthAccount` block in CC's global config file.
 //!
 //! CC's `claude auth status` and several internal UI elements read
 //! `~/.claude.json` for the user-visible identity (email,
@@ -17,9 +17,12 @@ use serde_json::{json, Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Resolve `~/.claude.json`. Returns `None` if `$HOME` is unset.
+/// The global config file CC reads its identity from — see
+/// [`crate::paths::global_claude_json_target`]. It was `$HOME/.claude.json`
+/// unconditionally, so under `CLAUDE_CONFIG_DIR` a swap rewrote a file CC
+/// was not reading and left the old account on screen.
 pub fn default_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".claude.json"))
+    Some(crate::paths::global_claude_json_target())
 }
 
 /// Read the current `oauthAccount` block from `path` for backup.

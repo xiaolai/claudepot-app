@@ -51,7 +51,7 @@ pub async fn session_list_orphans() -> Result<Vec<crate::dto::OrphanedProjectDto
 // The `.claude.json` location is owned by `claudepot_core::paths::
 // claude_json_path` — the one accessor the CLI and this Tauri layer
 // share, so the two surfaces can't drift.
-use claudepot_core::paths::claude_json_path;
+use claudepot_core::paths::global_claude_json_target;
 
 /// Resolve a free-form move target so the caller can describe it before
 /// committing to it: `~` expanded, absolute-ness settled, and the
@@ -98,7 +98,7 @@ pub async fn session_move(
             force_sync_conflict: force_conflict,
             cleanup_source_if_empty: cleanup_source,
             create_target_dir,
-            claude_json_path: claude_json_path(),
+            claude_json_path: Some(global_claude_json_target()),
         };
         let report = claudepot_core::session_move::move_session(
             &cfg,
@@ -132,7 +132,7 @@ pub async fn session_adopt_orphan(
             &cfg,
             &slug,
             target,
-            claude_json_path(),
+            Some(global_claude_json_target()),
         )?;
         Ok(crate::dto::AdoptReportDto::from(&report))
     })
@@ -206,7 +206,7 @@ pub async fn session_move_start(
                 force_sync_conflict: force_conflict,
                 cleanup_source_if_empty: cleanup_source,
                 create_target_dir,
-                claude_json_path: claude_json_path(),
+                claude_json_path: Some(global_claude_json_target()),
             };
             let result = session_move::move_session_with_progress(
                 &cfg,

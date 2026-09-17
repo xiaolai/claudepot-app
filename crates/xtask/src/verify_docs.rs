@@ -35,7 +35,10 @@
 //!    `db_pragmas::apply_standard_pragmas`. Not a docs fact, but the
 //!    same shape of failure and it belongs beside check 3: that one
 //!    gates WAL *cleanup* coverage, this one gates WAL *growth* bounds,
-//!    and `corpus.db` was missing from both for as long as it existed;
+//!    and `corpus.db` was missing from both for as long as it existed.
+//!    The same scan fails a production `.join(".claude.json")` outside
+//!    `paths.rs` — CC's global config has one resolver, and every
+//!    hand-built copy of it has pointed somewhere CC was not reading;
 //! 7. the website's hand-copied icon assets still track
 //!    `assets/icon-set/`. `scripts/regen-icons.sh` covers the app
 //!    ladder only, so the web copies are maintained by memory — and in
@@ -356,6 +359,14 @@ fn known_db_filenames(src: &str) -> BTreeSet<String> {
     out
 }
 
+/// The only production files allowed to name `.claude.json` directly:
+/// the resolver itself, and `migrate`'s resolver for an explicit config
+/// dir, which documents why it cannot use the global one.
+const GLOBAL_CONFIG_RESOLVERS: &[&str] = &[
+    "crates/claudepot-core/src/paths.rs",
+    "crates/claudepot-core/src/migrate/fragment.rs",
+];
+
 fn check_data_dir_databases(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
     let agents = read(repo, "AGENTS.md")?;
     let shipped = crate::data_dir_scan::scan(repo)?.dbs;
@@ -400,6 +411,16 @@ fn check_data_dir_databases(repo: &Path, problems: &mut Vec<String>) -> Result<(
     // `journal_size_limit` / `wal_autocheckpoint` for as long as it
     // existed, on the largest database in the app.
     let scan = crate::data_dir_scan::scan(repo)?;
+    for file in &scan.global_config_joins {
+        if GLOBAL_CONFIG_RESOLVERS.contains(&file.as_str()) {
+            continue;
+        }
+        problems.push(format!(
+            "`{file}` joins `.claude.json` itself — use `paths::global_claude_json_target()`. \
+             CC reads one resolved file (legacy `.config.json`, `CLAUDE_CONFIG_DIR`, a custom \
+             OAuth name), and every hand-built copy of that choice has been wrong"
+        ));
+    }
     for open in &scan.unpragmad_opens {
         problems.push(format!(
             "`{}::{}` calls `Connection::open` without `db_pragmas::apply_standard_pragmas` \

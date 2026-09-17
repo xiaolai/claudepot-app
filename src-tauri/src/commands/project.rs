@@ -156,7 +156,7 @@ pub async fn project_move_dry_run(
     svc: State<'_, crate::state::DryRunState>,
 ) -> Result<DryRunPlanDto, ErrorDto> {
     let cfg = paths::claude_config_dir();
-    let claude_json_path = dirs::home_dir().map(|h| h.join(".claude.json"));
+    let claude_json_path = Some(claudepot_core::paths::global_claude_json_target());
     let repair_root = paths::claudepot_repair_dir();
     let snapshots_dir = Some(repair_root.join("snapshots"));
     let core_args = project::MoveArgs {
@@ -257,7 +257,7 @@ pub async fn project_clean_start(
     ops.insert(new_running_op(&op_id, OpKind::CleanProjects, "", ""));
 
     let cfg = paths::claude_config_dir();
-    let claude_json = dirs::home_dir().map(|h| h.join(".claude.json"));
+    let claude_json = Some(claudepot_core::paths::global_claude_json_target());
     // Resolve protected paths once on the spawning thread so the
     // background task gets a snapshot — list mutations during a
     // multi-second clean must not change the rules mid-flight. On
@@ -401,9 +401,7 @@ fn remove_paths() -> (
     std::path::PathBuf, // data_dir
 ) {
     let config_dir = paths::claude_config_dir();
-    let claude_json = dirs::home_dir()
-        .map(|h| h.join(".claude.json"))
-        .unwrap_or_else(|| std::path::PathBuf::from(".claude.json"));
+    let claude_json = paths::global_claude_json_target();
     let history = config_dir.join("history.jsonl");
     let (_journals, locks, snaps) = claudepot_home_dirs();
     let data_dir = paths::claudepot_data_dir();

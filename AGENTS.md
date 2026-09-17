@@ -731,28 +731,32 @@ All writes go through `claudepot-core::settings_mutex`, the one
 serialized read-modify-write boundary for CC's settings files — see
 below.
 
-## Locating CC's global config — one resolver, two meanings
+## Locating CC's global config — one resolver
 
-Two different questions, and picking the wrong one is a silent bug:
+`paths::global_claude_json_target()` (or `resolved_global_claude_json()`
+when "it doesn't exist" is a distinct answer) is **the** file CC reads:
+it mirrors CC's `getGlobalClaudeFile` — legacy `<config_dir>/.config.json`
+wins when present, else `.claude.json` in `$CLAUDE_CONFIG_DIR`, else in
+the home directory, named `.claude-custom-oauth.json` instead while
+`CLAUDE_CODE_CUSTOM_OAUTH_URL` is set. It holds the `projects` map and
+the account identity as well as settings, so every reader and writer of
+either goes through it. **Never hand-roll that check.**
 
-| You mean | Call |
-|---|---|
-| the file at `$HOME/.claude.json` | `paths::claude_json_path()` |
-| the file **CC will actually read** | `paths::global_claude_json_target()` (or `resolved_global_claude_json()` when "it doesn't exist" is a distinct answer) |
+It was re-implemented three times and two copies were wrong:
+`config_view::effective_io` dropped the legacy branch while claiming
+parity in its own comment, and `cc_tips::history` hardcoded the home
+sibling, so under `CLAUDE_CONFIG_DIR` the tips ledger reported
+`num_startups: 0` forever — into `cc_tips_snapshots.jsonl`, which is
+append-only and unreconstructable.
 
-The second mirrors CC's `getGlobalClaudeFile` (`utils/env.ts:14-26`):
-legacy `<config_dir>/.config.json` wins when present, else
-`$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`. **Never
-hand-roll that three-way check** — it was re-implemented three times
-and two copies were wrong. `config_view::effective_io` dropped the
-legacy branch while claiming parity in its own comment, so Config →
-Effective MCP read the wrong file and showed no user-scope servers
-while the preview beside it read the right one; `cc_tips::history`
-hardcoded the home sibling, so under `CLAUDE_CONFIG_DIR` the tips
-ledger reported `num_startups: 0` forever — into
-`cc_tips_snapshots.jsonl`, which is append-only and unreconstructable.
-`claude_json_path()` is correct only where the home sibling is
-genuinely the target (project-move rewriting the `projects` map).
+There was also a second helper, `claude_json_path()`, that always named
+`$HOME/.claude.json`, documented as right "for project-move rewriting
+the `projects` map". It was not: CC reads that map from the resolved
+file, so project rename, clean, remove, repair, trash and session
+moves, and the account swap's `oauthAccount` rewrite, all edited a file
+CC was not reading whenever `CLAUDE_CONFIG_DIR` was set. The helper is
+deleted. `migrate::fragment::claude_json_for` derives the file from an
+explicit config dir on purpose, and says why.
 
 ## Command palette (⌘K)
 

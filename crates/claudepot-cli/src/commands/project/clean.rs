@@ -10,7 +10,7 @@ pub fn clean(ctx: &AppContext, dry_run: bool, ignore_pending_journals: bool) -> 
         gate_on_pending_journals(ignore_pending_journals)?;
     }
     let config_dir = paths::claude_config_dir();
-    let claude_json_path = paths::claude_json_path();
+    let claude_json_path = Some(paths::global_claude_json_target());
     let snaps = snapshots_dir();
     let locks = locks_dir();
 

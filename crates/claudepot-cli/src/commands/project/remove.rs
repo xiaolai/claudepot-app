@@ -110,8 +110,7 @@ pub fn remove(ctx: &AppContext, target: &str, dry_run: bool) -> Result<()> {
         gate_on_pending_journals(false)?;
     }
     let config_dir = paths::claude_config_dir();
-    let claude_json =
-        paths::claude_json_path().ok_or_else(|| anyhow::anyhow!("no home directory"))?;
+    let claude_json = paths::global_claude_json_target();
     let history = config_dir.join("history.jsonl");
     let snapshots = snapshots_dir();
     let locks = locks_dir();
