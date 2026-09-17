@@ -55,9 +55,15 @@ const DESTS = ["assets/screenshots", "web/public/screenshots"];
  */
 const SHOTS = [
   { file: "accounts.png", nav: "Accounts", settle: "ACCOUNTS" },
-  { file: "activities.png", nav: "Activities", settle: "Mark all seen" },
-  { file: "projects.png", nav: "Projects", settle: "PROJECTS" },
-  { file: "memory.png", nav: "Knowledge", settle: "KNOWLEDGE" },
+  // Every section with tabs pins one, and settles on text only that tab
+  // renders. Activities remembers its last tab across launches
+  // (`claudepot.events.tab`), and this row used to settle on "Mark all
+  // seen" — a header button on every tab — so a run after someone had
+  // looked at Cost captured Cost. The loop below now refuses an
+  // unpinned row in a tabbed view, so the same slip cannot recur.
+  { file: "activities.png", nav: "Activities", tab: "Stream", settle: "Severity" },
+  { file: "projects.png", nav: "Projects", tab: "All", settle: "Select a project" },
+  { file: "memory.png", nav: "Knowledge", tab: "Dashboard", settle: "Across all projects" },
   { file: "keys.png", nav: "Keys", settle: "KEYS" },
   { file: "third-parties.png", nav: "Providers", settle: "PROVIDERS" },
   { file: "automations.png", nav: "Agents", settle: "AGENTS" },
@@ -121,31 +127,58 @@ function send(ws, command, args) {
 
 const js = (ws, script) => send(ws, "execute_js", { script }).then((r) => r.data ?? r.result);
 
-/** Click a sidebar entry. Nav labels carry a count badge ("Accounts4"), so
- *  match on the leading label rather than the whole string. */
+/** A label with its count badge removed: "Accounts4", "All · 8". */
+const BARE = String.raw`(s) => (s || '').trim().replace(/[\s·]*\(?\d+\)?$/, '').trim()`;
+
+/** Click a sidebar entry, then the tab if one is named. Returns what was
+ *  found, so a renamed label is a failure rather than a silent no-op —
+ *  the settle text alone cannot tell "wrong tab" from "right tab". */
 async function navigate(ws, label, tab) {
-  await js(
+  const nav = await js(
     ws,
     `(() => {
+      const bare = ${BARE};
       const aside = document.querySelector('aside') || document;
       const el = [...aside.querySelectorAll('button,a,[role="button"]')]
-        .find(e => (e.textContent||'').trim().replace(/\\d+$/,'').trim() === ${JSON.stringify(label)});
+        .find(e => bare(e.textContent) === ${JSON.stringify(label)});
       if (el) el.click();
       return !!el;
     })()`,
   );
-  if (tab) {
-    await sleep(400);
-    await js(
-      ws,
-      `(() => {
-        const t = [...document.querySelectorAll('button,[role="tab"]')]
-          .find(e => (e.textContent||'').trim() === ${JSON.stringify(tab)});
-        if (t) t.click();
-        return !!t;
-      })()`,
-    );
-  }
+  if (nav !== true || !tab) return { nav: nav === true, tab: null };
+  await sleep(400);
+  const found = await js(
+    ws,
+    `(() => {
+      const bare = ${BARE};
+      const t = [...document.querySelectorAll('button,[role="tab"]')]
+        .find(e => bare(e.textContent) === ${JSON.stringify(tab)});
+      if (t) t.click();
+      return !!t;
+    })()`,
+  );
+  return { nav: true, tab: found === true };
+}
+
+/** After settling: does the view have tabs the row did not pin, and is a
+ *  pinned `role="tab"` actually the selected one? "ok" or the reason. */
+function tabState(ws, tab) {
+  return js(
+    ws,
+    `(() => {
+      const bare = ${BARE};
+      const tabs = [...document.querySelectorAll('[role="tab"]')];
+      const want = ${JSON.stringify(tab ?? null)};
+      if (!want) {
+        return tabs.length === 0
+          ? 'ok'
+          : 'this view has tabs (' + tabs.map(t => bare(t.textContent)).join(', ') + ') — pin one with tab:';
+      }
+      const t = tabs.find(e => bare(e.textContent) === want);
+      if (!t) return 'ok'; // a pane button, not a role="tab" — nothing to read
+      return t.getAttribute('aria-selected') === 'true' ? 'ok' : 'tab "' + want + '" is not the selected one';
+    })()`,
+  );
 }
 
 /** Poll until the settle text appears. Beats a fixed sleep: a slow pane
@@ -168,6 +201,36 @@ async function waitForText(ws, text, timeoutMs = 10_000) {
   return false;
 }
 
+/** Poll until the sidebar is expanded in the DOM **and** as wide as
+ *  `--sidebar-width` resolves to. The attribute alone is React state; the
+ *  rendered width is what the image will show, and the two diverged once.
+ *  Returns "ok" or a description of what was on screen instead. */
+async function waitForExpandedSidebar(ws, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = "never measured";
+  while (Date.now() < deadline) {
+    last = await js(
+      ws,
+      `(() => {
+        const aside = document.querySelector('aside');
+        if (!aside) return 'no-aside';
+        if (aside.hasAttribute('data-collapsed')) return 'collapsed';
+        const probe = document.createElement('div');
+        probe.style.cssText = 'position:absolute;visibility:hidden;width:var(--sidebar-width)';
+        document.body.appendChild(probe);
+        const want = probe.getBoundingClientRect().width;
+        probe.remove();
+        const got = aside.getBoundingClientRect().width;
+        if (!(want > 0)) return 'no --sidebar-width';
+        return Math.abs(got - want) < 1 ? 'ok' : 'width ' + got + 'px, expected ' + want + 'px';
+      })()`,
+    );
+    if (last === "ok") return last;
+    await sleep(100);
+  }
+  return last;
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function main() {
@@ -182,6 +245,25 @@ async function main() {
   // own chevron carries `aria-expanded`, so this needs no locale string).
   // A missing sidebar or toggle is a failure, not a skip: every shot
   // below would otherwise navigate nowhere and settle on the wrong pane.
+  //
+  // Transitions are switched off first. The sidebar animates its width,
+  // and a click is not a layout: one run clicked the chevron, reported
+  // "expanded", and captured all nine shots with the expanded content
+  // squeezed into a rail that had not grown — the width animation had
+  // not advanced in a window that had only just opened. A still image
+  // has no use for an animation, and without one there is no clock to
+  // stall.
+  await js(
+    ws,
+    `(() => {
+      if (document.getElementById('capture-no-transitions')) return true;
+      const s = document.createElement('style');
+      s.id = 'capture-no-transitions';
+      s.textContent = '*, *::before, *::after { transition: none !important; }';
+      document.head.appendChild(s);
+      return true;
+    })()`,
+  );
   const sidebar = await js(
     ws,
     `(() => {
@@ -198,17 +280,36 @@ async function main() {
   if (sidebar !== "expanded" && sidebar !== "already-expanded") {
     throw new Error(`could not expand the sidebar before capturing: ${sidebar}`);
   }
-  await sleep(300);
+  const layout = await waitForExpandedSidebar(ws);
+  if (layout !== "ok") {
+    throw new Error(`the sidebar did not lay out expanded: ${layout}`);
+  }
 
   let ok = 0;
   const failures = [];
   for (const shot of SHOTS) {
-    await navigate(ws, shot.nav, shot.tab);
+    const went = await navigate(ws, shot.nav, shot.tab);
+    if (!went.nav || went.tab === false) {
+      failures.push(`${shot.file}: no ${went.nav ? `tab "${shot.tab}"` : `sidebar entry "${shot.nav}"`} to click — skipped`);
+      continue;
+    }
     if (!(await waitForText(ws, shot.settle))) {
       failures.push(`${shot.file}: "${shot.settle}" never appeared — skipped, not captured blank`);
       continue;
     }
-    await sleep(350); // let transitions finish before the pixel grab
+    await sleep(350); // let late renders land before the pixel grab
+    // Checked per shot, not once: the state is what the image shows, and
+    // an assertion made before the loop says nothing about shot nine.
+    const layout = await waitForExpandedSidebar(ws);
+    if (layout !== "ok") {
+      failures.push(`${shot.file}: sidebar not expanded at capture (${layout}) — skipped`);
+      continue;
+    }
+    const tabs = await tabState(ws, shot.tab);
+    if (tabs !== "ok") {
+      failures.push(`${shot.file}: ${tabs} — skipped`);
+      continue;
+    }
     const res = await send(ws, "capture_native_screenshot", { format: "png" });
     const b64 = res.data?.image ?? res.data?.base64 ?? res.data;
     if (typeof b64 !== "string") {
@@ -224,6 +325,8 @@ async function main() {
     console.log(`  ${shot.file.padEnd(20)} ${(buf.length / 1024).toFixed(0)} KB`);
     ok++;
   }
+  // Leave the app as it was found; it is someone's running dev build.
+  await js(ws, `(() => { document.getElementById('capture-no-transitions')?.remove(); return true; })()`);
   ws.close();
 
   console.log(`\n${ok}/${SHOTS.length} captured into ${DESTS.join(" and ")}`);
