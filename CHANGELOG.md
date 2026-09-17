@@ -6,6 +6,126 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.6.5 — beta (released 2026-09-18)
+
+Mostly one theme: making the numbers and the readings true. Cost
+figures were inflated and missing three things Claude Code bills for,
+the retention pane under-counted what its timer deletes, and several
+panes read files Claude Code no longer reads. Everything here was
+re-verified against Claude Code **2.1.274**.
+
+### Fixed
+
+- **Token totals were 2–6× too high, and every cost built on them.**
+  Claude Code writes one transcript line per content block and repeats
+  the message's full `usage` on each, so summing per line charged a
+  message once per thinking block, text block and tool call. One
+  session on the reference machine recorded 16.1M output tokens
+  against 2.7M actually used. Each API message is now charged once —
+  across 21,550 usage lines, all 12,608 repeats carried usage
+  identical to their message's first line, so charging the first
+  sighting is exact rather than an approximation. **The session index
+  re-reads every transcript once on first launch** (one pass, a few
+  minutes): the stored totals cannot be corrected arithmetically,
+  because the inflation factor is per message.
+- **Three things Claude Code bills for were not priced at all.**
+  One-hour cache writes cost 2× input rather than the five-minute
+  1.25×, and they were 65% of all cache-write tokens here; web
+  searches are $0.01 per request; fast mode and US-only inference each
+  have their own rate table. Fast mode used to be a documented gap —
+  a fast Opus session was billed at half its real rate. Every one of
+  them now travels with the tokens it belongs to, so a figure
+  covering both standard and premium usage is the sum of what each was
+  actually charged.
+- **Fable 5.1 had no rates, and Sonnet 5 carried an increase that was
+  cancelled.** An unpriced model fell back to a family estimate;
+  Sonnet 5 is flat $2/$10 and was scored higher above 200K tokens.
+  Opus 4 and Sonnet 4 gained their own rows rather than inheriting a
+  successor's.
+- **Under `CLAUDE_CONFIG_DIR`, project and account state was written
+  to a file Claude Code does not read.** CC resolves its global config
+  three ways — a legacy `.config.json`, then `$CLAUDE_CONFIG_DIR`,
+  then the home sibling — and Claudepot wrote `~/.claude.json`
+  regardless. Project moves, renames, repairs and cleanup now write
+  wherever CC actually reads, including the `-custom-oauth` name a
+  custom OAuth URL selects.
+- **A project move left `autoMemoryDirectory` pointing at the old
+  path.** The rewrite updated `settings.json`, and Claude Code honours
+  that key in `settings.local.json` — the project's memory directory
+  silently stayed behind. Both files are rewritten now.
+- **Retention under-reported what its timer deletes.** `cleanupPeriodDays`
+  ages out more than thirty locations under `~/.claude`, and the pane
+  counted conversations plus a partial list. It now counts every
+  directory 2.1.274 sweeps, each in the unit CC actually deletes
+  (files for some, immediate subdirectories for others), and says
+  which ones hold only caches.
+- **Managed (enterprise) policy was read from the wrong place, so
+  Config never saw one.** Claude Code reads `managed-settings.json`,
+  its drop-in directory and `managed-mcp.json` from a system directory
+  — `/Library/Application Support/ClaudeCode`, `C:\Program
+  Files\ClaudeCode`, or `/etc/claude-code` — which `CLAUDE_CONFIG_DIR`
+  does not move. Enterprise MCP lockout is also decided by the file
+  existing, not by its contents: an empty or unreadable file locks
+  out, which is the fail-closed direction.
+- **An empty `availableModels` list read as "no restriction".** It
+  blocks every explicit model, and a managed policy can override the
+  user-level enforcement switch; both now say so where the switch is.
+- **Writing any attribution setting dropped `attribution.sessionUrl`.**
+  That key turns off the trailer and PR link on work from web and
+  Remote Control sessions, so anyone who had set it got the trailer
+  back the next time they touched this control. The `commit` and `pr`
+  keys are now changed inside the existing object.
+- **A disabled Artifact tool could still show as on.** Claude Code
+  treats `CLAUDE_CODE_DISABLE_ARTIFACT` as set when it appears in
+  settings' own `env` block, not only in the process environment;
+  Claudepot read only the latter.
+- **A session running a shell command showed as idle.** 2.1.274 added
+  a fourth status, `shell`, which CC's own session list counts as
+  working.
+- **Audio attachments leaked `[Audio #2]` into session titles** — the
+  placeholder 2.1.274 added, which neither title cleaner stripped.
+- **A scheduled headless run could stall for two minutes per tool
+  call.** Since 2.1.268 the approval hook also fires in `claude -p`
+  and SDK sessions, which have no prompt to fall back to, so with the
+  remote surface up each blocked call waited out the full 110-second
+  window in a run nobody was watching. Those sessions are now answered
+  immediately. Approving a headless run from the phone would be a new
+  capability and is deliberately not offered.
+- **Env-var safety flags were read from a source three months stale.**
+  They now come from the installed binary, which changed two rows:
+  `OTEL_LOG_ASSISTANT_RESPONSES` is pre-trust safe, and
+  `ANTHROPIC_CUSTOM_HEADERS` is safe only when its headers are benign
+  rather than unconditionally. The disclosure names the build it read.
+- **Plugin-provided settings kept keys Claude Code drops.** It reads
+  exactly `agent` and `subagentStatusLine` from a plugin's
+  `settings.json`.
+- **Words ran together in several places** — the Activities empty
+  state read "or clickReindexto backfill". Text placed directly in a
+  flex container loses the spaces at each run's edge; four surfaces
+  were affected, and a new gate covers the whole renderer.
+- **On Windows, a cross-drive repair migration failed instead of
+  copying.** The fallback recognised Unix's error number only.
+
+### Changed
+
+- **⌘R refreshes the section you are looking at.** It used to refresh
+  Accounts and Projects wherever you were.
+- **On Windows, the packaged app no longer reloads on F5 or Ctrl+R.**
+  0.6.4 removed those keys everywhere they could be cancelled from the
+  page and noted WebView2 as unverified; they are now turned off below
+  the page, where WebView2 handles them.
+- **The documentation screenshots were re-captured** against the
+  current UI.
+
+### Security
+
+- **`rmcp` moved to 2.x**, clearing three advisories against the MCP
+  memory server's transport — an unauthenticated session-table leak,
+  missing resource validation in OAuth metadata discovery, and custom
+  headers following a cross-origin redirect. The version floor now
+  matches what ships, so a regenerated lockfile cannot select an
+  affected release.
+
 ## 0.6.4 — beta (released 2026-09-17)
 
 The installed app stops behaving like a browser tab: the webview's
