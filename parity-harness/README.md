@@ -18,10 +18,11 @@ across every edge case in `dev-docs/config-section-plan.md` §8.4.
 
 For each subdirectory under `parity-harness/fixtures/`, the verifier:
 
-1. Checks `notes.md` exists and cites the CC version pinned in
-   `parity-harness/PINNED_CC_VERSION` (as `claude-code@<version>`).
-   This makes a pin bump checkable: bumping the pin without
-   re-deriving the fixtures fails the harness.
+1. Checks `notes.md` carries its provenance (§4): `Verified:
+   claude-code@<PINNED_CC_VERSION> by parity-harness/dump.ts` for every
+   fixture `dump.ts` can drive, `Hand-derived: claude-code@<version>`
+   only for one it cannot. Bumping the pin without re-running the
+   drivable fixtures fails the harness.
 2. Reads `input.json` — the source bundle (plugin_base, user, project,
    local, flag, policy×4) in the shape the harness documents.
 3. Feeds it to `effective_settings::compute_raw`.
@@ -67,54 +68,88 @@ to what CC would produce before its own outbound serialization).
 | # | What it exercises |
 |---|---|
 | `case_01_user_project_merge` | Plain precedence: project overrides user at shared key, missing keys retained from lower layer. |
-| `case_02_null_clobber` | `null` at higher precedence clobbers a populated container below. |
+| `case_02_null_clobber` | `null` at higher precedence clobbers a populated container below (neutral probe key — a schema-typed `hooks: null` is dropped by CC's validation instead). |
 | `case_03_policy_remote_over_mdm` | Policy first-source-wins: remote wins even though mdm_admin is populated; non-policy scopes keep their non-overlapping keys. |
-| `case_04_plugin_base_agent` | `plugin_base.agent` visible under user `theme`; project overrides `agent.model` via deep merge, retains plugin's `agent.tools`. |
-| `case_05_local_over_project` | Local layer overrides project and user at shared keys. |
-| `case_06_flag_over_local` | Flag layer overrides local; non-overlapping local key retained. |
+| `case_04_plugin_base_agent` | Plugin base (`agent`, `subagentStatusLine` — the only keys CC keeps from a plugin) sits below every file layer; project overrides `agent`, the plugin's `subagentStatusLine` survives. |
+| `case_05_local_over_project` | Local layer overrides project and user at shared keys (real theme names). |
+| `case_06_flag_over_local` | Flag layer overrides local; non-overlapping local key retained (real theme names). |
 | `case_07_array_concat_dedupe` | Same array-of-primitives key in user+project: concat lower-then-upper, value-dedupe, first occurrence keeps position. |
 | `case_08_hooks_concat_order` | Arrays of objects (hook entries) across layers: order preserved, equal-content duplicates kept (objects never deduped). |
 | `case_09_policy_managed_file_winner` | Policy fallthrough reaches managed-file composite; populated HKCU below never consulted. |
 | `case_10_policy_hkcu_winner` | HKCU wins when all higher policy origins are absent; still overrides non-policy layers. |
 | `case_11_policy_empty_remote_skipped` | Present-but-empty (`{}`) remote source skipped without error; populated mdm_admin wins. |
-| `case_12_scalar_clobber_empty_object_noop` | Higher scalar clobbers lower object wholesale; higher empty object is a no-op. |
+| `case_12_scalar_clobber_empty_object_noop` | Higher scalar clobbers lower object wholesale; higher empty object is a no-op (neutral probe keys). |
 
-## 4. Version pinning and the adapter gap
+## 4. Version pinning and the adapter
 
-`parity-harness/PINNED_CC_VERSION` records — in one machine-readable
-place — which CC version every `expected.json` was hand-derived from.
-The verifier requires each fixture's `notes.md` to cite
-`claude-code@<that version>`, so the pin can't drift away from the
-goldens silently. **Bumping the pin means re-walking every fixture
-against the new CC source and updating its notes.md.** Re-pin cadence:
-treat a CC minor-version jump or a quarter — whichever comes first —
-as the trigger to diff `utils/settings/settings.ts` between pinned and
-current and re-derive anything that moved.
+`parity-harness/PINNED_CC_VERSION` records the Claude Code version the
+machine-verified fixtures were last checked against. Every `notes.md`
+carries one provenance line, and `cargo xtask verify-cc-parity` enforces
+which kind:
 
-### 4.0 Decision (2026-08-18, re-checked 2026-08-28): the pin stays at 2.1.88
+| Line | Allowed when |
+|---|---|
+| `Verified: claude-code@<pin> by parity-harness/dump.ts` | always — and required for every fixture `dump.ts` can drive |
+| `Hand-derived: claude-code@<version>` | only when the fixture has a populated policy layer `dump.ts` cannot install |
 
-**Re-checked against the installed 2.1.250 binary on 2026-08-28, when a
-re-pin was explicitly requested.** The adapter gap is still shut, so the
-answer is unchanged and the request could not be honoured:
+So moving the pin still forces the work it always did: every drivable
+fixture fails until it has been re-run against the new build.
 
-- `claude --help` still has no `--dump-settings` /
-  `--dump-effective-settings` / `--print-settings` flag — zero matches
-  for `dump`, `effective`, `print-settings` or `show-settings`;
-- `strings` over the binary finds no `--dump*` surface at all;
-- `loadSettingsFromDisk` and `mergedSettings` *do* appear, but
-  `mergedSettings` is a **private class field** (`this.mergedSettings`)
-  on a minified settings-cache class — not an exported API, not a CLI
-  verb, and not reachable over the SDK control protocol;
-- the only `*[Ss]ettings"` method name in the bundle is
-  `getArtilleryComputerSettings`, which is unrelated.
+### 4.0 The adapter gap is open (2026-09-17)
 
-So re-deriving the twelve `expected.json` files against 2.1.250 remains
-impossible with current tooling, and bumping `PINNED_CC_VERSION` would
-mean editing twelve `notes.md` files to cite `claude-code@2.1.250` for a
-derivation that never happened — after which CI would enforce the lie on
-every future run. **A re-pin is not a decision waiting on authorization;
-it is blocked.** Reopen when the adapter gap opens, not on request and
-not on a calendar.
+CC answers the SDK control request `{ "subtype": "get_settings" }` with
+`effective` — its own merge — plus the raw per-source layers and any
+validation errors. It needs no credentials and no model call.
+`parity-harness/dump.ts` builds each fixture in a sandbox and asks:
+
+```bash
+bun parity-harness/dump.ts --check            # every fixture
+bun parity-harness/dump.ts <fixture-dir>      # print CC's merge for one
+```
+
+It is on-demand, not a CI gate — CI has no Claude Code installed, and
+pinning one there would make a green run depend on a moving download.
+The watchlist row "settings merge precedence" is where it runs.
+
+**First run, against 2.1.274: 8 of 8 drivable fixtures match**, after
+five were rewritten. None of the five had found a precedence change;
+each had been written with values the current schema rejects, and CC
+validates before it merges:
+
+| Fixture | What CC 2.1.274 did with the old input |
+|---|---|
+| `case_02` | kept the user's `hooks` under a project `"hooks": null` — the invalid `null` is dropped, it does not clobber |
+| `case_04` | rejected `agent` as an object (it is a string now), and keeps only `agent` / `subagentStatusLine` from a plugin |
+| `case_05`, `case_06` | dropped `"local-theme"` / `"flag-theme"` silently, leaving the lower valid theme |
+| `case_12` | skipped the whole project file, because `sandbox: "disabled"` and `statusLine: {}` failed validation |
+
+The rules those fixtures state still hold and are now tested with real
+theme names or neutral probe keys (`xParity…`), which reach the merge as
+written.
+
+The four policy fixtures stay **hand-derived at 2.1.88**: the managed
+file lives at a fixed system path (CC's override hook is compiled out),
+and remote, MDM and HKCU need an org, a profile or Windows. What was
+re-checked for them is only the top-level source order, which the
+2.1.274 binary still lists as
+`["userSettings","projectSettings","localSettings","flagSettings","policySettings"]`.
+
+**Known uncovered surface.** Claudepot's merge does not model CC's
+validation step, so a schema-invalid value renders in Claudepot's
+effective view where CC would drop it (or skip its whole file).
+`--setting-sources` disabling a source, and managed settings merging
+`env` per key, are also unmodelled — both new surface, tracked in
+`crates/xtask/cc-upstream-watch.md`.
+
+### 4.0.0 The decision this replaced (2026-08-18, re-checked 2026-08-28)
+
+Until 2026-09-17 the pin stayed at 2.1.88 because no way existed to ask
+CC for its merge: no `--dump-settings` flag, a minified bundle, and
+`mergedSettings` a private class field. Bumping the pin would have meant
+editing twelve `notes.md` files to claim a derivation that never
+happened, which CI would then have enforced. The record of that
+reasoning follows, unchanged, because it is why the policy fixtures are
+still hand-derived.
 
 ### 4.0.1 The original decision (2026-08-18): freeze, with evidence
 
@@ -193,12 +228,7 @@ the exact function + line refs recorded per fixture in `notes.md`.
 The Rust `effective_settings::compute` is tested against those
 goldens.
 
-When a real adapter lands, `parity-harness/dump.ts` takes over:
-
-```bash
-# regenerate expected.json for a single fixture (FUTURE — stub today)
-bun parity-harness/dump.ts parity-harness/fixtures/case_01_user_project_merge
-```
+That adapter landed as `parity-harness/dump.ts` — see §4.0.
 
 Until then `dump.ts` prints the contract and exits 1, and the
 verifier ignores `CLAUDE_SRC` (it warns if you set it — no code

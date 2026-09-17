@@ -101,14 +101,15 @@ fn verify_cc_parity(args: &[String]) -> Result<()> {
         }
     }
 
-    // A CC-side adapter that regenerates expected.json from a live CC
-    // tree does not exist yet (parity-harness/README.md §4). Say so
+    // The adapter is `parity-harness/dump.ts`, which drives an installed
+    // Claude Code over its control protocol; it is not a source-tree
+    // shim, so a CLAUDE_SRC checkout has nothing to do with it. Say so
     // instead of silently ignoring the variable.
     if std::env::var_os("CLAUDE_SRC").is_some() {
         eprintln!(
-            "warning: CLAUDE_SRC is set, but the CC-side adapter is not \
-             implemented — the variable is ignored and goldens stay \
-             hand-pinned. See parity-harness/README.md §4."
+            "warning: CLAUDE_SRC is set, but nothing reads it — fixtures are \
+             verified against an installed Claude Code with \
+             `bun parity-harness/dump.ts --check`. See parity-harness/README.md §4."
         );
     }
 
@@ -195,12 +196,12 @@ fn run_fixture(fixture: &Path, pinned_cc_version: &str) -> Result<()> {
     use claudepot_core::config_view::effective_settings;
     use claudepot_core::config_view::policy::PolicySource;
 
-    check_fixture_notes(fixture, pinned_cc_version)?;
-
     let input_path = fixture.join("input.json");
     let expected_path = fixture.join("expected.json");
     let input = read_json(&input_path)?;
     let expected = read_json(&expected_path)?;
+
+    check_fixture_notes(fixture, pinned_cc_version, &input)?;
 
     let bundle = parse_input(&input)?;
     let input_struct = effective_settings::EffectiveSettingsInput {
@@ -256,30 +257,76 @@ fn run_fixture(fixture: &Path, pinned_cc_version: &str) -> Result<()> {
 /// `claude-code@<version>`. This makes a pin bump checkable: bumping
 /// `parity-harness/PINNED_CC_VERSION` without re-deriving the fixtures
 /// fails the harness instead of silently passing against stale goldens.
-fn check_fixture_notes(fixture: &Path, pinned_cc_version: &str) -> Result<()> {
+fn check_fixture_notes(
+    fixture: &Path,
+    pinned_cc_version: &str,
+    input: &serde_json::Value,
+) -> Result<()> {
     let notes_path = fixture.join("notes.md");
     let notes = std::fs::read_to_string(&notes_path).with_context(|| {
         format!(
-            "read {} — every fixture must ship a notes.md citing the CC \
-             source (file + lines + version) its expected.json was derived \
-             from. See parity-harness/README.md §2.",
+            "read {} — every fixture must ship a notes.md recording how its \
+             expected.json was established. See parity-harness/README.md §2.",
             notes_path.display()
         )
     })?;
-    let want = format!("claude-code@{pinned_cc_version}");
-    if !notes.contains(&want) {
-        bail!(
-            "{} does not cite {want} (the version in \
-             parity-harness/PINNED_CC_VERSION). If the pin moved, re-derive \
-             expected.json against the new CC source and update notes.md.",
-            notes_path.display()
-        );
+    if let Some(problem) =
+        notes_provenance_problem(&notes, pinned_cc_version, fixture_is_drivable(input))
+    {
+        bail!("{}: {problem}", notes_path.display());
     }
     Ok(())
 }
 
-/// Read `parity-harness/PINNED_CC_VERSION` — the single machine-readable
-/// record of which CC version the goldens were hand-derived from.
+/// `dump.ts` can install every layer except the policy ones.
+fn fixture_is_drivable(input: &serde_json::Value) -> bool {
+    input
+        .get("policy")
+        .and_then(|p| p.as_array())
+        .is_none_or(|entries| {
+            entries
+                .iter()
+                .all(|e| e.get("value").is_none_or(|v| v.is_null()))
+        })
+}
+
+/// Every fixture carries exactly one kind of provenance.
+///
+/// A fixture `parity-harness/dump.ts` can drive must say it was verified by
+/// running the pinned Claude Code — so moving the pin forces every such
+/// fixture to be re-run, exactly as the single hand-derived pin used to.
+/// Only a fixture dump.ts cannot drive may rest on a hand derivation; a
+/// drivable one that claims it would be excusing itself from the check.
+fn notes_provenance_problem(notes: &str, pinned: &str, drivable: bool) -> Option<String> {
+    let verified = format!("Verified: claude-code@{pinned} by parity-harness/dump.ts");
+    if notes.contains(&verified) {
+        return None;
+    }
+    if let Some(at) = notes.find("Verified: claude-code@") {
+        let rest = &notes[at + "Verified: claude-code@".len()..];
+        let stale = rest.split_whitespace().next().unwrap_or("");
+        return Some(format!(
+            "was verified against {stale}, but the pin is {pinned} — run \
+             `bun parity-harness/dump.ts --check` against {pinned} and update the line"
+        ));
+    }
+    if notes.contains("Hand-derived: claude-code@") {
+        return drivable.then(|| {
+            format!(
+                "claims a hand derivation, but dump.ts can drive this fixture — run \
+                 `bun parity-harness/dump.ts --check` and record `{verified}`"
+            )
+        });
+    }
+    Some(format!(
+        "records no provenance. Expected `{verified}` (after running \
+         `bun parity-harness/dump.ts --check`), or `Hand-derived: claude-code@<version>` \
+         for a fixture whose policy layers dump.ts cannot install"
+    ))
+}
+
+/// Read `parity-harness/PINNED_CC_VERSION` — the Claude Code version the
+/// machine-verified fixtures were last checked against by `dump.ts`.
 fn read_pinned_cc_version(repo_root: &Path) -> Result<String> {
     let p = repo_root.join("parity-harness").join("PINNED_CC_VERSION");
     let s = std::fs::read_to_string(&p).with_context(|| {
@@ -448,4 +495,57 @@ fn workspace_root() -> Result<PathBuf> {
         .and_then(|p| p.parent())
         .ok_or_else(|| anyhow!("xtask manifest path had no grandparent"))?
         .to_path_buf())
+}
+
+#[cfg(test)]
+mod parity_provenance_tests {
+    use super::*;
+    use serde_json::json;
+
+    const PIN: &str = "2.1.274";
+
+    fn policy(values: &[serde_json::Value]) -> serde_json::Value {
+        json!({ "policy": values.iter().map(|v| json!({"origin": "remote", "value": v})).collect::<Vec<_>>() })
+    }
+
+    #[test]
+    fn a_fixture_verified_against_the_pin_passes() {
+        let notes = "Verified: claude-code@2.1.274 by parity-harness/dump.ts (2026-09-17).";
+        assert_eq!(notes_provenance_problem(notes, PIN, true), None);
+    }
+
+    #[test]
+    fn a_verification_against_an_older_pin_is_stale() {
+        // Moving the pin must force every drivable fixture to be re-run.
+        let notes = "Verified: claude-code@2.1.250 by parity-harness/dump.ts.";
+        let problem = notes_provenance_problem(notes, PIN, true).unwrap();
+        assert!(problem.contains("verified against 2.1.250"), "{problem}");
+        assert!(problem.contains("the pin is 2.1.274"), "{problem}");
+    }
+
+    #[test]
+    fn a_hand_derivation_is_accepted_only_where_dump_cannot_reach() {
+        let notes = "Hand-derived: claude-code@2.1.88.";
+        assert_eq!(notes_provenance_problem(notes, PIN, false), None);
+        let problem = notes_provenance_problem(notes, PIN, true).unwrap();
+        assert!(problem.contains("dump.ts can drive"), "{problem}");
+    }
+
+    #[test]
+    fn notes_without_provenance_are_refused() {
+        let problem = notes_provenance_problem("Derived by reading.", PIN, true).unwrap();
+        assert!(problem.contains("records no provenance"), "{problem}");
+    }
+
+    #[test]
+    fn only_a_populated_policy_layer_makes_a_fixture_undrivable() {
+        assert!(fixture_is_drivable(&policy(&[json!(null), json!(null)])));
+        assert!(fixture_is_drivable(&json!({})));
+        assert!(!fixture_is_drivable(&policy(&[
+            json!(null),
+            json!({"a": 1})
+        ])));
+        // An empty object is still a layer someone has to install.
+        assert!(!fixture_is_drivable(&policy(&[json!({})])));
+    }
 }

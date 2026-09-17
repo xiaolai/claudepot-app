@@ -1,26 +1,16 @@
 # case_05_local_over_project
 
-The local layer (`settings.local.json`) overrides both project and
-user at shared keys. First end-to-end coverage of the `local` slot —
-the four original fixtures all set `"local": null`.
+The local layer overrides project and user at shared keys.
 
-Derived from claude-code@2.1.88 source:
+Verified: claude-code@2.1.274 by parity-harness/dump.ts (2026-09-17).
 
-- `localSettings` comes after `projectSettings` and `userSettings` in
-  `SETTING_SOURCES` (`src/utils/settings/constants.ts:7-21`, "Order
-  matters - later sources override earlier ones"); the default
-  enablement order is `src/bootstrap/state.ts:313-319`.
-- Each file source is parsed and merged in loop order in
-  `loadSettingsFromDisk` (`src/utils/settings/settings.ts:674`,
-  `:741-765`), so local's `mergeWith` call runs last of the three and
-  its scalars overwrite (`settingsMergeCustomizer`,
-  `settings.ts:538-547`, returns `undefined` for non-arrays → lodash
-  default assignment).
-
-Expected values:
+The themes are real theme names. The previous inputs (`"local-theme"`,
+…) are not valid values, and on 2.1.274 Claude Code drops an invalid
+`theme` silently — no validation error — leaving the lower valid value
+in place, so the fixture was testing the schema.
 
 | key | winner | why |
 |---|---|---|
-| `theme` | local (`"local-theme"`) | defined in all three; local merges last |
-| `editor` | user (`"vim"`) | only user defines it — retained |
-| `model` | local (`"sonnet"`) | local overrides project |
+| `theme` | local (`"dark-daltonized"`) | local is above project and user |
+| `model` | local (`"sonnet"`) | local is above project |
+| `editor` | user (`"vim"`) | only user defines it |

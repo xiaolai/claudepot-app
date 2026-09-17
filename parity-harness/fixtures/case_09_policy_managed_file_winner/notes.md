@@ -4,7 +4,11 @@ Policy fallthrough reaches the managed-file composite: remote and MDM
 are absent, so `managed-settings.json` (+ drop-ins) wins, and the
 lower-priority HKCU source is never consulted even though populated.
 
-Derived from claude-code@2.1.88 source:
+Hand-derived: claude-code@2.1.88. `parity-harness/dump.ts` cannot drive
+this fixture — its policy layers need root, an org, an MDM profile or
+Windows — so it has not been re-verified against a current build.
+
+Derived from the 2.1.88 source:
 
 - Policy block: `src/utils/settings/settings.ts:677-737`. The
   managed-file branch (`settings.ts:705-712`) runs only when remote

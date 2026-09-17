@@ -1,4 +1,8 @@
 {
-  "agent": {"model": "sonnet", "tools": ["Bash"]},
+  "agent": "project-agent",
+  "subagentStatusLine": {
+    "type": "command",
+    "command": "plugin-status.sh"
+  },
   "theme": "dark"
 }

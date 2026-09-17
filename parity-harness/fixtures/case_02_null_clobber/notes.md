@@ -1,21 +1,19 @@
 # case_02_null_clobber
 
-`null` at higher precedence clobbers a populated container below.
+`null` at a higher layer clobbers a populated container below it.
 
-Derived from claude-code@2.1.88 source:
+Verified: claude-code@2.1.274 by parity-harness/dump.ts (2026-09-17).
 
-- `settingsMergeCustomizer` (`src/utils/settings/settings.ts:538-547`)
-  only special-cases array-on-array; for `hooks: null` over
-  `hooks: {…}` it returns `undefined`, so lodash `mergeWith` default
-  applies. lodash skips only `undefined` source values — `null` is
-  assigned, replacing the destination object wholesale.
-- Empirically verified against CC's own dependency: `lodash-es`
-  `mergeWith` from the 2.1.88 tree with the verbatim customizer gives
-  `mergeWith({a:{x:1}}, {a:null}, customizer)` → `{a:null}`.
-
-Expected values:
+The key is a neutral probe (`xParityContainer`) on purpose. Claude Code
+validates schema-typed keys before merging, and on 2.1.274 a
+`"hooks": null` in project settings does **not** clobber the user's
+hooks — the invalid `null` is dropped during validation, so the case
+this fixture used to state with `hooks` now tests the schema rather than
+the merge. An untyped key reaches the merge as written. Claudepot's
+merge does not model that validation step; see the README's known
+uncovered surface.
 
 | key | winner | why |
 |---|---|---|
-| `hooks` | project (`null`) | null clobbers the user's hooks object |
-| `theme` | user (`"dark"`) | absent in project — retained |
+| `xParityContainer` | project (`null`) | a later `null` replaces the whole container |
+| `theme` | user (`"dark"`) | absent above — retained |

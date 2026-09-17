@@ -1,25 +1,12 @@
 # case_06_flag_over_local
 
-The flag layer (`--settings` file / SDK inline settings) overrides
-local at shared keys. First end-to-end coverage of the `flag` slot —
-the four original fixtures all set `"flag": null`.
+The `--settings` flag layer overrides local; local's other keys stay.
 
-Derived from claude-code@2.1.88 source:
+Verified: claude-code@2.1.274 by parity-harness/dump.ts (2026-09-17).
 
-- `flagSettings` comes after `localSettings` (and before
-  `policySettings`) in `SETTING_SOURCES`
-  (`src/utils/settings/constants.ts:7-21`); default enablement order
-  `src/bootstrap/state.ts:313-319`.
-- The flag source merges in the same loop as the file sources: a
-  `--settings <file>` path goes through `settings.ts:741-765`, and
-  SDK inline settings merge at `settings.ts:771-781` — both at the
-  flagSettings position, after local.
-- Scalar conflict resolved by lodash default assignment
-  (`settingsMergeCustomizer`, `settings.ts:538-547`).
-
-Expected values:
+Real theme names, for the reason given in case_05.
 
 | key | winner | why |
 |---|---|---|
-| `theme` | flag (`"flag-theme"`) | flag merges after project and local |
+| `theme` | flag (`"light-daltonized"`) | flag is above local |
 | `verbose` | local (`true`) | absent in flag — retained |

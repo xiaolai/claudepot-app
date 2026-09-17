@@ -1,25 +1,21 @@
 # case_04_plugin_base_agent
 
-Plugin settings are the lowest-precedence base; a project layer
-deep-merges over them, overriding one nested key while retaining the
-plugin's siblings.
+Plugin settings are the lowest-precedence base, below every file layer.
 
-Derived from claude-code@2.1.88 source:
+Verified: claude-code@2.1.274 by parity-harness/dump.ts (2026-09-17).
 
-- Plugin settings merged first, before the source loop:
-  `src/utils/settings/settings.ts:659-667` (`getPluginSettingsBase()`
-  merged into the empty accumulator with `settingsMergeCustomizer` —
-  "Start with plugin settings as the lowest priority base").
-- Project deep merge: `settingsMergeCustomizer`
-  (`settings.ts:538-547`) returns `undefined` for object-on-object,
-  so lodash `mergeWith` recurses: `agent.model` is overwritten by
-  project, `agent.tools` (absent in project) is retained from the
-  plugin base.
-
-Expected values:
+A plugin's `settings.json` is cut down to an allowlist before it joins
+the merge. On 2.1.274 that allowlist is `["agent", "subagentStatusLine"]`
+(`SE().pick(…).strip()` over `rWe` in the plugin loader) — anything else
+a plugin ships, `theme` included, is dropped. `agent` is a string in the
+current schema, so the old version of this fixture, which gave it an
+object and deep-merged into it, was rejected outright. The fixture's
+`plugin_base` is the layer *after* that cut, which is what
+`effective_settings::compute_raw` takes; the cut itself is tested in
+`config_view::plugin_base`.
 
 | key | winner | why |
 |---|---|---|
-| `agent.model` | project (`"sonnet"`) | deep merge, later overwrites |
-| `agent.tools` | plugin base (`["Bash"]`) | absent above — retained |
+| `agent` | project (`"project-agent"`) | a file layer overrides the plugin base |
+| `subagentStatusLine` | plugin base | nothing above sets it |
 | `theme` | user (`"dark"`) | only user defines it |

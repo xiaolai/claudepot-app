@@ -3,7 +3,10 @@
 Plain precedence: project overrides user at a shared scalar key;
 keys missing from the higher layer are retained from the lower.
 
-Derived from claude-code@2.1.88 source:
+Verified: claude-code@2.1.274 by parity-harness/dump.ts (2026-09-17). The derivation below is the original
+reading of the 2.1.88 source; the result still holds.
+
+Originally derived from the 2.1.88 source:
 
 - Source order (user before project, later overrides earlier):
   `src/utils/settings/constants.ts:7-21` (`SETTING_SOURCES`, "Order

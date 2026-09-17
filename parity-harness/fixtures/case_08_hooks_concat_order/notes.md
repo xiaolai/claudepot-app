@@ -11,7 +11,10 @@ parses are never identical. The fixture locks both properties: object
 no-dedupe AND concat order (all user entries before all project
 entries).
 
-Derived from claude-code@2.1.88 source:
+Verified: claude-code@2.1.274 by parity-harness/dump.ts (2026-09-17). The derivation below is the original
+reading of the 2.1.88 source; the result still holds.
+
+Originally derived from the 2.1.88 source:
 
 - Array-on-array → `mergeArrays`
   (`src/utils/settings/settings.ts:529-531`):

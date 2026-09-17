@@ -5,7 +5,11 @@ first-source-wins — fallthrough continues to the populated MDM
 source. Distinguishes "present but empty" from "missing": both fall
 through, neither errors.
 
-Derived from claude-code@2.1.88 source:
+Hand-derived: claude-code@2.1.88. `parity-harness/dump.ts` cannot drive
+this fixture — its policy layers need root, an org, an MDM profile or
+Windows — so it has not been re-verified against a current build.
+
+Derived from the 2.1.88 source:
 
 - Remote gate: `src/utils/settings/settings.ts:683` —
   `if (remoteSettings && Object.keys(remoteSettings).length > 0)`.

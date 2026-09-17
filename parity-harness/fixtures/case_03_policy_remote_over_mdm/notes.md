@@ -4,7 +4,11 @@ Policy first-source-wins: a populated remote source wins and the MDM
 source is never consulted; the winning policy object merges at the
 highest precedence over the file-based layers.
 
-Derived from claude-code@2.1.88 source:
+Hand-derived: claude-code@2.1.88. `parity-harness/dump.ts` cannot drive
+this fixture — its policy layers need root, an org, an MDM profile or
+Windows — so it has not been re-verified against a current build.
+
+Derived from the 2.1.88 source:
 
 - Policy block in `loadSettingsFromDisk`:
   `src/utils/settings/settings.ts:677-737`. Remote is checked first
