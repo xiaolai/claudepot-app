@@ -225,6 +225,7 @@ export function ProjectDetail({
         r.models,
         r.tokens,
         sessionEventMs(r.last_ts, r.last_modified_ms),
+        r.premium,
       );
       map.set(r.session_id, c);
       if (c != null) {

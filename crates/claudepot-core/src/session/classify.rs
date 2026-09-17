@@ -363,6 +363,7 @@ mod tests {
     #[test]
     fn tool_use_and_result_are_ai() {
         let use_ev = SessionEvent::AssistantToolUse {
+            usage: None,
             ts: None,
             uuid: None,
             model: None,

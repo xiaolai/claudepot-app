@@ -161,6 +161,7 @@ impl PriceTable {
                         output_per_mtok: r.output_per_mtok * factor,
                         cache_write_per_mtok: r.cache_write_per_mtok * factor,
                         cache_read_per_mtok: r.cache_read_per_mtok * factor,
+                        cache_write_1h_per_mtok: r.cache_write_1h_per_mtok * factor,
                     },
                 )
             })
@@ -258,6 +259,7 @@ mod tests {
         models.insert(
             "claude-fake-1".to_string(),
             ModelRates {
+                cache_write_1h_per_mtok: 20.0,
                 input_per_mtok: 10.0,
                 output_per_mtok: 20.0,
                 cache_write_per_mtok: 12.5,
@@ -276,6 +278,7 @@ mod tests {
         // even while real tiers stay at parity.
         let factor = 1.25;
         let scaled = ModelRates {
+            cache_write_1h_per_mtok: (10.0 * factor) * 2.0,
             input_per_mtok: 10.0 * factor,
             output_per_mtok: 20.0 * factor,
             cache_write_per_mtok: 12.5 * factor,

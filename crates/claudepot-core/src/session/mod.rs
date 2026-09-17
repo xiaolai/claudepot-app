@@ -50,6 +50,7 @@ pub mod slim;
 pub mod subagents;
 pub mod title;
 pub mod tool_link;
+pub mod usage;
 pub mod worktree;
 
 // The core module *is* the noun's shared model; re-export it flat so

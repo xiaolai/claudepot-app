@@ -379,6 +379,7 @@ mod tests {
             models.insert(
                 "claude-opus-5".to_string(),
                 super::super::ModelRates {
+                    cache_write_1h_per_mtok: 14.0,
                     input_per_mtok: 7.0,
                     output_per_mtok: 35.0,
                     cache_write_per_mtok: 8.75,

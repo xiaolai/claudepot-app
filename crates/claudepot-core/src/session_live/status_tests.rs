@@ -102,6 +102,7 @@ fn unmatched_tool_use_keeps_busy_even_after_text_close() {
         stop_reason: Some("tool_use".into()),
     });
     m.ingest(&SessionEvent::AssistantToolUse {
+        usage: None,
         ts: ts(10, 0, 2),
         uuid: None,
         model: Some("claude-opus-4-7".into()),
@@ -117,6 +118,7 @@ fn unmatched_tool_use_keeps_busy_even_after_text_close() {
 fn tool_result_closes_open_tool() {
     let mut m = machine();
     m.ingest(&SessionEvent::AssistantToolUse {
+        usage: None,
         ts: ts(10, 0, 1),
         uuid: None,
         model: None,
@@ -152,6 +154,7 @@ fn tool_result_closes_open_tool() {
 fn system_turn_duration_alone_does_not_clear_open_tool() {
     let mut m = machine();
     m.ingest(&SessionEvent::AssistantToolUse {
+        usage: None,
         ts: ts(10, 0, 1),
         uuid: None,
         model: None,
@@ -219,6 +222,7 @@ fn stuck_overlay_triggers_on_ancient_open_tool() {
     let mut m = machine();
     // Tool started at 09:40 — 20 minutes before frozen now.
     m.ingest(&SessionEvent::AssistantToolUse {
+        usage: None,
         ts: ts(9, 40, 0),
         uuid: None,
         model: None,
@@ -236,6 +240,7 @@ fn stuck_overlay_triggers_on_ancient_open_tool() {
 fn stuck_does_not_trigger_on_young_tool() {
     let mut m = machine();
     m.ingest(&SessionEvent::AssistantToolUse {
+        usage: None,
         ts: ts(10, 0, 10),
         uuid: None,
         model: None,
@@ -253,6 +258,7 @@ fn stuck_does_not_trigger_on_young_tool() {
 fn current_action_is_oldest_open_tool() {
     let mut m = machine();
     m.ingest(&SessionEvent::AssistantToolUse {
+        usage: None,
         ts: ts(10, 0, 10),
         uuid: None,
         model: None,
@@ -262,6 +268,7 @@ fn current_action_is_oldest_open_tool() {
         input_full: "pnpm test".into(),
     });
     m.ingest(&SessionEvent::AssistantToolUse {
+        usage: None,
         ts: ts(10, 0, 11),
         uuid: None,
         model: None,
@@ -283,6 +290,7 @@ fn current_action_truncates_long_args() {
     // verbatim and the truncator has to step in.
     let long = "a".repeat(200);
     m.ingest(&SessionEvent::AssistantToolUse {
+        usage: None,
         ts: ts(10, 0, 10),
         uuid: None,
         model: None,
@@ -368,6 +376,7 @@ fn current_action_redacts_leaked_keys() {
     // only used for bare sk-ant-... tokens not wrapped in a header).
     let mut m = machine();
     m.ingest(&SessionEvent::AssistantToolUse {
+        usage: None,
         ts: ts(10, 0, 10),
         uuid: None,
         model: None,
@@ -399,6 +408,7 @@ fn current_action_redacts_bare_sk_ant_token() {
     // classic sk-ant-*** shape still works for bare tokens.
     let mut m = machine();
     m.ingest(&SessionEvent::AssistantToolUse {
+        usage: None,
         ts: ts(10, 0, 10),
         uuid: None,
         model: None,
@@ -471,6 +481,7 @@ fn fallback_waiting_on_permission_mode_event() {
     // must return Waiting in that case instead of inventing Idle.
     let mut m = machine();
     m.ingest(&SessionEvent::AssistantToolUse {
+        usage: None,
         ts: ts(10, 0, 1),
         uuid: None,
         model: None,
@@ -502,6 +513,7 @@ fn fallback_waiting_on_permission_mode_event() {
 fn pid_waiting_overrides_derived_busy() {
     let mut m = machine();
     m.ingest(&SessionEvent::AssistantToolUse {
+        usage: None,
         ts: ts(10, 0, 10),
         uuid: None,
         model: None,

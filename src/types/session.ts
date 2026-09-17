@@ -59,9 +59,34 @@ export interface DiscardReport {
 export interface TokenUsage {
   input: number;
   output: number;
+  /** Every cache write, five-minute and one-hour together. */
   cache_creation: number;
   cache_read: number;
+  /** Of `cache_creation`, the one-hour writes. */
+  cache_creation_1h?: number;
+  web_search_requests?: number;
   total: number;
+}
+
+/** A token count with every field optional — a premium bucket. */
+export interface TokenCounts {
+  input?: number;
+  output?: number;
+  cache_creation?: number;
+  cache_read?: number;
+  cache_creation_1h?: number;
+  web_search_requests?: number;
+}
+
+/** The part of a token total billed above the standard rate. Each
+ *  bucket is a subset of that total. Mirrors
+ *  `claudepot_core::session::PremiumUsage`. */
+export interface PremiumUsage {
+  /** `speed: "fast"`. */
+  fast?: TokenCounts;
+  /** `inference_geo: "us"`. */
+  us?: TokenCounts;
+  fast_us?: TokenCounts;
 }
 
 /**
@@ -89,6 +114,8 @@ export interface SessionRow {
   first_user_prompt: string | null;
   models: string[];
   tokens: TokenUsage;
+  /** Absent when every token was billed at the standard rate. */
+  premium?: PremiumUsage;
   git_branch: string | null;
   cc_version: string | null;
   /** CC's internal display slug (e.g. "brave-otter-88"). */
@@ -127,6 +154,8 @@ export type SessionEvent =
       ts: string | null;
       uuid: string | null;
       model: string | null;
+      /** The message's usage, when this call is where it rides. */
+      usage?: TokenUsage;
       tool_name: string;
       tool_use_id: string;
       /** Trimmed, newline-collapsed, 240-char cap. Use for display. */

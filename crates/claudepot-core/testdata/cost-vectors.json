@@ -1,0 +1,112 @@
+{
+  "comment": [
+    "Cross-language contract for pricing a token total.",
+    "",
+    "rate-resolution-vectors.json pins which rate a model resolves to;",
+    "these pin what a usage costs at it: one-hour cache writes, fast",
+    "mode, US-only inference, and web searches, the way Claude Code's own",
+    "cost function (2.1.274) combines them.",
+    "",
+    "Both sides run these vectors against the bundled book:",
+    "  - crates/claudepot-core/src/pricing/book.rs :: shared_cost_vectors_match",
+    "  - src/costs.test.ts :: 'shared cost vectors'",
+    "",
+    "usage: a token total. premium: the parts of it billed above the",
+    "standard rate (fast, us, fast_us), each a subset of usage. Absent",
+    "fields are zero. usd is computed by hand in the vector's name."
+  ],
+  "vectors": [
+    {
+      "name": "Opus 5 standard: $5 in + $25 out + $0.50 read + 0.6M x $6.25 + 0.4M x $10 writes",
+      "model": "claude-opus-5",
+      "on": [2026, 7, 25],
+      "usage": {"input": 1000000, "output": 1000000, "cache_read": 1000000, "cache_creation": 1000000, "cache_creation_1h": 400000},
+      "usd": 38.25
+    },
+    {
+      "name": "Fable 5.1 one-hour writes only: 1M x $20",
+      "model": "claude-fable-5-1",
+      "on": [2026, 9, 17],
+      "usage": {"cache_creation": 1000000, "cache_creation_1h": 1000000},
+      "usd": 20.0
+    },
+    {
+      "name": "a one-hour count above the write total is capped at it: 1M x $10",
+      "model": "claude-opus-5",
+      "on": [2026, 9, 17],
+      "usage": {"cache_creation": 1000000, "cache_creation_1h": 5000000},
+      "usd": 10.0
+    },
+    {
+      "name": "web searches bill $0.01 each",
+      "model": "claude-opus-5",
+      "on": [2026, 9, 17],
+      "usage": {"web_search_requests": 3},
+      "usd": 0.03
+    },
+    {
+      "name": "Opus 5 fast: 1M out x $50",
+      "model": "claude-opus-5",
+      "on": [2026, 9, 17],
+      "usage": {"output": 1000000},
+      "premium": {"fast": {"output": 1000000}},
+      "usd": 50.0
+    },
+    {
+      "name": "Opus 4.6 fast: 1M out x $150",
+      "model": "claude-opus-4-6",
+      "on": [2026, 9, 17],
+      "usage": {"output": 1000000},
+      "premium": {"fast": {"output": 1000000}},
+      "usd": 150.0
+    },
+    {
+      "name": "a model with no fast table bills fast tokens at its standard rate: Sonnet 5 1M out x $10",
+      "model": "claude-sonnet-5",
+      "on": [2026, 9, 17],
+      "usage": {"output": 1000000},
+      "premium": {"fast": {"output": 1000000}},
+      "usd": 10.0
+    },
+    {
+      "name": "US-only: 1M out x $25 x 1.1",
+      "model": "claude-opus-5",
+      "on": [2026, 9, 17],
+      "usage": {"output": 1000000},
+      "premium": {"us": {"output": 1000000}},
+      "usd": 27.5
+    },
+    {
+      "name": "fast and US-only: 1M out x $50 x 1.1",
+      "model": "claude-opus-5",
+      "on": [2026, 9, 17],
+      "usage": {"output": 1000000},
+      "premium": {"fast_us": {"output": 1000000}},
+      "usd": 55.0
+    },
+    {
+      "name": "half fast: 1M out x $25 + 1M out x $50",
+      "model": "claude-opus-5",
+      "on": [2026, 9, 17],
+      "usage": {"output": 2000000},
+      "premium": {"fast": {"output": 1000000}},
+      "usd": 75.0
+    },
+    {
+      "name": "web searches are not multiplied by the US rate: $27.50 + 10 x $0.01",
+      "model": "claude-opus-5",
+      "on": [2026, 9, 17],
+      "usage": {"output": 1000000, "web_search_requests": 10},
+      "premium": {"us": {"output": 1000000, "web_search_requests": 10}},
+      "usd": 27.6
+    },
+    {
+      "name": "a family estimate has no fast table of its own: 1M out x $25",
+      "model": "claude-opus-7",
+      "on": [2026, 9, 17],
+      "usage": {"output": 1000000},
+      "premium": {"fast": {"output": 1000000}},
+      "usd": 25.0
+    }
+  ]
+}

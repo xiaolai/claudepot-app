@@ -14,6 +14,7 @@ fn ts(s: &str) -> Option<DateTime<Utc>> {
 
 fn sample_detail() -> SessionDetail {
     let row = SessionRow {
+        premium: Default::default(),
         session_id: "sess-1".into(),
         slug: "-r".into(),
         file_path: PathBuf::from("/tmp/x.jsonl"),
@@ -47,6 +48,7 @@ fn sample_detail() -> SessionDetail {
             text: "debug".into(),
         },
         SessionEvent::AssistantToolUse {
+            usage: None,
             ts: ts("2026-04-10T10:00:01Z"),
             uuid: Some("u2".into()),
             model: Some("claude-opus-4-7".into()),

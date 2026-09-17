@@ -331,6 +331,7 @@ mod tests {
 
     fn row(id: &str) -> SessionRow {
         SessionRow {
+            premium: Default::default(),
             session_id: id.to_string(),
             slug: "-test".to_string(),
             file_path: PathBuf::from(format!("/tmp/{id}.jsonl")),

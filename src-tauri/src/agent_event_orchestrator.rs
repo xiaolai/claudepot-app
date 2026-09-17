@@ -1010,6 +1010,7 @@ mod tests {
         let now = chrono::Utc::now();
         let one_hour_ago = last_ts(now);
         SessionRow {
+            premium: Default::default(),
             session_id: session_id.to_string(),
             slug: project.to_string(),
             file_path: std::path::PathBuf::from(format!(

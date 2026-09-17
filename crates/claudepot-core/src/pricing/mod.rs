@@ -56,8 +56,14 @@ pub use tier::PriceTier;
 pub struct ModelRates {
     pub input_per_mtok: f64,
     pub output_per_mtok: f64,
+    /// Five-minute cache writes.
     pub cache_write_per_mtok: f64,
     pub cache_read_per_mtok: f64,
+    /// One-hour cache writes. Absent from cache and history files
+    /// written before it existed, hence the default; readers re-derive
+    /// every cache rate from the model anyway (`history::to_live_rates`).
+    #[serde(default)]
+    pub cache_write_1h_per_mtok: f64,
 }
 
 /// Where the in-memory rates came from. Surfaced to the UI so we can
@@ -135,6 +141,7 @@ pub fn bundled() -> PriceTable {
                 output_per_mtok: r.output_per_million_usd,
                 cache_write_per_mtok: r.cache_write_per_million_usd,
                 cache_read_per_mtok: r.cache_read_per_million_usd,
+                cache_write_1h_per_mtok: r.cache_write_1h_per_million_usd,
             },
         );
     }
@@ -412,13 +419,14 @@ fn scrape_family(flat: &str, prefix: &str) -> Option<(String, ModelRates)> {
     let tail = &flat[start..];
     let window = &tail[..tail.len().min(2000)];
     let (input, output) = extract_two_dollar_rates(window)?;
-    let (cache_write, cache_read) =
+    let (cache_write, cache_write_1h, cache_read) =
         crate::session_live::pricing::derived_cache_rates(&model_id, input);
     let rates = ModelRates {
         input_per_mtok: input,
         output_per_mtok: output,
         cache_write_per_mtok: cache_write,
         cache_read_per_mtok: cache_read,
+        cache_write_1h_per_mtok: cache_write_1h,
     };
     Some((model_id, rates))
 }
@@ -686,6 +694,7 @@ mod tests {
         scraped.insert(
             "claude-opus-4-8".to_string(),
             ModelRates {
+                cache_write_1h_per_mtok: 1998.0,
                 input_per_mtok: 999.0,
                 output_per_mtok: 999.0,
                 cache_write_per_mtok: 0.0,

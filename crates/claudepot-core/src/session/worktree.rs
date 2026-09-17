@@ -208,6 +208,7 @@ mod tests {
 
     fn row(project: &str, branch: Option<&str>, last: Option<DateTime<Utc>>) -> SessionRow {
         SessionRow {
+            premium: Default::default(),
             session_id: format!("sess-{project}"),
             slug: project.replace('/', "-"),
             file_path: PathBuf::new(),

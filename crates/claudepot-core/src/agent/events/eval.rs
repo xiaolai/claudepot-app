@@ -330,6 +330,7 @@ mod tests {
     /// A session row with `last_ts` set, rooted at `project_path`.
     fn session(session_id: &str, project_path: &str, last_ts: Option<DateTime<Utc>>) -> SessionRow {
         SessionRow {
+            premium: Default::default(),
             session_id: session_id.into(),
             slug: "slug".into(),
             file_path: PathBuf::from(format!("/home/u/.claude/projects/slug/{session_id}.jsonl")),

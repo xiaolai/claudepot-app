@@ -32,15 +32,27 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 
 /// Rates in US dollars per million tokens, matching Anthropic's
-/// published "standard" tier. All four token classes are priced here;
-/// see [`RATE_TIERS`] for the values and the date they were verified.
+/// published "standard" tier. See [`RATE_TIERS`] for the values and the
+/// date they were verified.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ModelRates {
     pub input_per_million_usd: f64,
     pub output_per_million_usd: f64,
     pub cache_read_per_million_usd: f64,
+    /// Five-minute cache writes (1.25× input).
     pub cache_write_per_million_usd: f64,
+    /// One-hour cache writes (2× input).
+    pub cache_write_1h_per_million_usd: f64,
 }
+
+/// A server-side web search, per request, for every model (CC 2.1.274's
+/// `webSearchRequests: 0.01` in every tier).
+pub const WEB_SEARCH_USD_PER_REQUEST: f64 = 0.01;
+
+/// US-only inference (`usage.inference_geo == "us"`) bills token cost at
+/// 1.1× — CC's `Wfe`, and Anthropic's data-residency pricing. Web
+/// searches are not multiplied.
+pub const US_GEO_MULTIPLIER: f64 = 1.1;
 
 /// Canonicalize a CC-reported model id to its release-series form.
 /// Rules, in order:
@@ -144,8 +156,8 @@ pub fn rates_for(model: &str) -> Option<ModelRates> {
     resolve_rates_on(model, today_utc()).map(|r| r.rates)
 }
 
-/// Cache-write and cache-read rates for `model` at an input rate of
-/// `input_per_million_usd`, as `(write, read)`.
+/// Cache rates for `model` at an input rate of `input_per_million_usd`,
+/// as `(five-minute write, one-hour write, read)`.
 ///
 /// For sources that see only input and output — the live pricing
 /// scrape, and the history observations it writes. The multipliers
@@ -159,7 +171,7 @@ pub fn rates_for(model: &str) -> Option<ModelRates> {
 /// Scaled as `bundled × (input / bundled_input)` rather than through a
 /// ratio, so an unchanged input returns the bundled figures
 /// bit-for-bit — history dedup compares with `==`.
-pub fn derived_cache_rates(model: &str, input_per_million_usd: f64) -> (f64, f64) {
+pub fn derived_cache_rates(model: &str, input_per_million_usd: f64) -> (f64, f64, f64) {
     let input = input_per_million_usd;
     let key = canonicalize_model_id(model);
     let listed = periods_for_id(&key)
@@ -171,10 +183,11 @@ pub fn derived_cache_rates(model: &str, input_per_million_usd: f64) -> (f64, f64
             let scale = input / r.input_per_million_usd;
             (
                 r.cache_write_per_million_usd * scale,
+                r.cache_write_1h_per_million_usd * scale,
                 r.cache_read_per_million_usd * scale,
             )
         }
-        None => (input * 1.25, input * 0.10),
+        None => (input * 1.25, input * 2.0, input * 0.10),
     }
 }
 
@@ -226,10 +239,9 @@ pub fn ymd_from_ms(ts_ms: i64) -> Option<Ymd> {
 /// them would need a fake `claude-3-` family; unlisted, they render
 /// `—`, which is honest for models retired from the first-party API.
 ///
-/// **Known gap:** fast mode bills Opus 5 and Opus 4.8 at $10/$50
-/// rather than $5/$25, and CC's transcripts carry no fast-mode marker,
-/// so a fast-mode session is under-reported here. Recording it would
-/// need a signal we don't have; see `docs` on the fast-mode toggle.
+/// Fast mode is priced from [`FAST_RATE_TIERS`]: transcripts have
+/// carried `usage.speed` since the field was added, which closed what
+/// this note used to call a known gap.
 const RATE_TIERS: &[(&[&str], &[RatePeriod])] = &[
     // Opus 5 / 4.8 / 4.7 / 4.6 — the standard Opus tier ($5 / $25).
     // NOT the old $15 / $75 tier: Anthropic dropped Opus pricing with
@@ -251,6 +263,7 @@ const RATE_TIERS: &[(&[&str], &[RatePeriod])] = &[
                 output_per_million_usd: 25.0,
                 cache_read_per_million_usd: 0.5,
                 cache_write_per_million_usd: 6.25,
+                cache_write_1h_per_million_usd: 10.0,
             },
         }],
     ),
@@ -268,6 +281,7 @@ const RATE_TIERS: &[(&[&str], &[RatePeriod])] = &[
                 output_per_million_usd: 75.0,
                 cache_read_per_million_usd: 1.5,
                 cache_write_per_million_usd: 18.75,
+                cache_write_1h_per_million_usd: 30.0,
             },
         }],
     ),
@@ -287,6 +301,7 @@ const RATE_TIERS: &[(&[&str], &[RatePeriod])] = &[
                 output_per_million_usd: 10.0,
                 cache_read_per_million_usd: 0.2,
                 cache_write_per_million_usd: 2.5,
+                cache_write_1h_per_million_usd: 4.0,
             },
         }],
     ),
@@ -306,6 +321,7 @@ const RATE_TIERS: &[(&[&str], &[RatePeriod])] = &[
                 output_per_million_usd: 15.0,
                 cache_read_per_million_usd: 0.3,
                 cache_write_per_million_usd: 3.75,
+                cache_write_1h_per_million_usd: 6.0,
             },
         }],
     ),
@@ -319,6 +335,7 @@ const RATE_TIERS: &[(&[&str], &[RatePeriod])] = &[
                 output_per_million_usd: 50.0,
                 cache_read_per_million_usd: 1.0,
                 cache_write_per_million_usd: 12.5,
+                cache_write_1h_per_million_usd: 20.0,
             },
         }],
     ),
@@ -337,6 +354,7 @@ const RATE_TIERS: &[(&[&str], &[RatePeriod])] = &[
                 output_per_million_usd: 50.0,
                 cache_read_per_million_usd: 0.25,
                 cache_write_per_million_usd: 12.5,
+                cache_write_1h_per_million_usd: 20.0,
             },
         }],
     ),
@@ -350,10 +368,55 @@ const RATE_TIERS: &[(&[&str], &[RatePeriod])] = &[
                 output_per_million_usd: 5.0,
                 cache_read_per_million_usd: 0.1,
                 cache_write_per_million_usd: 1.25,
+                cache_write_1h_per_million_usd: 2.0,
             },
         }],
     ),
 ];
+
+/// Fast-mode rates (`usage.speed == "fast"`), from CC 2.1.274's cost
+/// function: Opus 5 and 4.8 bill at 2× their standard rates, Opus 4.7
+/// and 4.6 at 6× — the research-preview price those two carried while
+/// fast mode ran on them. Cache multipliers apply on top, as they do at
+/// the standard rate. A model not listed here bills fast-mode tokens at
+/// its standard rate, which is what CC does too.
+const FAST_RATE_TIERS: &[(&[&str], ModelRates)] = &[
+    (
+        &["claude-opus-5", "claude-opus-4-8"],
+        ModelRates {
+            input_per_million_usd: 10.0,
+            output_per_million_usd: 50.0,
+            cache_read_per_million_usd: 1.0,
+            cache_write_per_million_usd: 12.5,
+            cache_write_1h_per_million_usd: 20.0,
+        },
+    ),
+    (
+        &["claude-opus-4-7", "claude-opus-4-6"],
+        ModelRates {
+            input_per_million_usd: 30.0,
+            output_per_million_usd: 150.0,
+            cache_read_per_million_usd: 3.0,
+            cache_write_per_million_usd: 37.5,
+            cache_write_1h_per_million_usd: 60.0,
+        },
+    ),
+];
+
+/// Fast-mode rates for a canonical model id, if it has its own.
+pub fn fast_rates_for(canonical_id: &str) -> Option<ModelRates> {
+    FAST_RATE_TIERS
+        .iter()
+        .find(|(ids, _)| ids.contains(&canonical_id))
+        .map(|(_, r)| *r)
+}
+
+/// Every model with its own fast-mode rates, for transport.
+pub fn fast_rate_entries() -> impl Iterator<Item = (&'static str, ModelRates)> {
+    FAST_RATE_TIERS
+        .iter()
+        .flat_map(|(ids, r)| ids.iter().map(move |id| (*id, *r)))
+}
 
 /// The model whose rate stands in for an unlisted member of a family.
 ///
@@ -468,26 +531,28 @@ fn family_prefix(id: &str) -> Option<&str> {
     Some(&id[..CLAUDE.len() + dash + 1])
 }
 
-/// Apply rates to token counts. The one place the cost arithmetic
-/// lives, so every surface weights the four token classes identically.
-pub fn apply_rates(
-    r: &ModelRates,
-    input_tokens: u64,
-    output_tokens: u64,
-    cache_read_tokens: u64,
-    cache_write_tokens: u64,
-) -> f64 {
+/// Token cost of `u` at `r` — the one place the per-token arithmetic
+/// lives, so every surface weights the token classes identically.
+///
+/// One-hour cache writes bill at their own rate and the rest of the
+/// writes at the five-minute rate, with the one-hour count capped at
+/// the write total (CC's `jfe`). Web searches are not tokens; see
+/// [`crate::pricing::PriceBook::cost`].
+pub fn price_tokens(r: &ModelRates, u: &crate::session::TokenUsage) -> f64 {
     let million = 1_000_000.0;
-    (input_tokens as f64 / million) * r.input_per_million_usd
-        + (output_tokens as f64 / million) * r.output_per_million_usd
-        + (cache_read_tokens as f64 / million) * r.cache_read_per_million_usd
-        + (cache_write_tokens as f64 / million) * r.cache_write_per_million_usd
+    let write_1h = u.cache_creation_1h.min(u.cache_creation);
+    let write_5m = u.cache_creation - write_1h;
+    (u.input as f64 / million) * r.input_per_million_usd
+        + (u.output as f64 / million) * r.output_per_million_usd
+        + (u.cache_read as f64 / million) * r.cache_read_per_million_usd
+        + (write_5m as f64 / million) * r.cache_write_per_million_usd
+        + (write_1h as f64 / million) * r.cache_write_1h_per_million_usd
 }
 
 /// Compute estimated cost in USD at today's rates. Returns `None` when
 /// the model belongs to no family we price — callers should not invent
-/// a number. Historical usage must use [`resolve_rates_on`] +
-/// [`apply_rates`] with its own date instead.
+/// a number. Historical usage must go through
+/// [`crate::pricing::PriceBook`] with its own date instead.
 pub fn estimate_cost_usd(
     model: &str,
     input_tokens: u64,
@@ -496,12 +561,15 @@ pub fn estimate_cost_usd(
     cache_write_tokens: u64,
 ) -> Option<f64> {
     let r = rates_for(model)?;
-    Some(apply_rates(
+    Some(price_tokens(
         &r,
-        input_tokens,
-        output_tokens,
-        cache_read_tokens,
-        cache_write_tokens,
+        &crate::session::TokenUsage {
+            input: input_tokens,
+            output: output_tokens,
+            cache_read: cache_read_tokens,
+            cache_creation: cache_write_tokens,
+            ..Default::default()
+        },
     ))
 }
 
@@ -627,14 +695,24 @@ mod tests {
             let r = exact_on(id, DAY);
             assert_eq!(
                 derived_cache_rates(id, r.input_per_million_usd),
-                (r.cache_write_per_million_usd, r.cache_read_per_million_usd),
+                (
+                    r.cache_write_per_million_usd,
+                    r.cache_write_1h_per_million_usd,
+                    r.cache_read_per_million_usd,
+                ),
                 "{id}"
             );
         }
         // Fable 5.1 keeps its quarter-rate reads when its input moves.
-        assert_eq!(derived_cache_rates("claude-fable-5-1", 20.0), (25.0, 0.5));
+        assert_eq!(
+            derived_cache_rates("claude-fable-5-1", 20.0),
+            (25.0, 40.0, 0.5)
+        );
         // An unlisted model gets the standard multipliers.
-        assert_eq!(derived_cache_rates("claude-fable-9", 10.0), (12.5, 1.0));
+        assert_eq!(
+            derived_cache_rates("claude-fable-9", 10.0),
+            (12.5, 20.0, 1.0)
+        );
     }
 
     #[test]
@@ -680,6 +758,7 @@ mod tests {
     /// observed rate change merged over a bundled opening period.
     fn dated_periods() -> [RatePeriod; 2] {
         let at = |input: f64| ModelRates {
+            cache_write_1h_per_million_usd: (input) * 2.0,
             input_per_million_usd: input,
             output_per_million_usd: input * 5.0,
             cache_read_per_million_usd: input / 10.0,
@@ -723,6 +802,7 @@ mod tests {
         let periods = [RatePeriod {
             starts: Some((2026, 6, 1)),
             rates: ModelRates {
+                cache_write_1h_per_million_usd: 2.0,
                 input_per_million_usd: 1.0,
                 output_per_million_usd: 2.0,
                 cache_read_per_million_usd: 0.1,

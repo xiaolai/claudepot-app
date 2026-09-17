@@ -791,6 +791,7 @@ fn mk_image_session_on_disk(
     let size = fs::metadata(&path).unwrap().len();
     let now = chrono::Utc::now();
     crate::session::SessionRow {
+        premium: Default::default(),
         session_id: uuid.to_string(),
         slug,
         file_path: path,
@@ -997,6 +998,7 @@ fn bulk_plan_drops_matched_rows_with_zero_slim_effect() {
     let size = fs::metadata(&path).unwrap().len();
     let now = chrono::Utc::now();
     let plain_row = crate::session::SessionRow {
+        premium: Default::default(),
         session_id: "plain-uuid".to_string(),
         slug: "-pP".to_string(),
         file_path: path,

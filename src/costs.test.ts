@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-// The same fixture `pricing::book`'s
-// `shared_vectors_match_this_implementation` runs. Imported rather
-// than read through `node:fs` so this stays a browser-target module.
+// The same fixtures `pricing::book`'s
+// `shared_vectors_match_this_implementation` and
+// `shared_cost_vectors_match` run. Imported rather than read through
+// `node:fs` so this stays a browser-target module.
 import vectorFixture from "../crates/claudepot-core/testdata/rate-resolution-vectors.json";
+import costFixture from "../crates/claudepot-core/testdata/cost-vectors.json";
 
 import {
   canonicalizeModelId,
@@ -15,7 +17,12 @@ import {
   ymdFromMs,
   type Ymd,
 } from "./costs";
-import type { PriceBookSnapshotDto, PriceTableDto } from "./types";
+import type {
+  PremiumUsage,
+  PriceBookSnapshotDto,
+  PriceTableDto,
+  TokenCounts,
+} from "./types";
 
 /**
  * The book the backend ships. Hand-built here rather than snapshotted
@@ -23,20 +30,21 @@ import type { PriceBookSnapshotDto, PriceTableDto } from "./types";
  * below are what actually keep the two implementations honest.
  */
 const BOOK: PriceBookSnapshotDto = (() => {
-  const flat = (
+  const period = (
     input: number,
     output: number,
     cacheWrite: number,
     cacheRead: number,
-  ) => [
-    {
-      starts: null,
-      input_per_mtok: input,
-      output_per_mtok: output,
-      cache_write_per_mtok: cacheWrite,
-      cache_read_per_mtok: cacheRead,
-    },
-  ];
+  ) => ({
+    starts: null,
+    input_per_mtok: input,
+    output_per_mtok: output,
+    cache_write_per_mtok: cacheWrite,
+    cache_read_per_mtok: cacheRead,
+    // One-hour writes are 2x input on every tier.
+    cache_write_1h_per_mtok: input * 2,
+  });
+  const flat = (...args: Parameters<typeof period>) => [period(...args)];
   const opus = flat(5, 25, 6.25, 0.5);
   const opusRetired = flat(15, 75, 18.75, 1.5);
   const sonnet4 = flat(3, 15, 3.75, 0.3);
@@ -70,6 +78,14 @@ const BOOK: PriceBookSnapshotDto = (() => {
       "claude-fable-": "claude-fable-5-1",
       "claude-mythos-": "claude-mythos-5-1",
     },
+    fast_models: {
+      "claude-opus-5": period(10, 50, 12.5, 1),
+      "claude-opus-4-8": period(10, 50, 12.5, 1),
+      "claude-opus-4-7": period(30, 150, 37.5, 3),
+      "claude-opus-4-6": period(30, 150, 37.5, 3),
+    },
+    web_search_usd_per_request: 0.01,
+    us_geo_multiplier: 1.1,
   };
 })();
 
@@ -99,6 +115,7 @@ const DATED_TABLE: PriceTableDto = {
           output_per_mtok: 35,
           cache_write_per_mtok: 8.75,
           cache_read_per_mtok: 0.7,
+          cache_write_1h_per_mtok: 14,
         },
       ],
     },
@@ -144,6 +161,34 @@ describe("shared rate-resolution vectors", () => {
           9,
         );
       }
+    });
+  }
+});
+
+describe("shared cost vectors", () => {
+  /** What a usage costs once its rate is resolved: one-hour writes,
+   *  fast mode, US-only inference and web searches, locked to
+   *  `PriceBook::cost`. */
+  const fixture = costFixture as unknown as {
+    vectors: {
+      name: string;
+      model: string;
+      on: Ymd;
+      usage: TokenCounts;
+      premium?: PremiumUsage;
+      usd: number;
+    }[];
+  };
+
+  it("has enough vectors to mean something", () => {
+    expect(fixture.vectors.length).toBeGreaterThanOrEqual(10);
+  });
+
+  for (const v of fixture.vectors) {
+    it(v.name, () => {
+      const got = costFromUsage(TABLE, v.model, v.usage, v.on, v.premium);
+      expect(got).not.toBeNull();
+      expect(got!.usd).toBeCloseTo(v.usd, 9);
     });
   }
 });

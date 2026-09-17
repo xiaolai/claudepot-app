@@ -32,7 +32,7 @@ use crate::activity::{
 };
 use crate::paths;
 use crate::project_sanitize::sanitize_path;
-use crate::session::{parse_line_into, SessionEvent};
+use crate::session::{EventParser, SessionEvent};
 use crate::session_live::bus::{AggregateBus, BusError, DetailBus};
 use crate::session_live::metrics_store::MetricsStore;
 use crate::session_live::redact::redact_secrets_opt;
@@ -545,8 +545,11 @@ impl LiveRuntime {
                 s.activity_state = ClassifierState::default();
             }
             let mut events: Vec<SessionEvent> = Vec::new();
+            // Status only — nothing here sums usage, so a parser per
+            // batch is enough.
+            let mut parser = EventParser::default();
             for (i, line) in progress.new_lines.iter().enumerate() {
-                parse_line_into(&mut events, line, i + 1);
+                parser.parse_line_into(&mut events, line, i + 1);
             }
             for e in &events {
                 s.machine.ingest(e);
@@ -890,6 +893,7 @@ fn seed_status_from_recent_lines(
     };
     let slice = &buf[parse_from..];
     let mut events: Vec<SessionEvent> = Vec::new();
+    let mut parser = EventParser::default();
     let mut line_no = 0usize;
     for raw in slice.split(|&b| b == b'\n') {
         if raw.is_empty() {
@@ -900,7 +904,7 @@ fn seed_status_from_recent_lines(
             Ok(s) => s,
             Err(_) => continue,
         };
-        parse_line_into(&mut events, line, line_no);
+        parser.parse_line_into(&mut events, line, line_no);
     }
     for e in &events {
         machine.ingest(e);

@@ -54,6 +54,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     tokens_output            INTEGER NOT NULL,
     tokens_cache_creation    INTEGER NOT NULL,
     tokens_cache_read        INTEGER NOT NULL,
+    tokens_cache_creation_1h INTEGER NOT NULL DEFAULT 0,
+    tokens_web_search        INTEGER NOT NULL DEFAULT 0,
+    usage_premium_json       TEXT,
     git_branch               TEXT,
     cc_version               TEXT,
     display_slug             TEXT,
@@ -88,6 +91,9 @@ CREATE TABLE IF NOT EXISTS session_turns (
     tokens_cache_creation INTEGER NOT NULL,
     tokens_cache_read   INTEGER NOT NULL,
     user_prompt_preview TEXT,              -- truncated user prompt that drove this assistant turn (NULL if none)
+    tokens_cache_creation_1h INTEGER NOT NULL DEFAULT 0,
+    tokens_web_search   INTEGER NOT NULL DEFAULT 0,
+    premium_kind        TEXT,              -- 'fast' | 'us' | 'fast_us'; NULL at the standard rate
     PRIMARY KEY (file_path, turn_index)
 );
 

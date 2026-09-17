@@ -22,9 +22,9 @@
 //! 3. **Unpriced** — no family match; `None`, rendered `—`.
 
 use crate::pricing::history::HistoryFile;
-use crate::session::TokenUsage;
+use crate::session::{PremiumUsage, TokenUsage};
 use crate::session_live::pricing::{
-    self as rates, apply_rates, canonicalize_model_id, ModelRates, RateConfidence, RatePeriod,
+    self as rates, canonicalize_model_id, price_tokens, ModelRates, RateConfidence, RatePeriod,
     ResolvedRates, Ymd,
 };
 
@@ -169,6 +169,7 @@ impl PriceBook {
             output_per_million_usd: r.output_per_million_usd * m,
             cache_read_per_million_usd: r.cache_read_per_million_usd * m,
             cache_write_per_million_usd: r.cache_write_per_million_usd * m,
+            cache_write_1h_per_million_usd: r.cache_write_1h_per_million_usd * m,
         }
     }
 
@@ -179,11 +180,42 @@ impl PriceBook {
         self.resolve(model, rates::ymd_from_ms(ts_ms)?)
     }
 
-    /// Cost of `usage` for `model` on day `on`.
-    pub fn cost(&self, model: &str, on: Ymd, usage: &TokenUsage) -> Option<PricedCost> {
+    /// Cost of `usage` for `model` on day `on`, CC's way (its `pFe`):
+    ///
+    /// - tokens in none of `premium`'s buckets at the model's rate;
+    /// - fast-mode tokens at the model's fast rate when it has one, and
+    ///   at its standard rate when it does not;
+    /// - US-only tokens, fast or not, at 1.1× their token cost;
+    /// - web searches per request, never multiplied.
+    ///
+    /// `premium` holds subsets of `usage`. The standard remainder floors
+    /// at zero, so no token is ever priced in two buckets.
+    pub fn cost(
+        &self,
+        model: &str,
+        on: Ymd,
+        usage: &TokenUsage,
+        premium: &PremiumUsage,
+    ) -> Option<PricedCost> {
         let r = self.resolve(model, on)?;
+        let base = r.rates;
+        let fast = rates::fast_rates_for(&canonicalize_model_id(model))
+            .map(|f| self.scaled(f))
+            .unwrap_or(base);
+        let standard = usage
+            .saturating_sub(&premium.fast)
+            .saturating_sub(&premium.us)
+            .saturating_sub(&premium.fast_us);
+        let geo = rates::US_GEO_MULTIPLIER;
+        let tokens_usd = price_tokens(&base, &standard)
+            + price_tokens(&base, &premium.us) * geo
+            + price_tokens(&fast, &premium.fast)
+            + price_tokens(&fast, &premium.fast_us) * geo;
+        let searches_usd = usage.web_search_requests as f64
+            * rates::WEB_SEARCH_USD_PER_REQUEST
+            * self.tier_multiplier;
         Some(PricedCost {
-            usd: apply_usage(&r.rates, usage),
+            usd: tokens_usd + searches_usd,
             confidence: r.confidence,
         })
     }
@@ -200,11 +232,12 @@ impl PriceBook {
         model: &str,
         ts_ms: Option<i64>,
         usage: &TokenUsage,
+        premium: &PremiumUsage,
     ) -> Option<PricedCost> {
         let on = ts_ms
             .and_then(rates::ymd_from_ms)
             .unwrap_or_else(rates::today_utc);
-        self.cost(model, on, usage)
+        self.cost(model, on, usage, premium)
     }
 }
 
@@ -221,6 +254,13 @@ pub struct PriceBookSnapshot {
     pub models: std::collections::BTreeMap<String, Vec<PeriodSnapshot>>,
     /// `claude-<family>-` → the model id an unlisted member falls back to.
     pub family_current: std::collections::BTreeMap<String, String>,
+    /// Model id → fast-mode rates, for the models that have their own.
+    /// `starts` is always null: fast rates are not dated.
+    pub fast_models: std::collections::BTreeMap<String, PeriodSnapshot>,
+    /// Per server-side web search, tier scaling included.
+    pub web_search_usd_per_request: f64,
+    /// Token-cost multiplier for US-only inference.
+    pub us_geo_multiplier: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -231,6 +271,20 @@ pub struct PeriodSnapshot {
     pub output_per_mtok: f64,
     pub cache_write_per_mtok: f64,
     pub cache_read_per_mtok: f64,
+    pub cache_write_1h_per_mtok: f64,
+}
+
+impl PeriodSnapshot {
+    fn of(starts: Option<[i32; 3]>, r: ModelRates) -> Self {
+        Self {
+            starts,
+            input_per_mtok: r.input_per_million_usd,
+            output_per_mtok: r.output_per_million_usd,
+            cache_write_per_mtok: r.cache_write_per_million_usd,
+            cache_read_per_mtok: r.cache_read_per_million_usd,
+            cache_write_1h_per_mtok: r.cache_write_1h_per_million_usd,
+        }
+    }
 }
 
 impl PriceBook {
@@ -252,14 +306,10 @@ impl PriceBook {
             let snapped: Vec<PeriodSnapshot> = periods
                 .iter()
                 .map(|p| {
-                    let r = self.scaled(p.rates);
-                    PeriodSnapshot {
-                        starts: p.starts.map(|(y, m, d)| [y, m as i32, d as i32]),
-                        input_per_mtok: r.input_per_million_usd,
-                        output_per_mtok: r.output_per_million_usd,
-                        cache_write_per_mtok: r.cache_write_per_million_usd,
-                        cache_read_per_mtok: r.cache_read_per_million_usd,
-                    }
+                    PeriodSnapshot::of(
+                        p.starts.map(|(y, m, d)| [y, m as i32, d as i32]),
+                        self.scaled(p.rates),
+                    )
                 })
                 .collect();
             models.insert(id.to_string(), snapped);
@@ -269,20 +319,13 @@ impl PriceBook {
             family_current: rates::family_current_map()
                 .map(|(f, c)| (f.to_string(), c.to_string()))
                 .collect(),
+            fast_models: rates::fast_rate_entries()
+                .map(|(id, r)| (id.to_string(), PeriodSnapshot::of(None, self.scaled(r))))
+                .collect(),
+            web_search_usd_per_request: rates::WEB_SEARCH_USD_PER_REQUEST * self.tier_multiplier,
+            us_geo_multiplier: rates::US_GEO_MULTIPLIER,
         }
     }
-}
-
-/// Apply rates to a [`TokenUsage`], mapping its field names onto the
-/// four priced token classes.
-fn apply_usage(r: &ModelRates, usage: &TokenUsage) -> f64 {
-    apply_rates(
-        r,
-        usage.input,
-        usage.output,
-        usage.cache_read,
-        usage.cache_creation,
-    )
 }
 
 #[cfg(test)]
@@ -303,6 +346,7 @@ mod tests {
         assert!(history.observe(
             "claude-opus-5",
             &TableRates {
+                cache_write_1h_per_mtok: 14.0,
                 input_per_mtok: 7.0,
                 output_per_mtok: 35.0,
                 cache_write_per_mtok: 8.75,
@@ -316,6 +360,8 @@ mod tests {
 
     fn usage(input: u64, output: u64) -> TokenUsage {
         TokenUsage {
+            cache_creation_1h: 0,
+            web_search_requests: 0,
             input,
             output,
             cache_read: 0,
@@ -343,7 +389,9 @@ mod tests {
     fn a_model_from_no_priced_family_is_unpriced() {
         let book = PriceBook::bundled_only();
         assert!(book.resolve("gpt-4", DAY).is_none());
-        assert!(book.cost("gpt-4", DAY, &usage(1, 1)).is_none());
+        assert!(book
+            .cost("gpt-4", DAY, &usage(1, 1), &PremiumUsage::default())
+            .is_none());
     }
 
     #[test]
@@ -353,10 +401,20 @@ mod tests {
         // rewrites the other.
         let book = observed_change();
         let before = book
-            .cost("claude-opus-5", (2026, 9, 30), &usage(1_000_000, 0))
+            .cost(
+                "claude-opus-5",
+                (2026, 9, 30),
+                &usage(1_000_000, 0),
+                &PremiumUsage::default(),
+            )
             .unwrap();
         let after = book
-            .cost("claude-opus-5", CHANGE_DAY, &usage(1_000_000, 0))
+            .cost(
+                "claude-opus-5",
+                CHANGE_DAY,
+                &usage(1_000_000, 0),
+                &PremiumUsage::default(),
+            )
             .unwrap();
         assert!((before.usd - 5.0).abs() < 1e-9);
         assert!((after.usd - 7.0).abs() < 1e-9);
@@ -372,6 +430,7 @@ mod tests {
         assert!(history.observe(
             "claude-fable-5-1",
             &TableRates {
+                cache_write_1h_per_mtok: 20.0,
                 input_per_mtok: 10.0,
                 output_per_mtok: 50.0,
                 cache_write_per_mtok: 12.5,
@@ -413,6 +472,7 @@ mod tests {
         history.observe(
             "claude-opus-5",
             &TableRates {
+                cache_write_1h_per_mtok: 16.0,
                 input_per_mtok: 8.0,
                 output_per_mtok: 40.0,
                 cache_write_per_mtok: 10.0,
@@ -439,6 +499,7 @@ mod tests {
         history.observe(
             "claude-opus-5",
             &TableRates {
+                cache_write_1h_per_mtok: 16.0,
                 input_per_mtok: 8.0,
                 output_per_mtok: 40.0,
                 cache_write_per_mtok: 10.0,
@@ -457,13 +518,17 @@ mod tests {
     fn cost_weights_every_token_class() {
         let book = PriceBook::bundled_only();
         let u = TokenUsage {
+            cache_creation_1h: 0,
+            web_search_requests: 0,
             input: 1_000_000,
             output: 1_000_000,
             cache_read: 1_000_000,
             cache_creation: 1_000_000,
         };
         // Opus 5: $5 in + $25 out + $0.50 cache-read + $6.25 cache-write.
-        let c = book.cost("claude-opus-5", DAY, &u).unwrap();
+        let c = book
+            .cost("claude-opus-5", DAY, &u, &PremiumUsage::default())
+            .unwrap();
         assert!((c.usd - 36.75).abs() < 1e-9);
     }
 
@@ -471,10 +536,20 @@ mod tests {
     fn an_untimestamped_row_falls_back_to_todays_rate() {
         let book = PriceBook::bundled_only();
         let fallback = book
-            .cost_at_ms("claude-opus-5", None, &usage(1_000_000, 0))
+            .cost_at_ms(
+                "claude-opus-5",
+                None,
+                &usage(1_000_000, 0),
+                &PremiumUsage::default(),
+            )
             .unwrap();
         let today = book
-            .cost("claude-opus-5", rates::today_utc(), &usage(1_000_000, 0))
+            .cost(
+                "claude-opus-5",
+                rates::today_utc(),
+                &usage(1_000_000, 0),
+                &PremiumUsage::default(),
+            )
             .unwrap();
         assert_eq!(fallback, today);
     }
@@ -583,6 +658,62 @@ mod tests {
         }
     }
 
+    #[derive(serde::Deserialize)]
+    struct CostVectorFile {
+        vectors: Vec<CostVector>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct CostVector {
+        name: String,
+        model: String,
+        on: [i32; 3],
+        usage: TokenUsage,
+        #[serde(default)]
+        premium: PremiumUsage,
+        usd: f64,
+    }
+
+    #[test]
+    fn shared_cost_vectors_match() {
+        let raw = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("testdata")
+                .join("cost-vectors.json"),
+        )
+        .expect("cost-vectors.json must exist");
+        let file: CostVectorFile = serde_json::from_str(&raw).expect("cost vectors must parse");
+        assert!(file.vectors.len() >= 10, "fixture must not be vacuous");
+        let book = PriceBook::bundled_only();
+        for v in &file.vectors {
+            let on = (v.on[0], v.on[1] as u32, v.on[2] as u32);
+            let got = book
+                .cost(&v.model, on, &v.usage, &v.premium)
+                .unwrap_or_else(|| panic!("{}: unpriced", v.name));
+            assert!(
+                (got.usd - v.usd).abs() < 1e-9,
+                "{}: expected ${}, got ${}",
+                v.name,
+                v.usd,
+                got.usd
+            );
+        }
+    }
+
+    #[test]
+    fn the_snapshot_carries_fast_rates_and_the_flat_charges() {
+        let snap = PriceBook::bundled_only().snapshot();
+        assert_eq!(snap.fast_models["claude-opus-5"].output_per_mtok, 50.0);
+        assert_eq!(snap.fast_models["claude-opus-4-6"].output_per_mtok, 150.0);
+        assert!(!snap.fast_models.contains_key("claude-sonnet-5"));
+        assert_eq!(snap.web_search_usd_per_request, 0.01);
+        assert_eq!(snap.us_geo_multiplier, 1.1);
+        assert_eq!(
+            snap.models["claude-opus-5"][0].cache_write_1h_per_mtok,
+            10.0
+        );
+    }
+
     #[test]
     fn the_snapshot_carries_every_priced_model_and_family() {
         // The renderer resolves against this snapshot, so a model
@@ -608,6 +739,7 @@ mod tests {
         current.insert(
             "claude-opus-5".to_string(),
             TableRates {
+                cache_write_1h_per_mtok: 14.0,
                 input_per_mtok: 7.0,
                 output_per_mtok: 35.0,
                 cache_write_per_mtok: 8.75,
@@ -625,6 +757,7 @@ mod tests {
         current.insert(
             "claude-opus-5".to_string(),
             TableRates {
+                cache_write_1h_per_mtok: 10.0,
                 input_per_mtok: 5.0,
                 output_per_mtok: 25.0,
                 cache_write_per_mtok: 6.25,
@@ -647,6 +780,7 @@ mod tests {
         current.insert(
             "claude-opus-5".to_string(),
             TableRates {
+                cache_write_1h_per_mtok: 14.0,
                 input_per_mtok: 7.0,
                 output_per_mtok: 35.0,
                 cache_write_per_mtok: 8.75,
@@ -669,6 +803,7 @@ mod tests {
         current.insert(
             "claude-opus-9".to_string(),
             TableRates {
+                cache_write_1h_per_mtok: 24.0,
                 input_per_mtok: 12.0,
                 output_per_mtok: 60.0,
                 cache_write_per_mtok: 15.0,

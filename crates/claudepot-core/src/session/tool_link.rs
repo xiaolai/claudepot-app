@@ -149,6 +149,7 @@ mod tests {
     fn tool_use(id: &str, name: &str, t: Option<DateTime<Utc>>) -> SessionEvent {
         let input = format!("{{\"for\":\"{id}\"}}");
         SessionEvent::AssistantToolUse {
+            usage: None,
             ts: t,
             uuid: None,
             model: Some("claude-opus-4-7".into()),

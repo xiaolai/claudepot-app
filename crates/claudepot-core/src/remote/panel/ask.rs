@@ -245,6 +245,7 @@ mod tests {
 
     fn ask_use(id: &str, input: serde_json::Value) -> SessionEvent {
         SessionEvent::AssistantToolUse {
+            usage: None,
             ts: None,
             uuid: None,
             model: None,
@@ -340,6 +341,7 @@ mod tests {
         // The difference between "approve Bash" and knowing whether it
         // is `cargo test` or `rm -rf`.
         let bash = SessionEvent::AssistantToolUse {
+            usage: None,
             ts: None,
             uuid: None,
             model: None,
@@ -356,6 +358,7 @@ mod tests {
     #[test]
     fn an_answered_tool_call_is_not_pending() {
         let bash = SessionEvent::AssistantToolUse {
+            usage: None,
             ts: None,
             uuid: None,
             model: None,
@@ -377,6 +380,7 @@ mod tests {
     #[test]
     fn a_pending_tool_argument_is_redacted() {
         let leaky = SessionEvent::AssistantToolUse {
+            usage: None,
             ts: None,
             uuid: None,
             model: None,
@@ -394,6 +398,7 @@ mod tests {
         // A peer message cannot grant an escalation, so chips here would
         // offer an action that is correctly refused.
         let bash = SessionEvent::AssistantToolUse {
+            usage: None,
             ts: None,
             uuid: None,
             model: None,
@@ -408,6 +413,7 @@ mod tests {
     #[test]
     fn a_malformed_input_yields_nothing_rather_than_a_guess() {
         let e = SessionEvent::AssistantToolUse {
+            usage: None,
             ts: None,
             uuid: None,
             model: None,

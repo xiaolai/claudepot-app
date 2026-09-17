@@ -228,8 +228,16 @@ pub fn attribute_context(events: &[SessionEvent]) -> ContextStats {
             SessionEvent::AssistantToolUse {
                 tool_name,
                 input_preview,
+                usage,
+                uuid,
                 ..
             } => {
+                // A tool-call-only message reports its usage here.
+                if let Some(u) = usage {
+                    if should_charge_usage(uuid, &mut usage_counted) {
+                        reported_total_tokens += u.total();
+                    }
+                }
                 let tokens = estimate_tokens(input_preview);
                 let category = if team_tool_call_indices.contains(&idx) {
                     ContextCategory::TeamCoordination
@@ -455,6 +463,7 @@ mod tests {
 
     fn tool_use(id: &str, name: &str, preview: &str) -> SessionEvent {
         SessionEvent::AssistantToolUse {
+            usage: None,
             ts: None,
             uuid: None,
             model: None,

@@ -355,8 +355,9 @@ pub(super) fn tail_lines(path: &Path, bytes: u64) -> Option<Vec<String>> {
 pub(super) fn tail_events(path: &Path, bytes: u64) -> Option<Vec<SessionEvent>> {
     let lines = tail_lines(path, bytes)?;
     let mut events = Vec::new();
+    let mut parser = crate::session::core::EventParser::default();
     for (i, line) in lines.iter().enumerate() {
-        crate::session::core::parse_line_into(&mut events, line, i + 1);
+        parser.parse_line_into(&mut events, line, i + 1);
     }
     Some(events)
 }

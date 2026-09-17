@@ -668,6 +668,7 @@ mod tests {
             },
         };
         let _used: ModelRates = ModelRates {
+            cache_write_1h_per_mtok: 2.0,
             input_per_mtok: 1.0,
             output_per_mtok: 1.0,
             cache_write_per_mtok: 1.0,

@@ -318,13 +318,14 @@ pub(crate) fn to_live_rates(
     model_id: &str,
     r: &ModelRates,
 ) -> crate::session_live::pricing::ModelRates {
-    let (write, read) =
+    let (write, write_1h, read) =
         crate::session_live::pricing::derived_cache_rates(model_id, r.input_per_mtok);
     crate::session_live::pricing::ModelRates {
         input_per_million_usd: r.input_per_mtok,
         output_per_million_usd: r.output_per_mtok,
         cache_read_per_million_usd: read,
         cache_write_per_million_usd: write,
+        cache_write_1h_per_million_usd: write_1h,
     }
 }
 
@@ -415,6 +416,7 @@ mod tests {
 
     fn rates(input: f64) -> ModelRates {
         ModelRates {
+            cache_write_1h_per_mtok: (input) * 2.0,
             input_per_mtok: input,
             output_per_mtok: input * 5.0,
             cache_write_per_mtok: input * 1.25,

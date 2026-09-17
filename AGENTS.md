@@ -248,17 +248,31 @@ Cost figures answer "what would pay-per-call have cost me". Rates are
   observation dated `D` means "first seen on `D`", an upper bound on
   when the change landed, so observations never override a bundled
   period that already covers that day.
-- `src/costs.ts` mirrors `PriceBook::resolve` for client-side
-  aggregation. **The two are locked together by
-  `crates/claudepot-core/testdata/rate-resolution-vectors.json`** —
-  both run those vectors. Change one, change the other, add a vector.
+- `src/costs.ts` mirrors `PriceBook::resolve` and `PriceBook::cost`
+  for client-side aggregation. **The two are locked together by
+  `crates/claudepot-core/testdata/rate-resolution-vectors.json` and
+  `cost-vectors.json`** — both run both. Change one, change the other,
+  add a vector. Every bundled model needs an exact rate vector, which
+  is what keeps the hand-built book in `costs.test.ts` complete.
+- **Usage is counted per API message, not per transcript line.** CC
+  writes a message as one line per content block, each repeating the
+  full `usage`; summing lines overstated every stored total 2–6×.
+  `session::usage::UsageLedger` charges a message once, and the index
+  re-reads every transcript the first time a build with it opens
+  `sessions.db` (`token_accounting`, a guard reset — never a
+  `SCHEMA_VERSION` bump, which would cascade into shared memory).
+- A cost is priced the way CC's own cost function prices it: one-hour
+  cache writes at 2× input rather than 1.25× (65% of all writes on the
+  reference machine), fast-mode tokens (`usage.speed`) at the model's
+  fast table, US-only inference (`usage.inference_geo`) at 1.1×, and
+  web searches at $0.01 each. `SessionRow::premium` carries the fast
+  and US-only buckets.
 - Family estimates are always marked in the UI (a leading `≈` plus a
   `title`), never presented as a quote. `ProjectUsageRow` carries
   `estimated_sessions` for the same reason.
 
-Known gap: fast mode bills Opus 5 / 4.8 at $10/$50 rather than
-$5/$25, and CC's transcripts carry no fast-mode marker, so a
-fast-mode session is under-reported.
+The session figure still prices every token at the session's first
+model; a session that switched models mid-way is approximate.
 
 ## Permission grants (ProjectDetail → Permissions)
 

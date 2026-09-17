@@ -360,3 +360,104 @@ fn scan_session_alone_collects_no_events() {
     let (_, events) = scan_session_inner("-repo-foo", &path, false).unwrap();
     assert!(events.is_empty());
 }
+
+/// Three lines of one API message (thinking, text, tool call), each
+/// repeating the message's usage the way CC writes them, then a second
+/// message made only of a tool call. Before per-message accounting the
+/// first message counted three times.
+fn split_message_transcript() -> Vec<String> {
+    let usage = r#"{"input_tokens":10,"output_tokens":100,"cache_creation_input_tokens":1000,"cache_read_input_tokens":5000,"cache_creation":{"ephemeral_1h_input_tokens":600,"ephemeral_5m_input_tokens":400},"server_tool_use":{"web_search_requests":1},"speed":"fast","inference_geo":"us"}"#;
+    let usage2 = r#"{"input_tokens":1,"output_tokens":7,"cache_creation_input_tokens":0,"cache_read_input_tokens":50,"speed":"standard"}"#;
+    let line = |uuid: &str, id: &str, part: &str, usage: &str, t: &str| {
+        format!(
+            r#"{{"type":"assistant","uuid":"{uuid}","message":{{"id":"{id}","role":"assistant","model":"claude-opus-5","content":[{part}],"usage":{usage}}},"timestamp":"2026-09-17T10:00:0{t}Z","cwd":"/p","sessionId":"S1"}}"#
+        )
+    };
+    vec![
+        r#"{"type":"user","message":{"role":"user","content":"go"},"timestamp":"2026-09-17T10:00:00Z","cwd":"/p","sessionId":"S1"}"#.to_string(),
+        line("a1", "msg_1", r#"{"type":"thinking","thinking":"hm"}"#, usage, "1"),
+        line("a2", "msg_1", r#"{"type":"text","text":"on it"}"#, usage, "2"),
+        line("a3", "msg_1", r#"{"type":"tool_use","id":"t1","name":"Bash","input":{}}"#, usage, "3"),
+        r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok","is_error":false}]},"timestamp":"2026-09-17T10:00:04Z","cwd":"/p","sessionId":"S1"}"#.to_string(),
+        line("a4", "msg_2", r#"{"type":"tool_use","id":"t2","name":"Read","input":{}}"#, usage2, "5"),
+    ]
+}
+
+#[test]
+fn a_message_written_across_lines_is_counted_once() {
+    let tmp = TempDir::new().unwrap();
+    let lines = split_message_transcript();
+    let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+    let path = write_session(tmp.path(), "-p", "S1", &refs);
+    let scan = scan_session("-p", &path).unwrap();
+    let t = &scan.row.tokens;
+    assert_eq!(
+        (
+            t.input,
+            t.output,
+            t.cache_creation,
+            t.cache_read,
+            t.cache_creation_1h,
+            t.web_search_requests
+        ),
+        (11, 107, 1000, 5050, 600, 1),
+        "each message once, not once per line"
+    );
+    // The fast + US message lands in its bucket; the standard one does not.
+    assert_eq!(scan.row.premium.fast_us.output, 100);
+    assert!(scan.row.premium.fast.is_zero() && scan.row.premium.us.is_zero());
+    // One turn per message, and one message per message.
+    assert_eq!(scan.turns.len(), 2);
+    assert_eq!(scan.row.assistant_message_count, 2);
+    assert_eq!(
+        scan.row.message_count, 4,
+        "two user lines, two assistant messages"
+    );
+    assert_eq!(scan.turns[0].tokens.output, 100);
+    assert_eq!(scan.turns[0].premium.fast_us.output, 100);
+    assert_eq!(scan.turns[1].tokens.output, 7);
+    assert!(scan.turns[1].premium.is_empty());
+}
+
+#[test]
+fn events_carry_each_messages_usage_exactly_once() {
+    let tmp = TempDir::new().unwrap();
+    let lines = split_message_transcript();
+    let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+    let path = write_session(tmp.path(), "-p", "S1", &refs);
+    let events = parse_events_public(&path).unwrap();
+    let carried: Vec<u64> = events
+        .iter()
+        .filter_map(|e| match e {
+            SessionEvent::AssistantText { usage: Some(u), .. }
+            | SessionEvent::AssistantToolUse { usage: Some(u), .. } => Some(u.output),
+            _ => None,
+        })
+        .collect();
+    // msg_1 on its text event (the thinking line has no carrier), and
+    // the tool-call-only msg_2 on its tool-use event.
+    assert_eq!(carried, vec![100, 7]);
+
+    // The two event folds and the one-pass scan agree.
+    let (_, scanned) = scan_session_with_events("-p", &path).unwrap();
+    let carried_scan: Vec<u64> = scanned
+        .iter()
+        .filter_map(|e| match e {
+            SessionEvent::AssistantText { usage: Some(u), .. }
+            | SessionEvent::AssistantToolUse { usage: Some(u), .. } => Some(u.output),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(carried_scan, carried);
+
+    // And the chunk view totals match the row.
+    let chunks = crate::session_chunks::build_chunks(&events);
+    let chunk_output: u64 = chunks
+        .iter()
+        .map(|c| match c {
+            crate::session_chunks::SessionChunk::Ai { header, .. } => header.metrics.tokens.output,
+            _ => 0,
+        })
+        .sum();
+    assert_eq!(chunk_output, 107);
+}

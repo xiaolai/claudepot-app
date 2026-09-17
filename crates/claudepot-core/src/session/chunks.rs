@@ -202,8 +202,15 @@ impl AiInProgress {
             SessionEvent::AssistantThinking { .. } => {
                 self.metrics.thinking_count += 1;
             }
-            SessionEvent::AssistantToolUse { .. } => {
+            SessionEvent::AssistantToolUse { usage, uuid, .. } => {
                 self.metrics.tool_call_count += 1;
+                // A message made only of tool calls carries its usage
+                // here; the parser attaches it once per message.
+                if let Some(u) = usage {
+                    if should_charge_usage(uuid, &mut self.usage_counted_uuids) {
+                        add_usage(&mut self.metrics.tokens, u);
+                    }
+                }
             }
             _ => {}
         }
@@ -279,10 +286,7 @@ fn metrics_for_single(ev: &SessionEvent) -> ChunkMetrics {
 }
 
 fn add_usage(acc: &mut TokenUsage, u: &TokenUsage) {
-    acc.input += u.input;
-    acc.output += u.output;
-    acc.cache_creation += u.cache_creation;
-    acc.cache_read += u.cache_read;
+    acc.add(u);
 }
 
 /// Return `true` when this `uuid` hasn't been charged yet, and record
@@ -333,6 +337,7 @@ mod tests {
 
     fn tool_use(id: &str, name: &str, t: Option<DateTime<Utc>>) -> SessionEvent {
         SessionEvent::AssistantToolUse {
+            usage: None,
             ts: t,
             uuid: None,
             model: None,

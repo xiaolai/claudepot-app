@@ -9,8 +9,11 @@
 export interface ModelRatesDto {
   input_per_mtok: number;
   output_per_mtok: number;
+  /** Five-minute cache writes. */
   cache_write_per_mtok: number;
   cache_read_per_mtok: number;
+  /** One-hour cache writes. */
+  cache_write_1h_per_mtok: number;
 }
 
 /** Where the current price table came from. */
@@ -31,6 +34,7 @@ export interface RatePeriodDto {
   output_per_mtok: number;
   cache_write_per_mtok: number;
   cache_read_per_mtok: number;
+  cache_write_1h_per_mtok: number;
 }
 
 /** The dated rate book: every priced model's periods plus the family
@@ -40,6 +44,12 @@ export interface PriceBookSnapshotDto {
   models: Record<string, RatePeriodDto[]>;
   /** `claude-<family>-` → the model id an unlisted member falls back to. */
   family_current: Record<string, string>;
+  /** Model id → fast-mode rates, for the models that have their own. */
+  fast_models: Record<string, RatePeriodDto>;
+  /** Per server-side web search. */
+  web_search_usd_per_request: number;
+  /** Token-cost multiplier for US-only inference. */
+  us_geo_multiplier: number;
 }
 
 export interface PriceTableDto {

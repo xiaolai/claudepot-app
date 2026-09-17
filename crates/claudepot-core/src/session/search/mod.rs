@@ -950,6 +950,7 @@ mod tests {
         last: Option<DateTime<Utc>>,
     ) -> SessionRow {
         SessionRow {
+            premium: Default::default(),
             session_id: session_id.into(),
             slug: slug.into(),
             file_path,

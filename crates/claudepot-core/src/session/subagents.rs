@@ -363,9 +363,14 @@ fn parse_subagent_file(path: &Path) -> Result<Subagent, SessionError> {
                 metrics.message_count += 1;
                 metrics.thinking_count += 1;
             }
-            SessionEvent::AssistantToolUse { .. } => {
+            SessionEvent::AssistantToolUse { usage, uuid, .. } => {
                 metrics.message_count += 1;
                 metrics.tool_call_count += 1;
+                if let Some(u) = usage {
+                    if should_charge_usage(uuid, &mut usage_counted) {
+                        add_usage(&mut metrics.tokens, u);
+                    }
+                }
             }
             SessionEvent::UserToolResult { .. } => {
                 metrics.message_count += 1;
@@ -411,10 +416,7 @@ fn event_ts(ev: &SessionEvent) -> Option<DateTime<Utc>> {
 }
 
 fn add_usage(acc: &mut TokenUsage, u: &TokenUsage) {
-    acc.input += u.input;
-    acc.output += u.output;
-    acc.cache_creation += u.cache_creation;
-    acc.cache_read += u.cache_read;
+    acc.add(u);
 }
 
 fn truncate(s: &str, max: usize) -> String {
@@ -640,6 +642,7 @@ mod tests {
         })
         .to_string();
         let parent_events = vec![SessionEvent::AssistantToolUse {
+            usage: None,
             ts: None,
             uuid: None,
             model: None,
@@ -686,6 +689,7 @@ mod tests {
         // form, input_full carries the whole payload.
         let preview: String = parent_input.chars().take(240).collect();
         let parent_events = vec![SessionEvent::AssistantToolUse {
+            usage: None,
             ts: None,
             uuid: None,
             model: None,
@@ -735,6 +739,7 @@ mod tests {
         })
         .to_string();
         let parent_events = vec![SessionEvent::AssistantToolUse {
+            usage: None,
             ts: None,
             uuid: None,
             model: None,
@@ -775,6 +780,7 @@ mod tests {
         );
         let mut agents = resolve_subagents(tmp.path(), "-r", "S1").unwrap();
         let parent_events = vec![SessionEvent::AssistantToolUse {
+            usage: None,
             ts: None,
             uuid: None,
             model: None,
@@ -805,6 +811,7 @@ mod tests {
         let mut agents = resolve_subagents(tmp.path(), "-r", "S1").unwrap();
         let parent_events = vec![
             SessionEvent::AssistantToolUse {
+                usage: None,
                 ts: None,
                 uuid: None,
                 model: None,

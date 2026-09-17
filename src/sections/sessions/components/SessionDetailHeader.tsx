@@ -81,15 +81,13 @@ export function SessionDetailHeader({
   const cost = sessionCostEstimate(
     priceTable,
     row.models,
-    {
-      input: row.tokens.input,
-      output: row.tokens.output,
-      cache_read: row.tokens.cache_read,
-      cache_creation: row.tokens.cache_creation,
-    },
+    // The whole token row — a hand-picked subset dropped one-hour
+    // writes and web searches from the figure.
+    row.tokens,
     // Event time, not file mtime — mtime moves when a transcript is
     // moved or rewritten, which would re-price it. See `lib/sessionTime`.
     sessionEventMs(row.last_ts, row.last_modified_ms),
+    row.premium,
   );
 
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);

@@ -10,7 +10,7 @@
 //! transaction, and a reader (`load_turns`) used by consumer
 //! surfaces.
 
-use crate::session::{TokenUsage, TurnRecord};
+use crate::session::{PremiumKind, PremiumUsage, TokenUsage, TurnRecord};
 use rusqlite::{params, Connection};
 
 use super::SessionIndexError;
@@ -51,9 +51,36 @@ pub(super) fn replace_turns(
             i64::try_from(t.tokens.cache_creation).unwrap_or(i64::MAX),
             i64::try_from(t.tokens.cache_read).unwrap_or(i64::MAX),
             preview,
+            i64::try_from(t.tokens.cache_creation_1h).unwrap_or(i64::MAX),
+            i64::try_from(t.tokens.web_search_requests).unwrap_or(i64::MAX),
+            premium_kind_of(&t.premium).as_column(),
         ])?;
     }
     Ok(())
+}
+
+/// The bucket a turn's premium names. A turn is one message, so at most
+/// one bucket holds anything.
+fn premium_kind_of(p: &PremiumUsage) -> PremiumKind {
+    if !p.fast_us.is_zero() {
+        PremiumKind::FastUs
+    } else if !p.fast.is_zero() {
+        PremiumKind::Fast
+    } else if !p.us.is_zero() {
+        PremiumKind::Us
+    } else {
+        PremiumKind::Standard
+    }
+}
+
+fn premium_from_row(tokens: &TokenUsage, r: &rusqlite::Row) -> PremiumUsage {
+    let kind = PremiumKind::from_column(
+        r.get::<_, Option<String>>("premium_kind")
+            .ok()
+            .flatten()
+            .as_deref(),
+    );
+    PremiumUsage::single(kind, tokens)
 }
 
 /// Drop every per-turn row for `file_path`. Called by `codec::delete_row`
@@ -87,6 +114,8 @@ pub struct TurnCandidate {
     pub ts_ms: Option<i64>,
     pub model: String,
     pub tokens: TokenUsage,
+    /// The turn's tokens in the bucket of the price they were billed at.
+    pub premium: PremiumUsage,
     pub user_prompt_preview: Option<String>,
 }
 
@@ -124,14 +153,23 @@ pub fn fetch_turn_candidates(
             turn_index: usize::try_from(r.get::<_, i64>("turn_index")?).unwrap_or(0),
             ts_ms: r.get("ts_ms")?,
             model: r.get("model")?,
+            premium: PremiumUsage::default(),
             tokens: TokenUsage {
                 input: u64::try_from(r.get::<_, i64>("tokens_input")?).unwrap_or(0),
                 output: u64::try_from(r.get::<_, i64>("tokens_output")?).unwrap_or(0),
                 cache_creation: u64::try_from(r.get::<_, i64>("tokens_cache_creation")?)
                     .unwrap_or(0),
                 cache_read: u64::try_from(r.get::<_, i64>("tokens_cache_read")?).unwrap_or(0),
+                cache_creation_1h: u64::try_from(r.get::<_, i64>("tokens_cache_creation_1h")?)
+                    .unwrap_or(0),
+                web_search_requests: u64::try_from(r.get::<_, i64>("tokens_web_search")?)
+                    .unwrap_or(0),
             },
             user_prompt_preview: r.get("user_prompt_preview")?,
+        })
+        .map(|mut c| {
+            c.premium = premium_from_row(&c.tokens, r);
+            c
         })
     };
     let rows: Vec<TurnCandidate> = match (has_from, has_to) {
@@ -175,8 +213,17 @@ pub fn load_turns(db: &Connection, file_path: &str) -> Result<Vec<TurnRecord>, S
                 cache_creation: u64::try_from(r.get::<_, i64>("tokens_cache_creation")?)
                     .unwrap_or(0),
                 cache_read: u64::try_from(r.get::<_, i64>("tokens_cache_read")?).unwrap_or(0),
+                cache_creation_1h: u64::try_from(r.get::<_, i64>("tokens_cache_creation_1h")?)
+                    .unwrap_or(0),
+                web_search_requests: u64::try_from(r.get::<_, i64>("tokens_web_search")?)
+                    .unwrap_or(0),
             },
             user_prompt_preview: r.get("user_prompt_preview")?,
+            premium: PremiumUsage::default(),
+        })
+        .map(|mut t| {
+            t.premium = premium_from_row(&t.tokens, r);
+            t
         })
     })?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -192,6 +239,7 @@ const TURN_RANK_EXPR: &str =
 const SQL_TURN_CANDIDATES_BOTH: &str = r#"
 SELECT t.file_path, s.project_path, t.turn_index, t.ts_ms, t.model,
        t.tokens_input, t.tokens_output, t.tokens_cache_creation, t.tokens_cache_read,
+       t.tokens_cache_creation_1h, t.tokens_web_search, t.premium_kind,
        t.user_prompt_preview
 FROM session_turns t
 JOIN sessions s ON s.file_path = t.file_path
@@ -205,6 +253,7 @@ LIMIT ?3
 const SQL_TURN_CANDIDATES_FROM: &str = r#"
 SELECT t.file_path, s.project_path, t.turn_index, t.ts_ms, t.model,
        t.tokens_input, t.tokens_output, t.tokens_cache_creation, t.tokens_cache_read,
+       t.tokens_cache_creation_1h, t.tokens_web_search, t.premium_kind,
        t.user_prompt_preview
 FROM session_turns t
 JOIN sessions s ON s.file_path = t.file_path
@@ -217,6 +266,7 @@ LIMIT ?2
 const SQL_TURN_CANDIDATES_TO: &str = r#"
 SELECT t.file_path, s.project_path, t.turn_index, t.ts_ms, t.model,
        t.tokens_input, t.tokens_output, t.tokens_cache_creation, t.tokens_cache_read,
+       t.tokens_cache_creation_1h, t.tokens_web_search, t.premium_kind,
        t.user_prompt_preview
 FROM session_turns t
 JOIN sessions s ON s.file_path = t.file_path
@@ -229,6 +279,7 @@ LIMIT ?2
 const SQL_TURN_CANDIDATES_OPEN: &str = r#"
 SELECT t.file_path, s.project_path, t.turn_index, t.ts_ms, t.model,
        t.tokens_input, t.tokens_output, t.tokens_cache_creation, t.tokens_cache_read,
+       t.tokens_cache_creation_1h, t.tokens_web_search, t.premium_kind,
        t.user_prompt_preview
 FROM session_turns t
 JOIN sessions s ON s.file_path = t.file_path
@@ -246,8 +297,9 @@ const SQL_INSERT_TURN: &str = r#"
 INSERT INTO session_turns (
     file_path, turn_index, ts_ms, model,
     tokens_input, tokens_output, tokens_cache_creation, tokens_cache_read,
-    user_prompt_preview
-) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+    user_prompt_preview,
+    tokens_cache_creation_1h, tokens_web_search, premium_kind
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
 "#;
 
 // Test-only, paired with `load_turns` above.
@@ -256,6 +308,7 @@ const SQL_SELECT_TURNS_BY_FILE: &str = r#"
 SELECT
     turn_index, ts_ms, model,
     tokens_input, tokens_output, tokens_cache_creation, tokens_cache_read,
+    tokens_cache_creation_1h, tokens_web_search, premium_kind,
     user_prompt_preview
 FROM session_turns
 WHERE file_path = ?1

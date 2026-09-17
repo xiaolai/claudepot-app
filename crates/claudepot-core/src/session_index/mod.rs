@@ -725,6 +725,78 @@ pub struct RefreshStats {
 /// The unified `_pending_rescan` marker triggers cache invalidation
 /// even when versions match — covers both "Rebuild Shared Memory"
 /// and "Forget Shared Memory" recovery paths.
+/// Version of the token accounting the stored rows were written with.
+///
+/// `"2"` charges each API message once (see `session::usage`) and
+/// records one-hour cache writes, web searches and the fast / US-only
+/// premium. Rows from before it counted a message once per content
+/// block — 2–6× the real totals — and have none of the new columns.
+const TOKEN_ACCOUNTING: &str = "2";
+
+/// Bring the token columns up to [`TOKEN_ACCOUNTING`].
+///
+/// Deliberately **not** a `SCHEMA_VERSION` bump: that path deletes every
+/// session row, and the delete cascades into shared-memory provenance
+/// nothing can rebuild. Instead the new columns are added in place and
+/// every row's re-parse guard is voided, so the next refresh re-reads
+/// each transcript and overwrites its row with `ON CONFLICT DO UPDATE`,
+/// which cascades nothing. Idempotent: the marker makes the second open
+/// a pair of no-op probes.
+fn apply_token_accounting(tx: &rusqlite::Transaction) -> Result<(), SessionIndexError> {
+    let add = |table: &str, column: &str, decl: &str| -> Result<(), SessionIndexError> {
+        let present: bool = tx
+            .query_row(
+                &format!("SELECT 1 FROM pragma_table_info('{table}') WHERE name = ?1"),
+                [column],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+        if !present {
+            tx.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl};"))?;
+        }
+        Ok(())
+    };
+    add(
+        "sessions",
+        "tokens_cache_creation_1h",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    add(
+        "sessions",
+        "tokens_web_search",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    add("sessions", "usage_premium_json", "TEXT")?;
+    add(
+        "session_turns",
+        "tokens_cache_creation_1h",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    add(
+        "session_turns",
+        "tokens_web_search",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    add("session_turns", "premium_kind", "TEXT")?;
+
+    let current: Option<String> = tx
+        .query_row("SELECT v FROM meta WHERE k = 'token_accounting'", [], |r| {
+            r.get(0)
+        })
+        .ok();
+    if current.as_deref() != Some(TOKEN_ACCOUNTING) {
+        // A guard no file can match: every row is re-read on the next
+        // refresh. `file_mtime_ns` is never negative for a real file.
+        tx.execute("UPDATE sessions SET file_mtime_ns = -1", [])?;
+        tx.execute(
+            "INSERT INTO meta (k, v) VALUES ('token_accounting', ?1)
+             ON CONFLICT(k) DO UPDATE SET v = excluded.v",
+            [TOKEN_ACCOUNTING],
+        )?;
+    }
+    Ok(())
+}
+
 fn apply_schema(db: &Connection) -> Result<(), SessionIndexError> {
     let current_version = crate::artifact_usage::schema::SCHEMA_VERSION;
 
@@ -796,6 +868,8 @@ fn apply_schema(db: &Connection) -> Result<(), SessionIndexError> {
             "ALTER TABLE sessions ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'claude_code';",
         )?;
     }
+
+    apply_token_accounting(&tx)?;
 
     // Apply the v4 Shared Memory tables + triggers (idempotent).
     tx.execute_batch(crate::shared_memory::schema::SCHEMA)?;
@@ -2495,6 +2569,99 @@ mod tests {
         );
         // Non-stamped sibling untouched.
         assert!(tmp.path().join("sessions.db.corrupt-notastamp").exists());
+    }
+
+    /// An index written before per-message accounting stored 2–6×
+    /// the real totals. Opening it must re-read every transcript —
+    /// without deleting a row, since deleting cascades into
+    /// shared-memory provenance.
+    #[test]
+    fn opening_an_index_from_the_old_accounting_rereads_every_transcript() {
+        let tmp = TempDir::new().unwrap();
+        let cfg = tmp.path().join("cfg");
+        let slug_dir = cfg.join("projects").join("-p");
+        std::fs::create_dir_all(&slug_dir).unwrap();
+        let line = |uuid: &str, part: &str| {
+            format!(
+                r#"{{"type":"assistant","uuid":"{uuid}","message":{{"id":"msg_1","role":"assistant","model":"claude-opus-5","content":[{part}],"usage":{{"input_tokens":1,"output_tokens":100,"cache_creation":{{"ephemeral_1h_input_tokens":0}}}}}},"timestamp":"2026-09-17T10:00:00Z","cwd":"/p","sessionId":"S1"}}"#
+            )
+        };
+        std::fs::write(
+            slug_dir.join("S1.jsonl"),
+            format!(
+                "{}\n{}\n",
+                line("a1", r#"{"type":"text","text":"x"}"#),
+                line(
+                    "a2",
+                    r#"{"type":"tool_use","id":"t","name":"Bash","input":{}}"#
+                )
+            ),
+        )
+        .unwrap();
+        let path = tmp.path().join("sessions.db");
+        let idx = SessionIndex::open(&path).unwrap();
+        idx.refresh(&cfg).unwrap();
+        assert_eq!(idx.list_all(&cfg).unwrap()[0].tokens.output, 100);
+        drop(idx);
+
+        // Put the file back the way an older build left it: the doubled
+        // total, no new columns, no marker.
+        {
+            let db = Connection::open(&path).unwrap();
+            db.execute_batch(
+                "UPDATE sessions SET tokens_output = 200;
+                 DELETE FROM meta WHERE k = 'token_accounting';
+                 ALTER TABLE sessions DROP COLUMN usage_premium_json;
+                 ALTER TABLE sessions DROP COLUMN tokens_web_search;
+                 ALTER TABLE sessions DROP COLUMN tokens_cache_creation_1h;
+                 ALTER TABLE session_turns DROP COLUMN premium_kind;
+                 ALTER TABLE session_turns DROP COLUMN tokens_web_search;
+                 ALTER TABLE session_turns DROP COLUMN tokens_cache_creation_1h;",
+            )
+            .unwrap();
+        }
+
+        let idx = SessionIndex::open(&path).unwrap();
+        assert_eq!(idx.row_count().unwrap(), 1, "no row is deleted");
+        let rows = idx.list_all(&cfg).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].tokens.output, 100, "the stale total is re-read");
+        drop(idx);
+
+        // The marker makes the next open a no-op: a row with a stale
+        // total stays stale, because nothing asked for a re-read.
+        {
+            let db = Connection::open(&path).unwrap();
+            db.execute("UPDATE sessions SET tokens_output = 7", [])
+                .unwrap();
+        }
+        let idx = SessionIndex::open(&path).unwrap();
+        assert_eq!(idx.list_all(&cfg).unwrap()[0].tokens.output, 7);
+    }
+
+    #[test]
+    fn premium_and_one_hour_writes_survive_the_index() {
+        let tmp = TempDir::new().unwrap();
+        let cfg = tmp.path().join("cfg");
+        let slug_dir = cfg.join("projects").join("-p");
+        std::fs::create_dir_all(&slug_dir).unwrap();
+        std::fs::write(
+            slug_dir.join("S1.jsonl"),
+            concat!(
+                r#"{"type":"assistant","uuid":"a1","message":{"id":"msg_1","role":"assistant","model":"claude-opus-5","content":[{"type":"text","text":"x"}],"usage":{"input_tokens":1,"output_tokens":100,"cache_creation_input_tokens":50,"cache_creation":{"ephemeral_1h_input_tokens":30},"server_tool_use":{"web_search_requests":2},"speed":"fast"}},"timestamp":"2026-09-17T10:00:00Z","cwd":"/p","sessionId":"S1"}"#,
+                "\n"
+            ),
+        )
+        .unwrap();
+        let idx = SessionIndex::open(&tmp.path().join("sessions.db")).unwrap();
+        let row = &idx.list_all(&cfg).unwrap()[0];
+        assert_eq!(row.tokens.cache_creation_1h, 30);
+        assert_eq!(row.tokens.web_search_requests, 2);
+        assert_eq!(row.premium.fast.output, 100);
+        let turns = idx.turn_candidates(None, None, 10).unwrap();
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].tokens.cache_creation_1h, 30);
+        assert_eq!(turns[0].premium.fast.output, 100);
     }
 
     #[test]

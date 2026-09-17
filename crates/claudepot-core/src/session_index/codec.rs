@@ -229,6 +229,9 @@ pub(super) fn upsert_row(
             row.has_error as i64,
             row.is_sidechain as i64,
             indexed_at_ms,
+            i64::try_from(row.tokens.cache_creation_1h).unwrap_or(i64::MAX),
+            i64::try_from(row.tokens.web_search_requests).unwrap_or(i64::MAX),
+            row.premium.to_column(),
         ],
     )?;
     Ok(())
@@ -360,7 +363,13 @@ fn row_from_sql(r: &rusqlite::Row) -> rusqlite::Result<SessionRow> {
             output: u64::try_from(r.get::<_, i64>("tokens_output")?).unwrap_or(0),
             cache_creation: u64::try_from(r.get::<_, i64>("tokens_cache_creation")?).unwrap_or(0),
             cache_read: u64::try_from(r.get::<_, i64>("tokens_cache_read")?).unwrap_or(0),
+            cache_creation_1h: u64::try_from(r.get::<_, i64>("tokens_cache_creation_1h")?)
+                .unwrap_or(0),
+            web_search_requests: u64::try_from(r.get::<_, i64>("tokens_web_search")?).unwrap_or(0),
         },
+        premium: crate::session::PremiumUsage::from_column(
+            r.get::<_, Option<String>>("usage_premium_json")?.as_deref(),
+        ),
         git_branch: r.get("git_branch")?,
         cc_version: r.get("cc_version")?,
         display_slug: r.get("display_slug")?,
@@ -402,10 +411,11 @@ INSERT INTO sessions (
     first_user_prompt, models_json,
     tokens_input, tokens_output, tokens_cache_creation, tokens_cache_read,
     git_branch, cc_version, display_slug, has_error, is_sidechain,
-    indexed_at_ms
+    indexed_at_ms,
+    tokens_cache_creation_1h, tokens_web_search, usage_premium_json
 ) VALUES (
     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-    ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26
+    ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29
 )
 ON CONFLICT(file_path) DO UPDATE SET
     slug                     = excluded.slug,
@@ -432,7 +442,10 @@ ON CONFLICT(file_path) DO UPDATE SET
     display_slug             = excluded.display_slug,
     has_error                = excluded.has_error,
     is_sidechain             = excluded.is_sidechain,
-    indexed_at_ms            = excluded.indexed_at_ms
+    indexed_at_ms            = excluded.indexed_at_ms,
+    tokens_cache_creation_1h = excluded.tokens_cache_creation_1h,
+    tokens_web_search        = excluded.tokens_web_search,
+    usage_premium_json       = excluded.usage_premium_json
 "#;
 
 // Not `#[cfg(test)]`: `get_row_by_path` is production code now (it backs
@@ -444,6 +457,7 @@ SELECT
     event_count, message_count, user_message_count, assistant_message_count,
     first_user_prompt, models_json,
     tokens_input, tokens_output, tokens_cache_creation, tokens_cache_read,
+    tokens_cache_creation_1h, tokens_web_search, usage_premium_json,
     git_branch, cc_version, display_slug, has_error, is_sidechain,
     indexed_at_ms
 FROM sessions
@@ -456,6 +470,7 @@ SELECT
     event_count, message_count, user_message_count, assistant_message_count,
     first_user_prompt, models_json,
     tokens_input, tokens_output, tokens_cache_creation, tokens_cache_read,
+    tokens_cache_creation_1h, tokens_web_search, usage_premium_json,
     git_branch, cc_version, display_slug, has_error, is_sidechain,
     indexed_at_ms
 FROM sessions
@@ -470,6 +485,7 @@ SELECT
     event_count, message_count, user_message_count, assistant_message_count,
     first_user_prompt, models_json,
     tokens_input, tokens_output, tokens_cache_creation, tokens_cache_read,
+    tokens_cache_creation_1h, tokens_web_search, usage_premium_json,
     git_branch, cc_version, display_slug, has_error, is_sidechain,
     indexed_at_ms
 FROM sessions

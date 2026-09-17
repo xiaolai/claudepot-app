@@ -11,6 +11,9 @@ pub struct TokenUsageDto {
     pub output: u64,
     pub cache_creation: u64,
     pub cache_read: u64,
+    /// Of `cache_creation`, the one-hour writes.
+    pub cache_creation_1h: u64,
+    pub web_search_requests: u64,
     pub total: u64,
 }
 
@@ -21,6 +24,8 @@ impl From<&claudepot_core::session::TokenUsage> for TokenUsageDto {
             output: t.output,
             cache_creation: t.cache_creation,
             cache_read: t.cache_read,
+            cache_creation_1h: t.cache_creation_1h,
+            web_search_requests: t.web_search_requests,
             total: t.total(),
         }
     }
@@ -44,6 +49,10 @@ pub struct SessionRowDto {
     pub first_user_prompt: Option<String>,
     pub models: Vec<String>,
     pub tokens: TokenUsageDto,
+    /// The part of `tokens` billed above the standard rate. Omitted
+    /// when there is none, which is nearly always.
+    #[serde(skip_serializing_if = "claudepot_core::session::PremiumUsage::is_empty")]
+    pub premium: claudepot_core::session::PremiumUsage,
     pub git_branch: Option<String>,
     pub cc_version: Option<String>,
     pub display_slug: Option<String>,
@@ -70,6 +79,7 @@ impl From<&claudepot_core::session::SessionRow> for SessionRowDto {
             first_user_prompt: r.first_user_prompt.clone(),
             models: r.models.clone(),
             tokens: TokenUsageDto::from(&r.tokens),
+            premium: r.premium.clone(),
             git_branch: r.git_branch.clone(),
             cc_version: r.cc_version.clone(),
             display_slug: r.display_slug.clone(),
@@ -110,6 +120,10 @@ pub enum SessionEventDto {
         ts: Option<DateTime<Utc>>,
         uuid: Option<String>,
         model: Option<String>,
+        /// The message's usage when this call is where it rides — see
+        /// `claudepot_core::session::usage`.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        usage: Option<TokenUsageDto>,
         tool_name: String,
         tool_use_id: String,
         input_preview: String,
@@ -211,6 +225,7 @@ impl From<&claudepot_core::session::SessionEvent> for SessionEventDto {
                 ts,
                 uuid,
                 model,
+                usage,
                 tool_name,
                 tool_use_id,
                 input_preview,
@@ -219,6 +234,7 @@ impl From<&claudepot_core::session::SessionEvent> for SessionEventDto {
                 ts: *ts,
                 uuid: uuid.clone(),
                 model: model.clone(),
+                usage: usage.as_ref().map(TokenUsageDto::from),
                 tool_name: tool_name.clone(),
                 tool_use_id: tool_use_id.clone(),
                 input_preview: input_preview.clone(),

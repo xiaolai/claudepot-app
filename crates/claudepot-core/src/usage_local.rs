@@ -417,7 +417,7 @@ pub fn rank_candidates(
             // so a ranking that spans a price change compares what the
             // turns actually cost rather than re-scoring them all at
             // today's rate.
-            let cost = prices.cost_at_ms(&c.model, c.ts_ms, &c.tokens)?;
+            let cost = prices.cost_at_ms(&c.model, c.ts_ms, &c.tokens, &c.premium)?;
             Some(CostlyTurn {
                 file_path: c.file_path,
                 project_path: c.project_path,
@@ -466,7 +466,7 @@ fn compute_session_cost(
     last_ms: Option<i64>,
 ) -> Option<PricedCost> {
     let model = dominant_model(&s.models)?;
-    prices.cost_at_ms(model, last_ms, &s.tokens)
+    prices.cost_at_ms(model, last_ms, &s.tokens, &s.premium)
 }
 
 /// Pick the dominant model from a session's recorded model list. CC
@@ -520,6 +520,7 @@ mod tests {
 
     fn row(project: &str, last_ts_ms: i64, models: Vec<&str>, tokens: TokenUsage) -> SessionRow {
         SessionRow {
+            premium: Default::default(),
             session_id: "sess".into(),
             slug: "slug".into(),
             file_path: PathBuf::from("/tmp/x.jsonl"),
@@ -594,6 +595,8 @@ mod tests {
                 1_000,
                 vec!["claude-sonnet-4-6"],
                 TokenUsage {
+                    cache_creation_1h: 0,
+                    web_search_requests: 0,
                     input: 1_000_000,
                     output: 500_000,
                     cache_creation: 100_000,
@@ -605,6 +608,8 @@ mod tests {
                 2_000,
                 vec!["claude-sonnet-4-6"],
                 TokenUsage {
+                    cache_creation_1h: 0,
+                    web_search_requests: 0,
                     input: 100_000,
                     output: 50_000,
                     cache_creation: 0,
@@ -616,6 +621,8 @@ mod tests {
                 3_000,
                 vec!["claude-opus-4-7"],
                 TokenUsage {
+                    cache_creation_1h: 0,
+                    web_search_requests: 0,
                     input: 200_000,
                     output: 100_000,
                     cache_creation: 0,
@@ -668,6 +675,8 @@ mod tests {
             1_800_000_000_000,
             vec!["<synthetic>", "claude-opus-5"],
             TokenUsage {
+                cache_creation_1h: 0,
+                web_search_requests: 0,
                 input: 1_000_000,
                 output: 1_000_000,
                 cache_creation: 0,
@@ -722,6 +731,8 @@ mod tests {
                 1_000,
                 vec!["claude-sonnet-4-6"],
                 TokenUsage {
+                    cache_creation_1h: 0,
+                    web_search_requests: 0,
                     input: 1_000_000,
                     output: 0,
                     cache_creation: 0,
@@ -734,6 +745,8 @@ mod tests {
                 2_000,
                 vec!["claude-future-9000"],
                 TokenUsage {
+                    cache_creation_1h: 0,
+                    web_search_requests: 0,
                     input: 500_000,
                     output: 0,
                     cache_creation: 0,
@@ -746,6 +759,8 @@ mod tests {
                 3_000,
                 vec![],
                 TokenUsage {
+                    cache_creation_1h: 0,
+                    web_search_requests: 0,
                     input: 250_000,
                     output: 0,
                     cache_creation: 0,
@@ -784,6 +799,7 @@ mod tests {
         assert!(history.observe(
             "claude-opus-5",
             &crate::pricing::ModelRates {
+                cache_write_1h_per_mtok: 14.0,
                 input_per_mtok: 7.0,
                 output_per_mtok: 35.0,
                 cache_write_per_mtok: 8.75,
@@ -794,6 +810,8 @@ mod tests {
         ));
         let prices = PriceBook::with_history(history);
         let tokens = TokenUsage {
+            cache_creation_1h: 0,
+            web_search_requests: 0,
             input: 1_000_000,
             output: 0,
             cache_creation: 0,
@@ -836,6 +854,8 @@ mod tests {
                 1_000,
                 vec!["claude-opus-9"],
                 TokenUsage {
+                    cache_creation_1h: 0,
+                    web_search_requests: 0,
                     input: 1_000_000,
                     output: 0,
                     cache_creation: 0,
@@ -860,6 +880,8 @@ mod tests {
                 1_000,
                 vec!["claude-opus-5"],
                 TokenUsage {
+                    cache_creation_1h: 0,
+                    web_search_requests: 0,
                     input: 1_000_000,
                     output: 0,
                     cache_creation: 0,
@@ -883,6 +905,8 @@ mod tests {
                     0,
                     "claude-opus-9",
                     TokenUsage {
+                        cache_creation_1h: 0,
+                        web_search_requests: 0,
                         input: 1_000_000,
                         output: 0,
                         cache_creation: 0,
@@ -894,6 +918,8 @@ mod tests {
                     1,
                     "claude-opus-5",
                     TokenUsage {
+                        cache_creation_1h: 0,
+                        web_search_requests: 0,
                         input: 900_000,
                         output: 0,
                         cache_creation: 0,
@@ -919,6 +945,8 @@ mod tests {
             1_000,
             vec![],
             TokenUsage {
+                cache_creation_1h: 0,
+                web_search_requests: 0,
                 input: 1_000,
                 output: 0,
                 cache_creation: 0,
@@ -942,6 +970,8 @@ mod tests {
                 500,
                 vec!["claude-sonnet-4-6"],
                 TokenUsage {
+                    cache_creation_1h: 0,
+                    web_search_requests: 0,
                     input: 1,
                     output: 0,
                     cache_creation: 0,
@@ -953,6 +983,8 @@ mod tests {
                 1_500,
                 vec!["claude-sonnet-4-6"],
                 TokenUsage {
+                    cache_creation_1h: 0,
+                    web_search_requests: 0,
                     input: 1,
                     output: 0,
                     cache_creation: 0,
@@ -980,6 +1012,8 @@ mod tests {
                 1_000,
                 vec!["claude-opus-4-7"],
                 TokenUsage {
+                    cache_creation_1h: 0,
+                    web_search_requests: 0,
                     input: 1,
                     output: 0,
                     cache_creation: 0,
@@ -991,6 +1025,8 @@ mod tests {
                 2_000,
                 vec!["claude-opus-4-7", "claude-sonnet-4-6"],
                 TokenUsage {
+                    cache_creation_1h: 0,
+                    web_search_requests: 0,
                     input: 1,
                     output: 0,
                     cache_creation: 0,
@@ -1003,6 +1039,8 @@ mod tests {
                 3_000,
                 vec!["claude-sonnet-4-6"],
                 TokenUsage {
+                    cache_creation_1h: 0,
+                    web_search_requests: 0,
                     input: 1,
                     output: 0,
                     cache_creation: 0,
@@ -1015,6 +1053,8 @@ mod tests {
                 4_000,
                 vec![],
                 TokenUsage {
+                    cache_creation_1h: 0,
+                    web_search_requests: 0,
                     input: 1,
                     output: 0,
                     cache_creation: 0,
@@ -1055,6 +1095,8 @@ mod tests {
             1,
             vec![],
             TokenUsage {
+                cache_creation_1h: 0,
+                web_search_requests: 0,
                 input: 1,
                 output: 0,
                 cache_creation: 0,
@@ -1080,6 +1122,7 @@ mod tests {
         tokens: TokenUsage,
     ) -> TurnCandidate {
         TurnCandidate {
+            premium: Default::default(),
             file_path: format!("/p/{turn_index}.jsonl"),
             project_path: project.into(),
             turn_index,
@@ -1103,6 +1146,8 @@ mod tests {
                 0,
                 "claude-opus-4-7",
                 TokenUsage {
+                    cache_creation_1h: 0,
+                    web_search_requests: 0,
                     input: 3_000_000,
                     output: 0,
                     cache_creation: 0,
@@ -1114,6 +1159,8 @@ mod tests {
                 1,
                 "claude-sonnet-4-6",
                 TokenUsage {
+                    cache_creation_1h: 0,
+                    web_search_requests: 0,
                     input: 5_000_000,
                     output: 0,
                     cache_creation: 0,
@@ -1125,6 +1172,8 @@ mod tests {
                 2,
                 "claude-opus-4-7",
                 TokenUsage {
+                    cache_creation_1h: 0,
+                    web_search_requests: 0,
                     input: 500_000,
                     output: 0,
                     cache_creation: 0,
@@ -1150,6 +1199,8 @@ mod tests {
                 0,
                 "claude-future-9000",
                 TokenUsage {
+                    cache_creation_1h: 0,
+                    web_search_requests: 0,
                     input: 100_000_000,
                     output: 0,
                     cache_creation: 0,
@@ -1161,6 +1212,8 @@ mod tests {
                 1,
                 "claude-opus-4-7",
                 TokenUsage {
+                    cache_creation_1h: 0,
+                    web_search_requests: 0,
                     input: 1_000,
                     output: 0,
                     cache_creation: 0,
@@ -1181,6 +1234,8 @@ mod tests {
             0,
             "claude-opus-4-7",
             TokenUsage {
+                cache_creation_1h: 0,
+                web_search_requests: 0,
                 input: 1_000_000,
                 output: 0,
                 cache_creation: 0,
@@ -1198,6 +1253,8 @@ mod tests {
             0,
             "claude-opus-4-7",
             TokenUsage {
+                cache_creation_1h: 0,
+                web_search_requests: 0,
                 input: 1_000_000,
                 output: 0,
                 cache_creation: 0,
@@ -1214,6 +1271,8 @@ mod tests {
         // stable-row-key strategy depends on a deterministic fallback.
         let prices = rates_for_test();
         let tokens = TokenUsage {
+            cache_creation_1h: 0,
+            web_search_requests: 0,
             input: 1_000_000,
             output: 0,
             cache_creation: 0,
@@ -1235,6 +1294,8 @@ mod tests {
         // Same payload, two model orderings → identical cost.
         let prices = rates_for_test();
         let tokens = TokenUsage {
+            cache_creation_1h: 0,
+            web_search_requests: 0,
             input: 1_000_000,
             output: 0,
             cache_creation: 0,

@@ -83,19 +83,60 @@ impl crate::error_code::ErrorCode for SessionError {
 // Public types — cross the Tauri boundary via DTO conversion.
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TokenUsage {
     pub input: u64,
     pub output: u64,
+    /// Every cache write, five-minute and one-hour together.
     pub cache_creation: u64,
     pub cache_read: u64,
+    /// The part of `cache_creation` written to the one-hour cache,
+    /// which bills at 2× input instead of 1.25×. See [`usage`].
+    pub cache_creation_1h: u64,
+    /// Server-side web searches, billed per request.
+    pub web_search_requests: u64,
 }
 
 impl TokenUsage {
+    /// Tokens of every class. `cache_creation_1h` is inside
+    /// `cache_creation` and web searches are not tokens, so neither is
+    /// added again.
     pub fn total(&self) -> u64 {
         self.input + self.output + self.cache_creation + self.cache_read
     }
+
+    pub fn is_zero(&self) -> bool {
+        *self == Self::default()
+    }
+
+    pub fn add(&mut self, other: &TokenUsage) {
+        self.input += other.input;
+        self.output += other.output;
+        self.cache_creation += other.cache_creation;
+        self.cache_read += other.cache_read;
+        self.cache_creation_1h += other.cache_creation_1h;
+        self.web_search_requests += other.web_search_requests;
+    }
+
+    /// Field-wise `self - other`, floored at zero.
+    pub fn saturating_sub(&self, other: &TokenUsage) -> TokenUsage {
+        TokenUsage {
+            input: self.input.saturating_sub(other.input),
+            output: self.output.saturating_sub(other.output),
+            cache_creation: self.cache_creation.saturating_sub(other.cache_creation),
+            cache_read: self.cache_read.saturating_sub(other.cache_read),
+            cache_creation_1h: self
+                .cache_creation_1h
+                .saturating_sub(other.cache_creation_1h),
+            web_search_requests: self
+                .web_search_requests
+                .saturating_sub(other.web_search_requests),
+        }
+    }
 }
+
+pub use super::usage::{self, PremiumKind, PremiumUsage, UsageLedger};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SessionRow {
@@ -132,7 +173,10 @@ pub struct SessionRow {
     /// Sorted, deduped list of `message.model` values seen on assistant
     /// events. Empty when the session has no assistant turns yet.
     pub models: Vec<String>,
+    /// Each API message counted once — see [`usage`].
     pub tokens: TokenUsage,
+    /// The part of `tokens` billed above the standard rate.
+    pub premium: PremiumUsage,
     /// `gitBranch` field from the last event that carried it — CC
     /// writes the current branch into every line, so we take the most
     /// recent reading.
@@ -188,6 +232,11 @@ pub enum SessionEvent {
         ts: Option<DateTime<Utc>>,
         uuid: Option<String>,
         model: Option<String>,
+        /// The message's usage, on the first text or tool-use event of
+        /// that message only. A message made only of tool calls has no
+        /// text event to carry it, so this is where it rides.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        usage: Option<TokenUsage>,
         tool_name: String,
         tool_use_id: String,
         /// Display-only preview: trimmed, newlines collapsed, capped at
@@ -498,6 +547,10 @@ pub struct TurnRecord {
     /// `model != ''` to drop unmatched turns from per-model breakdowns.
     pub model: String,
     pub tokens: TokenUsage,
+    /// The turn's tokens again, in the bucket of the price they were
+    /// billed at; empty for a standard-rate turn.
+    #[serde(default)]
+    pub premium: PremiumUsage,
     /// Truncated copy of the user prompt that drove this turn. The
     /// nearest preceding `user` message in the stream wins; multiple
     /// assistant turns produced from one prompt all carry the same
@@ -593,6 +646,11 @@ fn scan_session_inner(
     let mut first_user_prompt: Option<String> = None;
     let mut models: BTreeSet<String> = BTreeSet::new();
     let mut tokens = TokenUsage::default();
+    let mut premium = PremiumUsage::default();
+    // Separate ledgers: the totals charge a message at its first line,
+    // the events at its first line that has an event to carry it.
+    let mut ledger = UsageLedger::default();
+    let mut parser = EventParser::default();
     let mut cwd_from_transcript: Option<String> = None;
     let mut git_branch: Option<String> = None;
     let mut cc_version: Option<String> = None;
@@ -656,7 +714,7 @@ fn scan_session_inner(
             }
         };
         if collect_events {
-            emit_events_from_value(&mut events, &v);
+            parser.emit_from_value(&mut events, &v);
         }
 
         // Extract usage events from this line. Agent events come
@@ -742,8 +800,14 @@ fn scan_session_inner(
                 }
             }
             "assistant" => {
-                message_count += 1;
-                assistant_message_count += 1;
+                // Counted per API message, like the tokens below: a
+                // message written as three content-block lines is one
+                // message. A line with no `message` object still counts.
+                let counts = v.get("message").is_none_or(|msg| !ledger.is_charged(msg));
+                if counts {
+                    message_count += 1;
+                    assistant_message_count += 1;
+                }
                 if let Some(msg) = v.get("message") {
                     let turn_model = msg
                         .get("model")
@@ -753,50 +817,46 @@ fn scan_session_inner(
                     if !turn_model.is_empty() {
                         models.insert(turn_model.clone());
                     }
-                    let mut turn_tokens = TokenUsage::default();
-                    if let Some(usage) = msg.get("usage") {
-                        let inp = usage
-                            .get("input_tokens")
-                            .and_then(Value::as_u64)
-                            .unwrap_or(0);
-                        let out = usage
-                            .get("output_tokens")
-                            .and_then(Value::as_u64)
-                            .unwrap_or(0);
-                        let cw = usage
-                            .get("cache_creation_input_tokens")
-                            .and_then(Value::as_u64)
-                            .unwrap_or(0);
-                        let cr = usage
-                            .get("cache_read_input_tokens")
-                            .and_then(Value::as_u64)
-                            .unwrap_or(0);
-                        tokens.input += inp;
-                        tokens.output += out;
-                        tokens.cache_creation += cw;
-                        tokens.cache_read += cr;
-                        turn_tokens = TokenUsage {
-                            input: inp,
-                            output: out,
-                            cache_creation: cw,
-                            cache_read: cr,
-                        };
+                    // A message is written once per content block, each
+                    // line repeating its usage; only the first counts.
+                    let first_sighting = ledger.first_sighting(msg);
+                    let charged = if first_sighting {
+                        usage::read_message_usage(msg)
+                    } else {
+                        None
+                    };
+                    if let Some(mu) = &charged {
+                        tokens.add(&mu.tokens);
+                        premium.add(mu.kind, &mu.tokens);
                     }
                     if msg.get("stop_reason").and_then(Value::as_str) == Some("error") {
                         has_error = true;
                     }
                     // Emit a per-turn record. `turn_index` follows
-                    // the ordering of assistant lines as they appear
+                    // the ordering of assistant messages as they appear
                     // in the transcript; that ordering is stable for
                     // append-only writes (CC's normal mode).
-                    turns.push(TurnRecord {
-                        turn_index: assistant_ordinal,
-                        ts_ms: ts.map(|t| t.timestamp_millis()),
-                        model: turn_model,
-                        tokens: turn_tokens,
-                        user_prompt_preview: last_user_prompt.clone(),
-                    });
-                    assistant_ordinal += 1;
+                    // One turn per API message, on its first line; the
+                    // later lines of the same message add nothing to
+                    // cost and would repeat the turn.
+                    if first_sighting {
+                        let (turn_tokens, turn_premium) = match charged {
+                            Some(mu) => {
+                                let p = PremiumUsage::single(mu.kind, &mu.tokens);
+                                (mu.tokens, p)
+                            }
+                            None => (TokenUsage::default(), PremiumUsage::default()),
+                        };
+                        turns.push(TurnRecord {
+                            turn_index: assistant_ordinal,
+                            ts_ms: ts.map(|t| t.timestamp_millis()),
+                            model: turn_model,
+                            tokens: turn_tokens,
+                            premium: turn_premium,
+                            user_prompt_preview: last_user_prompt.clone(),
+                        });
+                        assistant_ordinal += 1;
+                    }
                 }
             }
             _ => {}
@@ -839,6 +899,7 @@ fn scan_session_inner(
         first_user_prompt,
         models: models.into_iter().collect(),
         tokens,
+        premium,
         git_branch,
         cc_version,
         display_slug,
@@ -956,6 +1017,7 @@ fn parse_events(path: &Path) -> Result<Vec<SessionEvent>, SessionError> {
     let file = fs::File::open(path)?;
     let reader = BufReader::new(file);
     let mut events = Vec::new();
+    let mut parser = EventParser::default();
 
     for (idx, line) in reader.lines().enumerate() {
         let line_number = idx + 1;
@@ -970,7 +1032,7 @@ fn parse_events(path: &Path) -> Result<Vec<SessionEvent>, SessionError> {
                 continue;
             }
         };
-        parse_line_into(&mut events, &line, line_number);
+        parser.parse_line_into(&mut events, &line, line_number);
     }
 
     Ok(events)
@@ -983,7 +1045,36 @@ fn parse_events(path: &Path) -> Result<Vec<SessionEvent>, SessionError> {
 /// Exposed crate-visible so `session_live::runtime` can feed events
 /// one line at a time as the tail reader surfaces them, without
 /// re-parsing the whole transcript.
-pub(crate) fn parse_line_into(out: &mut Vec<SessionEvent>, line: &str, line_number: usize) {
+///
+/// Stateful because usage is per message and a message spans lines:
+/// keep one parser for the lines of one transcript, or a message cut
+/// across two reads is charged twice.
+#[derive(Debug, Default)]
+pub(crate) struct EventParser {
+    usage: UsageLedger,
+}
+
+impl EventParser {
+    pub(crate) fn parse_line_into(
+        &mut self,
+        out: &mut Vec<SessionEvent>,
+        line: &str,
+        line_number: usize,
+    ) {
+        parse_line_with(self, out, line, line_number)
+    }
+
+    pub(crate) fn emit_from_value(&mut self, out: &mut Vec<SessionEvent>, v: &Value) {
+        emit_events_from_value(self, out, v)
+    }
+}
+
+fn parse_line_with(
+    parser: &mut EventParser,
+    out: &mut Vec<SessionEvent>,
+    line: &str,
+    line_number: usize,
+) {
     if line.trim().is_empty() {
         return;
     }
@@ -998,7 +1089,7 @@ pub(crate) fn parse_line_into(out: &mut Vec<SessionEvent>, line: &str, line_numb
             return;
         }
     };
-    emit_events_from_value(out, &v);
+    emit_events_from_value(parser, out, &v);
 }
 
 /// The event-emitting half of `parse_line_into`, taking a line that has
@@ -1011,7 +1102,7 @@ pub(crate) fn parse_line_into(out: &mut Vec<SessionEvent>, line: &str, line_numb
 /// `session_chunks` called the same function again (parses 3 and 4).
 /// On a 181 MB transcript that is ~720 MB of JSON parsing to show one
 /// conversation.
-pub(crate) fn emit_events_from_value(out: &mut Vec<SessionEvent>, v: &Value) {
+fn emit_events_from_value(parser: &mut EventParser, out: &mut Vec<SessionEvent>, v: &Value) {
     let ts = v
         .get("timestamp")
         .and_then(Value::as_str)
@@ -1022,7 +1113,7 @@ pub(crate) fn emit_events_from_value(out: &mut Vec<SessionEvent>, v: &Value) {
     let event_type = v.get("type").and_then(Value::as_str).unwrap_or("");
     match event_type {
         "user" => emit_user_events(out, v, ts, uuid),
-        "assistant" => emit_assistant_events(out, v, ts, uuid),
+        "assistant" => emit_assistant_events(parser, out, v, ts, uuid),
         "summary" => {
             let text = v
                 .get("summary")
@@ -1158,6 +1249,7 @@ fn emit_user_events(
 }
 
 fn emit_assistant_events(
+    parser: &mut EventParser,
     out: &mut Vec<SessionEvent>,
     v: &Value,
     ts: Option<DateTime<Utc>>,
@@ -1174,18 +1266,16 @@ fn emit_assistant_events(
         .get("stop_reason")
         .and_then(Value::as_str)
         .map(|s| s.to_string());
-    let usage = msg.get("usage").map(|u| TokenUsage {
-        input: u.get("input_tokens").and_then(Value::as_u64).unwrap_or(0),
-        output: u.get("output_tokens").and_then(Value::as_u64).unwrap_or(0),
-        cache_creation: u
-            .get("cache_creation_input_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
-        cache_read: u
-            .get("cache_read_input_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
-    });
+    // The message's usage goes on the first text or tool-use event of
+    // the first line that has one, and nowhere else — see [`usage`].
+    let has_carrier = matches!(msg.get("content"), Some(Value::Array(parts))
+        if parts.iter().any(|p| matches!(p.get("type").and_then(Value::as_str), Some("text" | "tool_use"))));
+    let mut usage =
+        if has_carrier && !parser.usage.is_charged(msg) && parser.usage.first_sighting(msg) {
+            msg.get("usage").map(usage::read_usage)
+        } else {
+            None
+        };
 
     let Some(Value::Array(parts)) = msg.get("content") else {
         return;
@@ -1201,7 +1291,7 @@ fn emit_assistant_events(
                         uuid: uuid.clone(),
                         model: model.clone(),
                         text: text.to_string(),
-                        usage: usage.clone(),
+                        usage: usage.take(),
                         stop_reason: stop_reason.clone(),
                     });
                 }
@@ -1232,6 +1322,7 @@ fn emit_assistant_events(
                     ts,
                     uuid: uuid.clone(),
                     model: model.clone(),
+                    usage: usage.take(),
                     tool_name,
                     tool_use_id,
                     input_preview,

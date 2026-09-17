@@ -280,6 +280,7 @@ mod tests {
         f.write_all(&vec![b'a'; size]).unwrap();
         let now = Utc::now();
         SessionRow {
+            premium: Default::default(),
             session_id: format!("{id}-uuid"),
             slug,
             file_path: path,

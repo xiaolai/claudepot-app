@@ -428,6 +428,7 @@ mod tests {
 
     fn row(id: &str, events: usize) -> SessionRow {
         SessionRow {
+            premium: Default::default(),
             session_id: id.to_string(),
             slug: "-tmp".into(),
             file_path: PathBuf::from("/nonexistent/x.jsonl"),
@@ -535,6 +536,8 @@ mod tests {
         // session, which tells a phone nothing.
         let mut r = row("s1", 1);
         r.tokens = crate::session::TokenUsage {
+            cache_creation_1h: 0,
+            web_search_requests: 0,
             input: 10,
             output: 20,
             cache_creation: 30,

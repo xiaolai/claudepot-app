@@ -275,7 +275,13 @@ function deriveDayMonthRollups(
     // dominant-model choice and the token shaping, and prices at the
     // rate in force on the session's own day. Re-deriving either here
     // is how this rollup and the transcript header drifted apart.
-    const c = sessionCostEstimate(table, row.models, row.tokens, eventMs);
+    const c = sessionCostEstimate(
+      table,
+      row.models,
+      row.tokens,
+      eventMs,
+      row.premium,
+    );
     if (c == null) continue;
     if (inToday) {
       todayCostSum += c.usd;
