@@ -113,5 +113,13 @@ objc2-app-kit = { version = "0.3", features = [
 # NSGeometry: traffic_light.rs reads NSRect / NSPoint / NSSize.
 objc2-foundation = { version = "0.3", features = ["NSData", "NSGeometry"] }
 
+[target.'cfg(target_os = "windows")'.dependencies]
+# WebView2's own switch for its browser accelerator keys (F5, Ctrl+R, …),
+# which Tauri 2.11 does not expose — see `webview_hardening.rs`. Both are
+# already in the lock file through wry; these pins match its versions, so
+# no new crate is downloaded or compiled.
+webview2-com = "0.38"
+windows-core = "0.61"
+
 [dev-dependencies]
 tempfile.workspace = true

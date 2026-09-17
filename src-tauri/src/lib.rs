@@ -43,6 +43,8 @@ mod dto_templates;
 mod dto_updates;
 mod dto_usage;
 mod events;
+#[cfg(all(target_os = "windows", not(debug_assertions)))]
+mod webview_hardening;
 // `pub` like `commands`: the catalog API (`tr` / `set_locale` /
 // `current_locale`) is a deliberate crate surface, and `current_locale`
 // has no internal caller yet (the webview resolves its own locale).
@@ -549,6 +551,11 @@ pub fn run() {
                         tracing::warn!("startup: could not pin the window on top: {e}");
                     }
                 }
+
+                // WebView2 handles F5 / Ctrl+R itself, below anything the
+                // page can cancel — see `webview_hardening`.
+                #[cfg(all(target_os = "windows", not(debug_assertions)))]
+                webview_hardening::disable_browser_accelerator_keys(&window);
 
                 // On Windows, set the WebView2 background color to match
                 // the OS dark/light theme so DWM repaints — which happen
