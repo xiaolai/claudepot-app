@@ -333,7 +333,7 @@ fn move_dir(src: &Path, dest: &Path) -> Result<(), ProjectTrashError> {
         Ok(()) => return Ok(()),
         Err(e) => e,
     };
-    if !is_exdev(&rename_err) {
+    if !crate::fs_utils::is_cross_device(&rename_err) {
         return Err(ProjectTrashError::io(src, rename_err));
     }
 
@@ -358,23 +358,6 @@ fn move_dir(src: &Path, dest: &Path) -> Result<(), ProjectTrashError> {
     }
     fs::remove_dir_all(src).map_err(|e| ProjectTrashError::io(src, e))?;
     Ok(())
-}
-
-fn is_exdev(err: &io::Error) -> bool {
-    let raw = err.raw_os_error();
-    #[cfg(unix)]
-    {
-        raw == Some(libc::EXDEV)
-    }
-    #[cfg(windows)]
-    {
-        // ERROR_NOT_SAME_DEVICE == 17
-        return raw == Some(17);
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        return raw == Some(18);
-    }
 }
 
 fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<(), ProjectTrashError> {

@@ -268,8 +268,39 @@ pub fn file_identity(meta: &std::fs::Metadata) -> u64 {
     }
 }
 
+/// Did a `rename` fail only because source and destination are on
+/// different filesystems — the one failure a copy-and-remove fallback
+/// may handle?
+///
+/// Deliberately narrow: a permission error must surface, not widen into
+/// a copy. std maps `EXDEV` (Unix) and `ERROR_NOT_SAME_DEVICE`
+/// (Windows) to `ErrorKind::CrossesDevices`, so this needs no per-OS
+/// errno. Three callers used to compare raw codes instead, and one
+/// compared only `18` — Linux's `EXDEV`, which Windows reports as `17`,
+/// so a cross-drive migration there failed rather than falling back.
+pub(crate) fn is_cross_device(err: &std::io::Error) -> bool {
+    err.kind() == std::io::ErrorKind::CrossesDevices
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_cross_device_rename_is_recognised_on_this_platform() {
+        #[cfg(unix)]
+        let exdev = libc::EXDEV;
+        #[cfg(windows)]
+        let exdev = 17; // ERROR_NOT_SAME_DEVICE
+        assert!(is_cross_device(&std::io::Error::from_raw_os_error(exdev)));
+        // Permission denied must not widen into a copy.
+        #[cfg(unix)]
+        let denied = libc::EACCES;
+        #[cfg(windows)]
+        let denied = 5; // ERROR_ACCESS_DENIED
+        assert!(!is_cross_device(&std::io::Error::from_raw_os_error(denied)));
+        assert!(!is_cross_device(&std::io::Error::other("x")));
+    }
+
     use super::*;
     use std::fs;
 

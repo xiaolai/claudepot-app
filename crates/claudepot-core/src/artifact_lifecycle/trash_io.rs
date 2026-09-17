@@ -35,17 +35,16 @@ pub(super) fn write_manifest_atomic(staging: &Path, manifest: &TrashManifest) ->
 /// `target`. Both directories and files are handled; symlinks
 /// preserve the link rather than the target.
 ///
-/// EXDEV detection is narrow: only the documented cross-device
-/// errno (18 / `EXDEV` on Unix, `ERROR_NOT_SAME_DEVICE` on Windows
-/// = 17 via raw_os_error). The previous "any ErrorKind::Other"
-/// fallback was too broad — a permission denied on rename would
-/// silently widen into a copy+remove path. Now non-EXDEV errors
-/// surface directly.
+/// Cross-device detection is narrow — see
+/// [`crate::fs_utils::is_cross_device`]. The previous "any
+/// ErrorKind::Other" fallback was too broad: a permission denied on
+/// rename would silently widen into a copy+remove path. Now every
+/// other error surfaces directly.
 pub(super) fn move_or_copy(source: &Path, target: &Path, kind: PayloadKind) -> Result<()> {
     match std::fs::rename(source, target) {
         Ok(()) => return Ok(()),
         Err(err) => {
-            if !is_exdev(&err) {
+            if !crate::fs_utils::is_cross_device(&err) {
                 return Err(LifecycleError::io("rename to trash")(err));
             }
         }
@@ -99,28 +98,6 @@ pub(super) fn move_or_copy(source: &Path, target: &Path, kind: PayloadKind) -> R
         }
     }
     Ok(())
-}
-
-/// True iff `err` is the documented "source and destination on
-/// different filesystems" error. Linux: EXDEV (18). Windows:
-/// ERROR_NOT_SAME_DEVICE (17). On Rust 1.85+ we'd prefer
-/// `ErrorKind::CrossesDevices`, but checking raw codes works on
-/// older toolchains too.
-fn is_exdev(err: &std::io::Error) -> bool {
-    let raw = err.raw_os_error();
-    #[cfg(unix)]
-    {
-        raw == Some(libc::EXDEV)
-    }
-    #[cfg(windows)]
-    {
-        // ERROR_NOT_SAME_DEVICE == 17
-        return raw == Some(17);
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        return raw == Some(18);
-    }
 }
 
 /// Recursive directory copy that preserves symlinks on Unix; Windows

@@ -46,9 +46,9 @@ pub fn migrate_repair_tree() -> io::Result<()> {
                 );
                 return Ok(());
             }
-            // EXDEV (18 on Linux/macOS) → cross-filesystem rename not
-            // supported; fall through to copy + delete.
-            Err(e) if e.raw_os_error() == Some(18) => {
+            // Cross-filesystem rename is not supported; fall through to
+            // copy + delete.
+            Err(e) if crate::fs_utils::is_cross_device(&e) => {
                 tracing::info!("cross-filesystem migration, copying then removing");
                 copy_dir_all(&legacy, &target)?;
                 fs::remove_dir_all(&legacy)?;
