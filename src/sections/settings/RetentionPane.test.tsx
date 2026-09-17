@@ -178,9 +178,13 @@ describe("RetentionPane", () => {
       }),
     );
     render(<RetentionPane pushToast={toast()} />);
-    expect(await screen.findByText(/file edit history — 3 in file-history/)).toBeInTheDocument();
+    // Plural picked from the raw count: "3 items", "1 item".
+    expect(await screen.findByText(/file edit history — 3 items in file-history/)).toBeInTheDocument();
     expect(screen.queryByText(/WIRE TEXT/)).toBeNull();
-    expect(screen.getByText(/fallback prose — 1 in brand-new/)).toBeInTheDocument();
+    expect(screen.getByText(/fallback prose — 1 item in brand-new/)).toBeInTheDocument();
+    // The scope note above already says this and points down here; the
+    // panel's lead used to say it again, word for word.
+    expect(screen.getAllByText(/not only a transcript setting/)).toHaveLength(1);
   });
 
   // design.md render-if-nonzero: a machine with nothing else on the

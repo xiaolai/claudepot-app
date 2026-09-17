@@ -246,12 +246,15 @@ function SweptPanel({ swept }: { swept: RetentionReport["swept_elsewhere"] }) {
               ? t("retention.swept.rowAtRisk", {
                   what: sweptWhat(d),
                   dir: d.rel,
+                  count: d.entries,
                   entries: formatNumber(d.entries),
                   deletable: formatNumber(d.already_deletable),
                 })
               : t("retention.swept.row", {
                   what: sweptWhat(d),
                   dir: d.rel,
+                  // `count` picks the plural; `entries` is the grouped form.
+                  count: d.entries,
                   entries: formatNumber(d.entries),
                 })}
           </div>

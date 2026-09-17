@@ -433,10 +433,13 @@
     "scopeNote": "cleanupPeriodDays is not only a transcript setting — Claude Code ages out more than thirty other locations under ~/.claude on the same timer. The counts above are conversations only, the part that cannot be regenerated; other directories that hold your work are listed below when they have anything in them.",
     "swept": {
       "title": "Also on this timer",
-      "lead": "cleanupPeriodDays is not only a transcript setting. Claude Code ages out these directories on the same schedule:",
-      "row": "{{what}} — {{entries}} in {{dir}}",
-      "rowAtRisk": "{{what}} — {{entries}} in {{dir}}, {{deletable}} past the cutoff",
-      "skipped": "{{count}} further directories hold only caches and diagnostics; Claudepot does not count those.",
+      "lead": "Claude Code ages out these directories on the same schedule:",
+      "row_one": "{{what}} — {{entries}} item in {{dir}}",
+      "row_other": "{{what}} — {{entries}} items in {{dir}}",
+      "rowAtRisk_one": "{{what}} — {{entries}} item in {{dir}}, {{deletable}} past the cutoff",
+      "rowAtRisk_other": "{{what}} — {{entries}} items in {{dir}}, {{deletable}} past the cutoff",
+      "skipped_one": "{{count}} further directory holds only caches and diagnostics; Claudepot does not count it.",
+      "skipped_other": "{{count}} further directories hold only caches and diagnostics; Claudepot does not count those.",
       "incomplete": "Part of this could not be read, so these counts are a floor.",
       "what": {
         "tasks": "background task state",
