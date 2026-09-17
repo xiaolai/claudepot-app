@@ -146,7 +146,12 @@ jobs:
         # then were not in CI, because this line named two crates. The
         # clippy job already passes `-p xtask`, so the crate COMPILED on
         # every run while none of its tests ever executed.
-        run: cargo test -p claudepot-core -p claudepot-cli -p xtask
+        #
+        # `--no-fail-fast`, because cargo otherwise stops at the first
+        # failing test binary: one core failure on windows-latest hid
+        # whether cli and xtask passed there at all (2026-09-18). The step
+        # still fails; it just reports everything first.
+        run: cargo test -p claudepot-core -p claudepot-cli -p xtask --no-fail-fast
 
       # The tauri crate carries real unit tests (orchestrators, DTOs,
       # preferences) plus an install smoke test that no other gate
@@ -161,8 +166,11 @@ jobs:
       # src-tauri/binaries/ first (a fresh checkout doesn't have it).
       # The frontend `dist/` is NOT needed: dev-profile codegen
       # doesn't embed assets.
+      # `!cancelled()`: an unrelated failure in the step above used to
+      # skip this one, so the tauri crate's Windows tests went unrun on
+      # exactly the run that needed to know about them.
       - name: Tests (tauri crate)
-        if: matrix.os != 'ubuntu-latest'
+        if: ${{ !cancelled() && matrix.os != 'ubuntu-latest' }}
         shell: bash
         env:
           # Native per-OS temp path — see the note on the core+cli step.
@@ -184,7 +192,7 @@ jobs:
       # when this step was added. It runs after the test step because that
       # step stages the CLI sidecar tauri-build validates.
       - name: Clippy (tauri crate)
-        if: matrix.os != 'ubuntu-latest'
+        if: ${{ !cancelled() && matrix.os != 'ubuntu-latest' }}
         run: cargo clippy --all-targets -p claudepot-tauri -- -D warnings
 
   # grill X26: `--ignored` integration tests are normally locked out

@@ -1,0 +1,10 @@
+# Shell scripts keep LF on every checkout.
+#
+# The windows-latest runner checks out with core.autocrlf=true, which
+# rewrites LF to CRLF. bash — Git Bash included — reads the CR as part of
+# each command (`$'\r': command not found`), so a CRLF shell script is a
+# broken one. It also broke a test: shared_memory::guard reads
+# scripts/repo-invariants.sh and asserts it carries, byte for byte, the
+# block its spec renders, which a CRLF copy never does (2026-09-18).
+*.sh text eol=lf
+scripts/pre-push text eol=lf
