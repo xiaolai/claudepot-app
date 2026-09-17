@@ -187,18 +187,18 @@ impl crate::error_code::ErrorCode for SettingsWriteError {
 }
 
 /// Truthy/falsy parser matching CC's `isEnvTruthy` / `isEnvDefinedFalsy`
-/// (`utils/envUtils.ts`) — we accept the same `1/true/yes/on` and
-/// `0/false/no/off` forms.
-fn env_is_truthy(raw: Option<&str>) -> bool {
+/// — the same `1/true/yes/on` and `0/false/no/off` forms, lowercased and
+/// **trimmed**, as 2.1.274's `String(e).toLowerCase().trim()` does.
+pub(crate) fn env_is_truthy(raw: Option<&str>) -> bool {
     matches!(
-        raw.map(str::to_ascii_lowercase).as_deref(),
+        raw.map(|s| s.trim().to_ascii_lowercase()).as_deref(),
         Some("1" | "true" | "yes" | "on")
     )
 }
 
 fn env_is_falsy(raw: Option<&str>) -> bool {
     matches!(
-        raw.map(str::to_ascii_lowercase).as_deref(),
+        raw.map(|s| s.trim().to_ascii_lowercase()).as_deref(),
         Some("0" | "false" | "no" | "off")
     )
 }

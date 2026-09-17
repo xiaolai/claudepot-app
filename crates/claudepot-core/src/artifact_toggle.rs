@@ -8,20 +8,23 @@
 //! the tool off makes CC keep that companion output as a local file
 //! instead — the fix for a multi-account setup.
 //!
-//! # CC's resolution model (verified against the shipped 2.1.218 binary)
+//! # CC's resolution model (re-read in the 2.1.274 binary)
 //!
 //! ```text
-//! Oas()  = env CLAUDE_CODE_DISABLE_ARTIFACT (raw, any non-empty value)
-//!          OR settings.disableArtifact === true            → hard OFF
-//! enabled = if Oas()               → false
-//!           else <availability gate, server-side>
-//!           else (enableArtifact ?? true)                  // default: enabled
+//! off   = CLAUDE_CODE_DISABLE_ARTIFACT in the process env (raw, any
+//!           non-empty value)
+//!         OR the same name in a flag/user settings `env` block
+//!           (isEnvTruthy)
+//!         OR enableArtifact === false   in any layer
+//!         OR disableArtifact === true   in any layer
+//! enabled = !off && <availability gate, server-side>   // default: on
 //! ```
 //!
-//! `enableArtifact` is resolved from `["policySettings",
-//! "flagSettings", "userSettings"]` only — there is **no project /
-//! localProject layer**. So this toggle is *global-only* and writes
-//! exclusively to `~/.claude/settings.json`.
+//! Off anywhere wins. Managed, `--settings` and user settings can also
+//! turn it on; **project and local settings can only turn it off** —
+//! 2.1.218 did not read them at all. This toggle is still
+//! *global-only* and writes exclusively to `~/.claude/settings.json`,
+//! so a project that turns the tool off is not reflected in its state.
 //!
 //! `enableArtifact` is the user-scoped toggle CC's own `/config` UI
 //! writes (clearing the key when it equals the default). `disableArtifact`
@@ -101,13 +104,18 @@ pub fn resolve_artifact_enabled() -> ArtifactState {
     // NOT `isEnvTruthy`: any non-empty value disables, even "0" / "false".
     // `var_os` (not `var`) so a non-UTF8 value still counts — JS sees a
     // non-empty string there too; only unset or empty is falsy.
-    let env_disable_set = std::env::var_os(DISABLE_ARTIFACT_ENV).is_some_and(|s| !s.is_empty());
+    //
+    // The same name in the user settings' `env` block also counts, read
+    // with `isEnvTruthy` (2.1.274). Claudepot missed it and reported the
+    // tool on while CC kept it off.
+    let path = user_settings_path();
+    let env_disable_set = std::env::var_os(DISABLE_ARTIFACT_ENV).is_some_and(|s| !s.is_empty())
+        || settings_env_disables(&path);
 
     // A malformed settings.json degrades to `None` on read (quiet, like the
     // auto-memory resolver), so the decision falls through to CC's default.
     // A later `set_artifact_enabled` on the same corrupt file fails loudly
     // rather than clobbering it (see `rmw_settings_bool`).
-    let path = user_settings_path();
     let user_enable_value = read_bool_setting(&path, ENABLE_ARTIFACT_KEY).unwrap_or(None);
     let user_disable_value = read_bool_setting(&path, DISABLE_ARTIFACT_KEY).unwrap_or(None);
 
@@ -144,6 +152,25 @@ pub fn resolve_artifact_enabled() -> ArtifactState {
         };
     }
     base
+}
+
+/// Does the settings file's `env` block set the disable variable to a
+/// truthy value? A boolean counts as itself, as it does in CC.
+fn settings_env_disables(path: &Path) -> bool {
+    let Ok(bytes) = std::fs::read(path) else {
+        return false;
+    };
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return false;
+    };
+    match v.get("env").and_then(|e| e.get(DISABLE_ARTIFACT_ENV)) {
+        Some(serde_json::Value::Bool(b)) => *b,
+        Some(serde_json::Value::String(s)) => crate::settings_writer::env_is_truthy(Some(s)),
+        Some(serde_json::Value::Number(n)) => {
+            crate::settings_writer::env_is_truthy(Some(&n.to_string()))
+        }
+        _ => false,
+    }
 }
 
 /// Set whether CC's Artifact tool is enabled, in `~/.claude/settings.json`.
@@ -337,5 +364,17 @@ mod tests {
         let s = resolve_artifact_enabled();
         assert!(s.enabled);
         assert_eq!(s.decided_by, ArtifactDecisionSource::Default);
+    }
+
+    #[test]
+    fn the_disable_variable_in_the_settings_env_block_counts() {
+        let (_t, _l) = isolated();
+        write_user_settings(r#"{"env":{"CLAUDE_CODE_DISABLE_ARTIFACT":" Yes "}}"#);
+        let s = resolve_artifact_enabled();
+        assert!(!s.enabled);
+        assert_eq!(s.decided_by, ArtifactDecisionSource::EnvDisable);
+        // isEnvTruthy there, not raw truthiness: "0" does not disable.
+        write_user_settings(r#"{"env":{"CLAUDE_CODE_DISABLE_ARTIFACT":"0"}}"#);
+        assert!(resolve_artifact_enabled().enabled);
     }
 }
