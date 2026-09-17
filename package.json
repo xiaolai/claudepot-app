@@ -69,11 +69,11 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
-    "@vitest/coverage-v8": "^4.1.4",
+    "@vitest/coverage-v8": "^4.1.11",
     "jsdom": "^29.0.2",
     "lucide-static": "^1.8.0",
     "typescript": "~5.8.3",
     "vite": "^7.3.6",
-    "vitest": "^4.1.4"
+    "vitest": "^4.1.11"
   }
 }
