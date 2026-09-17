@@ -32,4 +32,6 @@ dirs.workspace = true
 # claudepot-core stays free of the ~30-dep rmcp tree. Per the spike
 # verdict at dev-docs/reports/rmcp-spike-2026-05-15.md. rmcp
 # re-exports schemars so we don't need it as a direct dep.
-rmcp = { version = "2.0", features = ["server", "transport-io", "macros"] }
+# The floor is the security floor: 2.0.x carries GHSA-9g45-5xwm-f3wc
+# (headers leak across redirects, fixed in 2.1.0), and 1.x two more.
+rmcp = { version = "2.2", features = ["server", "transport-io", "macros"] }
