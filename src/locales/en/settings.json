@@ -638,6 +638,7 @@
     "cleared": "Model allowlist cleared — every model is selectable again.",
     "label": "Selectable models",
     "hintRestricts": "Only these models can be chosen in /model, --model, and fallback chains. Order matters: with enforcement on, Default becomes the first entry.",
+    "hintBlocksAll": "The list is present but empty, so Claude Code refuses every model you name and only Default can be used. Add an entry, or save to remove the list.",
     "hintEmpty": "Empty — every model your account can reach is selectable. Add a family alias, a version prefix, or a full model id.",
     "moveUp": "Move up",
     "moveDown": "Move down",
@@ -648,6 +649,7 @@
     "inputAria": "Model to allow",
     "add": "Add",
     "enforceLabel": "Apply the list to the Default model",
+    "enforcePolicy": "Set, but ignored: this machine has a managed policy file, and Claude Code then takes model enforcement from the policy rather than from your settings.",
     "enforceInert": "Set, but inert: Claude Code ignores it while the list is empty, so Default stays unrestricted. Add at least one model above. Needs Claude Code {{version}} or later.",
     "enforceHint": "Without this, picking \"Default\" in /model bypasses the list entirely and resolves to your account's default model. With it, Default becomes the first allowed entry. Needs Claude Code {{version}} or later."
   },

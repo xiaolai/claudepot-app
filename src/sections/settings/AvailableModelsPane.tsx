@@ -134,9 +134,11 @@ export function AvailableModelsPane({
           >
             {state == null
               ? t("shared.loading")
-              : state.restricts_models
-                ? t("models.hintRestricts")
-                : t("models.hintEmpty")}
+              : state.blocks_all
+                ? t("models.hintBlocksAll")
+                : state.restricts_models
+                  ? t("models.hintRestricts")
+                  : t("models.hintEmpty")}
           </div>
         </div>
 
@@ -236,13 +238,15 @@ export function AvailableModelsPane({
         hint={
           state == null
             ? t("shared.loading")
-            : enforce && !state.enforce_is_effective
-              ? t("models.enforceInert", {
-                  version: state.enforce_min_cc_version,
-                })
-              : t("models.enforceHint", {
-                  version: state.enforce_min_cc_version,
-                })
+            : enforce && state.enforce_overridden_by_policy
+              ? t("models.enforcePolicy")
+              : enforce && !state.enforce_is_effective
+                ? t("models.enforceInert", {
+                    version: state.enforce_min_cc_version,
+                  })
+                : t("models.enforceHint", {
+                    version: state.enforce_min_cc_version,
+                  })
         }
         hintTone={enforce && state != null && !state.enforce_is_effective ? "warn" : "muted"}
         checked={enforce}

@@ -631,6 +631,7 @@
     "cleared": "模型允许列表已清空 — 所有模型恢复可选。",
     "label": "可选模型",
     "hintRestricts": "只有这些模型可以在 /model、--model 和回退链中被选择。顺序很重要：启用强制后，Default 即为第一个条目。",
+    "hintBlocksAll": "列表存在但为空，因此 Claude Code 会拒绝你指定的每个模型，只能使用 Default。请添加条目，或保存以移除该列表。",
     "hintEmpty": "为空 — 你账户可用的所有模型都可选择。可添加模型族别名、版本前缀或完整模型 id。",
     "moveUp": "上移",
     "moveDown": "下移",
@@ -641,6 +642,7 @@
     "inputAria": "要允许的模型",
     "add": "添加",
     "enforceLabel": "把列表应用于 Default 模型",
+    "enforcePolicy": "已设置但被忽略：这台机器上有托管策略文件，此时 Claude Code 只按策略执行模型限制，不采用你的设置。",
     "enforceInert": "已设置，但暂不生效：列表为空时 Claude Code 会忽略它，Default 仍不受限。请先在上方添加至少一个模型。需要 Claude Code {{version}} 或更高版本。",
     "enforceHint": "不开启时，在 /model 中选择“Default”会完全绕过列表，解析为账户的默认模型。开启后，Default 即为第一个允许的条目。需要 Claude Code {{version}} 或更高版本。"
   },

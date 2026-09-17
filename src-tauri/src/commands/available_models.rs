@@ -20,6 +20,10 @@ pub struct AvailableModelsDto {
     pub key_present: bool,
     /// True when any restriction is actually in force.
     pub restricts_models: bool,
+    /// A present, empty list: only Default can be used.
+    pub blocks_all: bool,
+    /// The enforce flag is set and a managed policy makes CC ignore it.
+    pub enforce_overridden_by_policy: bool,
     /// True when `enforceAvailableModels` is doing something. CC
     /// ignores it with an empty list, so the UI shows "set but inert"
     /// rather than implying Default is restricted.
@@ -32,6 +36,8 @@ pub struct AvailableModelsDto {
 fn dto(state: AvailableModelsState) -> AvailableModelsDto {
     AvailableModelsDto {
         restricts_models: state.restricts_models(),
+        blocks_all: state.blocks_all(),
+        enforce_overridden_by_policy: state.enforce_overridden_by_policy(),
         enforce_is_effective: state.enforce_is_effective(),
         entries: state.entries,
         enforce: state.enforce,

@@ -24,7 +24,9 @@ function mkState(over: Partial<AvailableModelsState> = {}): AvailableModelsState
     enforce,
     key_present: entries.length > 0,
     restricts_models: entries.length > 0,
+    blocks_all: false,
     enforce_is_effective: enforce === true && entries.length > 0,
+    enforce_overridden_by_policy: false,
     enforce_min_cc_version: "2.1.175",
     ...over,
   };
@@ -119,6 +121,35 @@ describe("AvailableModelsPane", () => {
     );
     render(<AvailableModelsPane pushToast={pushToast} />);
     expect(await screen.findByText(/Set, but inert/)).toBeInTheDocument();
+  });
+
+  // CC refuses every explicit model under `availableModels: []`; the
+  // editor used to call that state "every model is selectable".
+  it("says a present, empty list leaves only Default", async () => {
+    stateImpl.fn = vi.fn(() =>
+      Promise.resolve(
+        mkState({ entries: [], key_present: true, restricts_models: true, blocks_all: true }),
+      ),
+    );
+    render(<AvailableModelsPane pushToast={pushToast} />);
+    expect(await screen.findByText(/only Default/)).toBeInTheDocument();
+    expect(screen.queryByText(/every model your account can reach/)).toBeNull();
+  });
+
+  it("names a managed policy as the reason enforcement is ignored", async () => {
+    stateImpl.fn = vi.fn(() =>
+      Promise.resolve(
+        mkState({
+          entries: ["opus"],
+          enforce: true,
+          enforce_is_effective: false,
+          enforce_overridden_by_policy: true,
+        }),
+      ),
+    );
+    render(<AvailableModelsPane pushToast={pushToast} />);
+    expect(await screen.findByText(/managed policy/)).toBeInTheDocument();
+    expect(screen.queryByText(/Set, but inert/)).toBeNull();
   });
 
   it("explains the Default-model hole when enforcement is off", async () => {

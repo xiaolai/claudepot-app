@@ -21,10 +21,22 @@
 //! default is — so a user can bypass the whole list by choosing
 //! Default. `enforceAvailableModels: true` closes that hole by
 //! remapping Default to the first allowed entry. It requires CC
-//! v2.1.175 or later, and it does nothing when the list is empty:
-//! with `availableModels: []`, Default stays usable no matter what,
-//! which is deliberate on CC's side so a bad config can't lock a user
-//! out of every model.
+//! v2.1.175 or later, and it does nothing when the list is empty.
+//!
+//! **An empty list is not "no list".** CC's allowlist check returns
+//! `true` when the key is absent and `false` for every explicit model
+//! when it is `[]` (2.1.274), so a hand-written `availableModels: []`
+//! leaves only Default selectable. This editor never writes `[]` —
+//! clearing the list removes the key — but it reports one it finds.
+//!
+//! **A user-level `enforceAvailableModels` needs CC to trust the
+//! cascade**, and CC withdraws that trust whenever an admin policy is in
+//! force without model keys of its own (2.1.274: "refusing
+//! cascade-trust mode"); only a policy that comes solely from the
+//! Windows per-user registry key is exempt. Claudepot can see the
+//! managed-settings *file* composite, not a remote or MDM policy, so
+//! [`AvailableModelsState::managed_policy_present`] is a floor: when it
+//! is true, the flag written here is ignored.
 //!
 //! [`AvailableModelsState::enforce_is_effective`] reports whether the
 //! flag is actually doing anything, so the UI can say "set but inert"
@@ -61,22 +73,37 @@ pub struct AvailableModelsState {
     /// `enforceAvailableModels` as written. `None` when absent.
     pub enforce: Option<bool>,
     /// True when the key exists at all — distinguishes "no allowlist"
-    /// from "an explicitly empty allowlist", which read the same to CC
-    /// but mean different things to a user looking at the editor.
+    /// from an explicitly empty one, which CC treats very differently:
+    /// the first allows every model, the second none but Default.
     pub key_present: bool,
+    /// A managed-settings file composite is in force on this machine,
+    /// which switches user-level enforcement off. See the module docs.
+    pub managed_policy_present: bool,
 }
 
 impl AvailableModelsState {
-    /// Whether any restriction is actually in force.
+    /// Whether any restriction is actually in force. A present `[]` is
+    /// the tightest one there is.
     pub fn restricts_models(&self) -> bool {
-        !self.entries.is_empty()
+        self.key_present || !self.entries.is_empty()
+    }
+
+    /// A present, empty list: every explicit model is refused and only
+    /// Default remains.
+    pub fn blocks_all(&self) -> bool {
+        self.key_present && self.entries.is_empty()
     }
 
     /// Whether `enforceAvailableModels` is doing anything. CC ignores
-    /// it when the list is empty, so a `true` with no entries is inert
-    /// and the UI must not imply otherwise.
+    /// it when the list is empty, and when a managed policy has taken
+    /// cascade trust away, so the UI must not imply otherwise.
     pub fn enforce_is_effective(&self) -> bool {
-        self.enforce == Some(true) && self.restricts_models()
+        self.enforce == Some(true) && !self.entries.is_empty() && !self.managed_policy_present
+    }
+
+    /// The flag is set, and a managed policy is why it does nothing.
+    pub fn enforce_overridden_by_policy(&self) -> bool {
+        self.enforce == Some(true) && self.managed_policy_present
     }
 }
 
@@ -147,11 +174,24 @@ pub fn normalize_entries(raw: &[String]) -> Result<Vec<String>, AllowlistError> 
 /// the editor then shows an empty list, and the first save rewrites the
 /// key cleanly. Non-string array members are skipped.
 pub fn resolve_available_models() -> AvailableModelsState {
+    resolve_available_models_with(&crate::paths::managed_settings_dir())
+}
+
+/// [`resolve_available_models`] with the managed-settings directory
+/// injected, so a test does not read the machine's real admin policy.
+fn resolve_available_models_with(managed_dir: &std::path::Path) -> AvailableModelsState {
+    let managed_policy_present = crate::config_view::policy::managed_composite_present(managed_dir);
     let Ok(bytes) = std::fs::read(user_settings_path()) else {
-        return AvailableModelsState::default();
+        return AvailableModelsState {
+            managed_policy_present,
+            ..AvailableModelsState::default()
+        };
     };
     let Ok(JsonValue::Object(map)) = serde_json::from_slice::<JsonValue>(&bytes) else {
-        return AvailableModelsState::default();
+        return AvailableModelsState {
+            managed_policy_present,
+            ..AvailableModelsState::default()
+        };
     };
     let raw = map.get(AVAILABLE_MODELS_KEY);
     let entries = match raw {
@@ -168,6 +208,7 @@ pub fn resolve_available_models() -> AvailableModelsState {
             .get(ENFORCE_AVAILABLE_MODELS_KEY)
             .and_then(JsonValue::as_bool),
         key_present: matches!(raw, Some(JsonValue::Array(_))),
+        managed_policy_present,
     }
 }
 
@@ -176,9 +217,8 @@ pub fn resolve_available_models() -> AvailableModelsState {
 /// a list that no longer justifies it.
 ///
 /// - An empty `entries` removes `availableModels` entirely rather than
-///   writing `[]`. The two behave the same in CC, but absence is what
-///   "no restriction" looks like in a hand-edited file, and it avoids
-///   leaving a key whose only effect is to confuse the next reader.
+///   writing `[]`. They are opposites in CC: absence allows every
+///   model, `[]` allows none but Default.
 /// - `enforce = false` likewise clears the key rather than writing an
 ///   explicit `false` — CC's default.
 /// - `enforce = true` with an *empty* list also clears the key. CC
@@ -282,6 +322,13 @@ mod tests {
         serde_json::from_slice(&fs::read(user_settings_path()).unwrap()).unwrap()
     }
 
+    /// Resolve against an empty managed-settings directory, so the
+    /// machine's real admin policy cannot change the answer.
+    fn resolve() -> AvailableModelsState {
+        let none = TempDir::new().unwrap();
+        resolve_available_models_with(none.path())
+    }
+
     fn v(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| s.to_string()).collect()
     }
@@ -332,7 +379,7 @@ mod tests {
     #[test]
     fn a_missing_file_reads_as_no_allowlist() {
         let (_t, _l) = isolated();
-        let s = resolve_available_models();
+        let s = resolve();
         assert_eq!(s, AvailableModelsState::default());
         assert!(!s.restricts_models());
         assert!(!s.key_present);
@@ -344,7 +391,7 @@ mod tests {
         write_user_settings(
             r#"{"availableModels":["sonnet","haiku"],"enforceAvailableModels":true}"#,
         );
-        let s = resolve_available_models();
+        let s = resolve();
         assert_eq!(s.entries, v(&["sonnet", "haiku"]));
         assert_eq!(s.enforce, Some(true));
         assert!(s.key_present);
@@ -353,40 +400,67 @@ mod tests {
     }
 
     #[test]
-    fn enforce_is_inert_with_an_empty_list() {
-        // CC ignores enforceAvailableModels when the list is empty, so
-        // the UI must not claim Default is restricted.
+    fn an_explicit_empty_list_blocks_every_model_but_default() {
+        // CC 2.1.274: the allowlist check returns true for an absent
+        // key and false for every explicit model under `[]`. An editor
+        // that read `[]` as "no restriction" told the user the opposite
+        // of what CC did. Enforcement stays inert: with nothing to
+        // remap Default to, CC keeps the tier default.
         let (_t, _l) = isolated();
         write_user_settings(r#"{"availableModels":[],"enforceAvailableModels":true}"#);
-        let s = resolve_available_models();
+        let s = resolve();
         assert!(s.key_present, "an explicit [] is still a present key");
-        assert!(!s.restricts_models());
+        assert!(s.restricts_models());
+        assert!(s.blocks_all());
         assert_eq!(s.enforce, Some(true));
         assert!(
             !s.enforce_is_effective(),
-            "enforce with no entries restricts nothing"
+            "enforce with no entries remaps nothing"
         );
+    }
+
+    #[test]
+    fn a_managed_policy_file_switches_user_enforcement_off() {
+        // CC refuses cascade trust when an admin policy is in force
+        // without model keys, and then ignores this file's flag.
+        let (_t, _l) = isolated();
+        write_user_settings(r#"{"availableModels":["sonnet"],"enforceAvailableModels":true}"#);
+        let managed = TempDir::new().unwrap();
+        fs::write(
+            managed.path().join("managed-settings.json"),
+            r#"{"permissions":{"deny":["Bash(rm:*)"]}}"#,
+        )
+        .unwrap();
+        let s = resolve_available_models_with(managed.path());
+        assert!(s.managed_policy_present);
+        assert!(!s.enforce_is_effective());
+        assert!(s.enforce_overridden_by_policy());
+        // An empty policy file is not a policy.
+        fs::write(managed.path().join("managed-settings.json"), "{}").unwrap();
+        let s = resolve_available_models_with(managed.path());
+        assert!(!s.managed_policy_present);
+        assert!(s.enforce_is_effective());
     }
 
     #[test]
     fn non_string_members_are_skipped_rather_than_failing_the_read() {
         let (_t, _l) = isolated();
         write_user_settings(r#"{"availableModels":["sonnet",42,null,"opus"]}"#);
-        assert_eq!(resolve_available_models().entries, v(&["sonnet", "opus"]));
+        assert_eq!(resolve().entries, v(&["sonnet", "opus"]));
     }
 
     #[test]
     fn a_malformed_file_reads_as_no_allowlist() {
         let (_t, _l) = isolated();
         write_user_settings("{not json");
-        assert_eq!(resolve_available_models(), AvailableModelsState::default());
+        assert_eq!(resolve(), AvailableModelsState::default());
     }
 
     #[test]
     fn a_non_array_value_reads_as_no_allowlist() {
         let (_t, _l) = isolated();
         write_user_settings(r#"{"availableModels":"sonnet"}"#);
-        let s = resolve_available_models();
+        let s = resolve();
         assert!(s.entries.is_empty());
         assert!(!s.key_present);
     }
@@ -429,7 +503,7 @@ mod tests {
         // so assert through the resolver, which handles a missing file.
         let (_t, _l) = isolated();
         set_available_models(&[], true).unwrap();
-        let s = resolve_available_models();
+        let s = resolve();
         assert_eq!(s.enforce, None);
         assert!(s.entries.is_empty());
         assert!(!s.enforce_is_effective());
@@ -496,7 +570,7 @@ mod tests {
     fn a_saved_allowlist_reads_back_identically() {
         let (_t, _l) = isolated();
         set_available_models(&v(&["sonnet", "claude-opus-4-8"]), true).unwrap();
-        let s = resolve_available_models();
+        let s = resolve();
         assert_eq!(s.entries, v(&["sonnet", "claude-opus-4-8"]));
         assert!(s.enforce_is_effective());
     }
