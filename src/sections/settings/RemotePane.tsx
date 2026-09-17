@@ -45,6 +45,7 @@ import { SectionLabel } from "../../components/primitives/SectionLabel";
 import { NF } from "../../icons";
 import { renderError } from "../../lib/i18n-error";
 import { QuickPromptsPane } from "./QuickPromptsPane";
+import { useGlobalShortcuts } from "../../hooks/useGlobalShortcuts";
 
 type Props = {
   pushToast?: (kind: "info" | "error", text: string) => void;
@@ -164,6 +165,8 @@ export function RemotePane({ pushToast }: Props) {
       setLoadError(renderError(e, t("remote.loadFailed")));
     }
   }, [t]);
+  // ⌘R — this surface's refresh; see `refresh` in sections/registry.tsx.
+  useGlobalShortcuts({ onRefresh: () => void load() });
 
   useEffect(() => {
     void load();

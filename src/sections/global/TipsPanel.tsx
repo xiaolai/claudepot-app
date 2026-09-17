@@ -11,10 +11,13 @@ import { Glyph } from "../../components/primitives/Glyph";
 import { NF } from "../../icons";
 import { TipsList } from "./tips/TipsList";
 import { useTipsCatalog } from "./tips/useTipsCatalog";
+import { useGlobalShortcuts } from "../../hooks/useGlobalShortcuts";
 
 export function TipsPanel() {
   const { t } = useTranslation("global");
   const { data, loading, error, refresh, refreshing } = useTipsCatalog();
+  // ⌘R — this surface's refresh; see `refresh` in sections/registry.tsx.
+  useGlobalShortcuts({ onRefresh: () => void refresh() });
 
   return (
     <div

@@ -21,6 +21,7 @@ import { formatNumber } from "../../lib/intl";
 import type { FileHealth, MemoryHealthReport } from "../../types";
 import { AutoMemoryGlobalCard } from "./AutoMemoryGlobalCard";
 import { AutoDreamGlobalCard } from "./AutoDreamGlobalCard";
+import { useGlobalShortcuts } from "../../hooks/useGlobalShortcuts";
 
 export function MemoryHealthPanel() {
   const { t } = useTranslation("global");
@@ -40,6 +41,8 @@ export function MemoryHealthPanel() {
       setLoading(false);
     }
   }, []);
+  // ⌘R — this surface's refresh; see `refresh` in sections/registry.tsx.
+  useGlobalShortcuts({ onRefresh: () => void fetchReport() });
 
   useEffect(() => {
     void fetchReport();

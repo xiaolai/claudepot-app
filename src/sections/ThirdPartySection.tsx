@@ -17,6 +17,7 @@ import {
   clearFromNetworkPanelBreadcrumb,
   consumeOpenAddRouteHint,
 } from "../lib/networkPanelDeepLink";
+import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
 
 /**
  * Third-party section — entry point for non-Anthropic LLM routes.
@@ -84,6 +85,8 @@ export function ThirdPartySection() {
     }
     setPathStatus(await pathStatusP);
   }, []);
+  // ⌘R — this surface's refresh; see `refresh` in sections/registry.tsx.
+  useGlobalShortcuts({ onRefresh: () => void refresh() });
 
   useEffect(() => {
     void refresh();

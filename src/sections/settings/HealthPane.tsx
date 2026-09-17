@@ -13,6 +13,7 @@ import type {
   DoctorSnapshot,
   ParseStatus,
 } from "../../api/cc-doctor";
+import { useGlobalShortcuts } from "../../hooks/useGlobalShortcuts";
 
 /**
  * Settings → Health pane. Renders the full output of `claude doctor`
@@ -73,6 +74,8 @@ export function HealthPane({ pushToast }: HealthPaneProps) {
     },
     [pushToast, t],
   );
+  // ⌘R — this surface's refresh; see `refresh` in sections/registry.tsx.
+  useGlobalShortcuts({ onRefresh: () => void load(true) });
 
   useEffect(() => {
     void load(false);

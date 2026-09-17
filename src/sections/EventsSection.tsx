@@ -31,6 +31,7 @@ import { CostTab } from "./events/CostTab";
 type EventsTab = "stream" | "usage" | "cost";
 
 import { EVENTS_TAB_KEY as TAB_STORAGE_KEY } from "../lib/storageKeys";
+import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
 
 function loadTab(): EventsTab {
   try {
@@ -259,6 +260,22 @@ export function EventsSection({
       void refreshAgg();
     }, LIVE_REFRESH_DEBOUNCE_MS);
   });
+  // The header's refresh button and ⌘R do the same thing — see this
+  // section's `refresh` entry in the registry.
+  const refreshActiveTab = useCallback(() => {
+    if (tab === "usage") {
+      usageRefreshRef.current?.();
+    } else if (tab === "cost") {
+      // CostTab refetches on its own when the window
+      // selector changes; the header's manual refresh has
+      // no immediate work to dispatch here. The next
+      // localStorage tick will refresh anyway.
+    } else {
+      void refresh();
+    }
+  }, [tab, refresh]);
+  useGlobalShortcuts({ onRefresh: refreshActiveTab });
+
   useEffect(() => {
     if (tab !== "stream") return;
     const refreshBoth = () => {
@@ -345,18 +362,7 @@ export function EventsSection({
           reindexing={reindexing}
           onReindex={handleReindex}
           onMarkAllSeen={markAllSeen}
-          onRefresh={() => {
-            if (tab === "usage") {
-              usageRefreshRef.current?.();
-            } else if (tab === "cost") {
-              // CostTab refetches on its own when the window
-              // selector changes; the header's manual refresh has
-              // no immediate work to dispatch here. The next
-              // localStorage tick will refresh anyway.
-            } else {
-              void refresh();
-            }
-          }}
+          onRefresh={refreshActiveTab}
         />
         <TabStrip current={tab} onPick={setTab} />
         {tab === "stream" && (

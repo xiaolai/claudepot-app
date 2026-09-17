@@ -75,6 +75,7 @@ import {
   consumeSettingsTabHint,
   type SettingsTabEventDetail,
 } from "../lib/networkPanelDeepLink";
+import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
 
 // Pane table + the `Tab` union both live in `settings/panes.ts`. The
 // ⌘K palette needs the same list to build "Open Settings → Retention"
@@ -710,6 +711,8 @@ function DiagnosticsPane({
       }
     }
   }, [pushToast, t]);
+  // ⌘R — this surface's refresh; see `refresh` in sections/registry.tsx.
+  useGlobalShortcuts({ onRefresh: () => void loadDiagnostics() });
 
   useEffect(() => {
     loadDiagnostics();

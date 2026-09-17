@@ -26,6 +26,7 @@ import { RecurrencePanel } from "./knowledge/RecurrencePanel";
 import { StatCard } from "./knowledge/dashboard-primitives";
 import type { StatCardProps } from "./knowledge/dashboard-primitives";
 import { renderError } from "../lib/i18n-error";
+import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
 
 type QueueState = Extract<ReviewStateName, "proposed" | "suspect">;
 
@@ -65,6 +66,8 @@ export function LessonsTab({
       setLoading(false);
     }
   }, [queue]);
+  // ⌘R — this surface's refresh; see `refresh` in sections/registry.tsx.
+  useGlobalShortcuts({ onRefresh: () => void refresh() });
 
   useEffect(() => {
     void refresh();

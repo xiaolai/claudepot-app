@@ -15,6 +15,7 @@ import { Glyph } from "../../components/primitives/Glyph";
 import { SectionLabel } from "../../components/primitives/SectionLabel";
 import { Tag } from "../../components/primitives/Tag";
 import { NF } from "../../icons";
+import { useGlobalShortcuts } from "../../hooks/useGlobalShortcuts";
 
 type Comparison = "older" | "equal" | "newer" | "unknown";
 
@@ -1048,6 +1049,8 @@ export function UpdatesPanel({
   }, [refresh, t]);
 
   const onCheckNow = useCallback(() => refresh(true), [refresh]);
+  // ⌘R — this surface's refresh; see `refresh` in sections/registry.tsx.
+  useGlobalShortcuts({ onRefresh: () => void onCheckNow() });
 
   const banner = useMemo(() => {
     if (error) return { tone: "error" as const, text: error };

@@ -32,6 +32,7 @@ import { AddKeyModal } from "./keys/AddKeyModal";
 import { OAuthUsageModal } from "./keys/OAuthUsageModal";
 import { EnvVaultSection } from "./keys/EnvVaultSection";
 import { consumePendingKeysFilter } from "./keys/pendingFilter";
+import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
 
 type PendingRemoval =
   | { kind: "api"; row: ApiKeySummary }
@@ -106,6 +107,8 @@ export function KeysSection() {
       setLoading(false);
     }
   }, [pushToast, t]);
+  // ⌘R — this surface's refresh; see `refresh` in sections/registry.tsx.
+  useGlobalShortcuts({ onRefresh: () => void refresh() });
 
   useEffect(() => {
     void refresh();

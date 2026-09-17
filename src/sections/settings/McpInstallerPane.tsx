@@ -34,6 +34,7 @@ import { Tag } from "../../components/primitives/Tag";
 import { NF } from "../../icons";
 import { renderError } from "../../lib/i18n-error";
 import { basename } from "../../lib/paths";
+import { useGlobalShortcuts } from "../../hooks/useGlobalShortcuts";
 
 // Narrow toast signature to the only two kinds we use, keeping the
 // pane decoupled from the broader Toast type. The PushToast prop
@@ -115,6 +116,13 @@ export function McpInstallerPane({
       pushToast("error", renderError(e, t("mcp.projectsLoadFailed")));
     }
   }, [pushToast, t]);
+  // ⌘R — this surface's refresh; see `refresh` in sections/registry.tsx.
+  useGlobalShortcuts({
+    onRefresh: () => {
+      void loadSnippet();
+      void loadProjects();
+    },
+  });
 
   const copyIncludeLine = useCallback(async () => {
     if (!install) return;

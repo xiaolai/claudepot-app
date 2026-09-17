@@ -20,6 +20,7 @@ import {
   RuleRow,
 } from "./RotationPane.bits";
 import { RotationRuleModal } from "./RotationRuleModal";
+import { useGlobalShortcuts } from "../../hooks/useGlobalShortcuts";
 
 interface Props {
   pushToast: (kind: "info" | "error", text: string) => void;
@@ -56,6 +57,8 @@ export function RotationPane({ pushToast }: Props) {
       pushToast("error", renderError(e, t("rotation.loadFailed")));
     }
   }, [pushToast, t]);
+  // ⌘R — this surface's refresh; see `refresh` in sections/registry.tsx.
+  useGlobalShortcuts({ onRefresh: () => void refresh() });
 
   useEffect(() => {
     refresh();

@@ -43,6 +43,7 @@ import { SkeletonList } from "../../components/primitives/Skeleton";
 import { save } from "@tauri-apps/plugin-dialog";
 import { ScreenHeader } from "../../shell/ScreenHeader";
 import { WidgetView } from "./WidgetView";
+import { useGlobalShortcuts } from "../../hooks/useGlobalShortcuts";
 
 /** How often to ask whether another process committed. */
 const POLL_MS = 4000;
@@ -168,6 +169,13 @@ export function BoardsSection() {
       setActionError(renderError(e));
     }
   }, []);
+  // ⌘R — this surface's refresh; see `refresh` in sections/registry.tsx.
+  useGlobalShortcuts({
+    onRefresh: () => {
+      void loadList();
+      if (selected) void loadDetail(selected);
+    },
+  });
 
   useEffect(() => {
     void loadList();

@@ -1057,7 +1057,10 @@ See `dev-docs/implementation-plan.md` for the full plan.
   section), the launch picker offered a `sessions` id that
   `useSection` silently rejected back to Accounts, and the palette
   reached three of the nine sections. A new section is one registry
-  entry; a new *list* of sections is a review finding.
+  entry — and that entry must say what ⌘R does there (`refresh`: the files
+  that bind it, or why nothing can be reloaded; `registry.refresh.test.ts`
+  checks each named file binds it). A new *list* of sections is a review
+  finding.
 - Long-running ops (project rename, repair resume/rollback) flow
   through a single op-progress pipeline:
   `Tauri *_start` cmd → spawns task → emits events on

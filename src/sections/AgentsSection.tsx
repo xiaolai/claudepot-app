@@ -24,6 +24,7 @@ import {
 } from "./agents/AgentModals";
 import { AgentCard } from "./agents/AgentCard";
 import { TemplateGallery } from "./templates/TemplateGallery";
+import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
 
 /**
  * Agents section — define + run scheduled `claude -p` jobs.
@@ -96,6 +97,8 @@ export function AgentsSection() {
       setLoadError(renderError(e));
     }
   }, []);
+  // ⌘R — this surface's refresh; see `refresh` in sections/registry.tsx.
+  useGlobalShortcuts({ onRefresh: () => void refresh() });
 
   useEffect(() => {
     refresh();

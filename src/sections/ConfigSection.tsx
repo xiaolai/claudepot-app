@@ -43,7 +43,7 @@ import { useLifecycleClassification } from "../hooks/useLifecycleClassification"
 import { DisabledScopeView } from "./config/DisabledScopeView";
 import { EnvVarsPane } from "./config/envvars/EnvVarsPane";
 import { useAppState } from "../providers/AppStateProvider";
-import { isShortcutContextBlocked } from "../hooks/useGlobalShortcuts";
+import { isShortcutContextBlocked, useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
 
 import {
   CONFIG_ANCHOR_STORAGE_KEY,
@@ -390,6 +390,8 @@ export function ConfigSection({
       setLoadError(renderError(e));
     }
   }, [setTree, anchor]);
+  // ⌘R — this surface's refresh; see `refresh` in sections/registry.tsx.
+  useGlobalShortcuts({ onRefresh: () => void refreshTree() });
 
   const refreshEditors = useCallback(() => {
     setEditors(null);

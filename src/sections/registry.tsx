@@ -72,6 +72,21 @@ export interface SectionDef {
    * review finding.
    */
   optional?: "boards";
+  /**
+   * What ⌘R does here. `lib/shortcutBindings.ts` documents it as
+   * "Refresh this section", and for most of the app's life only Accounts
+   * and Projects bound it: eight sections showed refresh buttons and
+   * ignored the key, which then fell through to the webview. Required, so
+   * a new section cannot skip the decision.
+   *
+   * - `boundIn` — every component under this section that reloads its own
+   *   data binds ⌘R to that reload (`useGlobalShortcuts({ onRefresh })`).
+   *   `registry.refresh.test.ts` checks each listed file does. A
+   *   component binds only while it is mounted, so a tab or pane refreshes
+   *   only when it is the one on screen.
+   * - `none` — the section has nothing ⌘R could reload; say why.
+   */
+  refresh: { boundIn: readonly string[] } | { none: string };
 }
 
 // Named import promises so React.lazy and the preload helpers share
@@ -121,12 +136,14 @@ export const sections: readonly SectionDef[] = [
     id: "accounts",
     labelKey: "sections.accounts",
     glyph: NF.users,
+    refresh: { boundIn: ["src/sections/AccountsSection.tsx"] },
     render: (p) => <AccountsSection onNavigate={p.onNavigate} />,
   },
   {
     id: "events",
     labelKey: "sections.events",
     glyph: NF.dashboard,
+    refresh: { boundIn: ["src/sections/EventsSection.tsx"] },
     loader: importEvents,
     render: (p) => <EventsSection onNavigate={p.onNavigate} />,
   },
@@ -134,6 +151,10 @@ export const sections: readonly SectionDef[] = [
     id: "projects",
     labelKey: "sections.projects",
     glyph: NF.folder,
+    refresh: {
+      // ConfigSection is embedded in the project detail pane.
+      boundIn: ["src/sections/ProjectsSection.tsx", "src/sections/ConfigSection.tsx"],
+    },
     loader: importProjects,
     render: (p) => (
       <ProjectsSection
@@ -152,6 +173,14 @@ export const sections: readonly SectionDef[] = [
     id: "shared-memory",
     labelKey: "sections.shared-memory",
     glyph: NF.book,
+    refresh: {
+      boundIn: [
+        // Recall is a search screen; there is nothing to reload.
+        "src/sections/knowledge/KnowledgeDashboard.tsx",
+        "src/sections/knowledge/KnowView.tsx",
+        "src/sections/LessonsTab.tsx",
+      ],
+    },
     loader: importSharedMemory,
     render: () => <SharedMemorySection />,
   },
@@ -159,6 +188,7 @@ export const sections: readonly SectionDef[] = [
     id: "keys",
     labelKey: "sections.keys",
     glyph: NF.key,
+    refresh: { boundIn: ["src/sections/KeysSection.tsx"] },
     loader: importKeys,
     render: () => <KeysSection />,
   },
@@ -167,6 +197,7 @@ export const sections: readonly SectionDef[] = [
     id: "third-party",
     labelKey: "sections.third-party",
     glyph: NF.cpu,
+    refresh: { boundIn: ["src/sections/ThirdPartySection.tsx"] },
     loader: importThirdParty,
     render: () => <ThirdPartySection />,
   },
@@ -175,6 +206,7 @@ export const sections: readonly SectionDef[] = [
     id: "automations",
     labelKey: "sections.automations",
     glyph: NF.clock,
+    refresh: { boundIn: ["src/sections/AgentsSection.tsx"] },
     loader: importAgents,
     render: () => <AgentsSection />,
   },
@@ -188,6 +220,15 @@ export const sections: readonly SectionDef[] = [
     id: "config",
     labelKey: "sections.config",
     glyph: NF.fileCode,
+    refresh: {
+      boundIn: [
+        "src/sections/ConfigSection.tsx",
+        "src/sections/config/envvars/EnvVarsPane.tsx",
+        "src/sections/global/UpdatesPanel.tsx",
+        "src/sections/global/MemoryHealthPanel.tsx",
+        "src/sections/global/TipsPanel.tsx",
+      ],
+    },
     loader: importGlobal,
     render: (p) => (
       <GlobalSection
@@ -205,6 +246,7 @@ export const sections: readonly SectionDef[] = [
     id: "boards",
     labelKey: "sections.boards",
     glyph: NF.board,
+    refresh: { boundIn: ["src/sections/boards/BoardsSection.tsx"] },
     loader: importBoards,
     render: () => <BoardsSection />,
     // Off by default: Boards is on trial, and a feature that installs
@@ -217,6 +259,16 @@ export const sections: readonly SectionDef[] = [
     id: "settings",
     labelKey: "sections.settings",
     glyph: NF.sliders,
+    refresh: {
+      boundIn: [
+        // Panes that are forms have nothing to reload.
+        "src/sections/SettingsSection.tsx",
+        "src/sections/settings/HealthPane.tsx",
+        "src/sections/settings/RemotePane.tsx",
+        "src/sections/settings/RotationPane.tsx",
+        "src/sections/settings/McpInstallerPane.tsx",
+      ],
+    },
     loader: importSettings,
     render: () => <SettingsSection />,
   },

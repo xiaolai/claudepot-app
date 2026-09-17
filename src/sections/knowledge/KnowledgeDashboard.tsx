@@ -33,6 +33,7 @@ import {
 } from "./dashboard-primitives";
 import type { StatCardProps, TrustMix } from "./dashboard-primitives";
 import { renderError } from "../../lib/i18n-error";
+import { useGlobalShortcuts } from "../../hooks/useGlobalShortcuts";
 
 /** A merged coverage row: a project, its session count, and its trust
  *  mix. Either half can be absent (a project with memories but no indexed
@@ -110,6 +111,8 @@ export function KnowledgeDashboard({
     }
     setLoading(false);
   }, [t]);
+  // ⌘R — this surface's refresh; see `refresh` in sections/registry.tsx.
+  useGlobalShortcuts({ onRefresh: () => void refresh() });
 
   useEffect(() => {
     void refresh();

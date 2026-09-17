@@ -28,6 +28,7 @@ import {
 } from "./knowledge-items";
 import type { KnowItem } from "./knowledge-items";
 import { renderError } from "../../lib/i18n-error";
+import { useGlobalShortcuts } from "../../hooks/useGlobalShortcuts";
 
 const GLOBAL_KEY = "(global)";
 /** Per-type row cap. A list at this length is flagged as truncated. */
@@ -138,6 +139,8 @@ export function KnowView({
     else if (failures.length > 0) setPartial(t("know.partial"));
     setLoading(false);
   }, [t]);
+  // ⌘R — this surface's refresh; see `refresh` in sections/registry.tsx.
+  useGlobalShortcuts({ onRefresh: () => void refresh() });
 
   useEffect(() => {
     void refresh();

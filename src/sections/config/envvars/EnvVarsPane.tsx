@@ -21,6 +21,7 @@ import { EnvVarsDisclosure } from "./EnvVarsDisclosure";
 import { EnvVarsToolbar } from "./EnvVarsToolbar";
 import { groupByCategory, itemKey, ItemView } from "./grouping";
 import { UndocumentedSection, UnrecognizedBucket } from "./EnvVarsBuckets";
+import { useGlobalShortcuts } from "../../../hooks/useGlobalShortcuts";
 
 /** Row count above which the list virtualizes. See the call site. */
 const VIRTUALIZE_ABOVE = 40;
@@ -78,6 +79,8 @@ export function EnvVarsPane() {
       setError(renderError(e));
     }
   }, []);
+  // ⌘R — this surface's refresh; see `refresh` in sections/registry.tsx.
+  useGlobalShortcuts({ onRefresh: () => void load() });
 
   useEffect(() => {
     void load();
