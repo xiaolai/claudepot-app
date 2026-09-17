@@ -6,6 +6,34 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.6.4 — beta (released 2026-09-17)
+
+The installed app stops behaving like a browser tab: the webview's
+reload keys and its native context menu are gone from release builds.
+
+### Changed
+
+- **A packaged build can no longer be reloaded by accident.** F5, ⌘R /
+  Ctrl+R and their Shift hard-reload variants are cancelled, and the
+  webview's own right-click menu, which carries browser verbs such as
+  Reload, no longer appears over app chrome. It still appears in a
+  text field and over selected text, so Copy, Paste and Look Up keep
+  working, and every one of the app's own context menus is untouched.
+  ⌘R still refreshes Accounts and Projects. A reload in a desktop
+  window threw away whatever lived only on screen — an open dialog, a
+  half-typed key — with nothing saying the window was disposable. The
+  Reload button on the crash screen still works, and development
+  builds keep both the keys and Inspect Element. On Windows, WebView2
+  handles some of these keys below the page, and whether they can be
+  cancelled from the page is not verified yet.
+
+### Security
+
+- **Four dependency pins moved past their advisories**: `fast-uri`,
+  `qs` and `sanitize-html` in the claudepot.com site, and
+  `browserslist` at the root, which is build-time only and does not
+  ship in the app.
+
 ## 0.6.3 — beta (released 2026-09-05)
 
 Two changes to the window chrome: the status bar gains a pin that
