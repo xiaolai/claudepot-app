@@ -34,12 +34,12 @@
 //! directory walk would give this module the traversal surface it exists
 //! not to have.
 //!
-//! The cost is stated rather than buried: those chunks are ~3.4 MB of
+//! The cost is stated rather than buried: those chunks are ~3.8 MB of
 //! committed bytes, embedded in every binary whether or not the remote
 //! surface is ever switched on. They buy per-diagram loading — a
 //! flowchart pulls ~60 KB, not the whole of mermaid — on a client that
 //! is a phone on a LAN and is served `no-store`. The base bundle is
-//! unchanged at ~413 KB: a thread with no diagram in it pays nothing.
+//! unchanged at ~426 KB: a thread with no diagram in it pays nothing.
 //!
 //! ## Fonts
 //!
@@ -674,7 +674,7 @@ mod tests {
         // on someone's phone, and the CSP would break it anyway.
         //
         // **The lazily-loaded chunks are deliberately out of scope**,
-        // and saying so is the point of this paragraph. They are ~3.4 MB
+        // and saying so is the point of this paragraph. They are ~3.8 MB
         // of vendored third-party code — mermaid, cytoscape, katex,
         // chevrotain — whose error strings alone name a dozen
         // documentation URLs. Asserting over them would need an

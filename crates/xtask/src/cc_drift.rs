@@ -392,7 +392,8 @@ fn read_pins(root: &Path) -> Result<(Vec<Pin>, Vec<String>)> {
             (
                 "binary_crosscheck_version",
                 PinKind::Version,
-                "env pane hides present_in_build / undocumented_in_build ENTIRELY, with no message",
+                "env pane renders present_in_build / undocumented_in_build as \"unavailable for \
+                 this version\" — correct, but it is a state nobody can act on",
             ),
             (
                 "cc_source_read_at",

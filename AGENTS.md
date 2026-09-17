@@ -17,6 +17,28 @@ over those nouns and over CC's filesystem, not new domain types. See
 Scope discipline applies to the *domain model* (don't add nouns
 casually); it does not cap what the UI can usefully expose.
 
+## How this file is split
+
+This file states the rules. `docs/notes/` carries the reasoning behind
+them — what was measured, which obvious alternative was tried and
+reverted, and which shipped bug each gate was written after. The split
+exists because this file is `@`-included into **every** session and the
+notes are not; it is not a signal that the notes are optional.
+
+| Note | Covers |
+|---|---|
+| [`docs/notes/remote-control.md`](docs/notes/remote-control.md) | the appliance security model, the certificate work, every design decision inside the phone panel |
+| [`docs/notes/gui-shell.md`](docs/notes/gui-shell.md) | the renderer and data-dir measurements, and three optimisations that were reverted |
+| [`docs/notes/test-gates.md`](docs/notes/test-gates.md) | the failure each gate was written after |
+| [`docs/notes/cc-integration.md`](docs/notes/cc-integration.md) | retention, permission grants and peer messaging, against dated CC versions |
+| [`docs/notes/i18n.md`](docs/notes/i18n.md) | the three catalogs and the bugs behind each rule |
+| [`docs/notes/assets-and-release.md`](docs/notes/assets-and-release.md) | icons, screenshots, release validation |
+
+**A rule in this file whose reasoning is in a note must not be changed
+from this file alone** — the note is where the argument against the
+obvious alternative lives, which is the part that stops a decision
+being silently reverted.
+
 ## Shared memory (dogfooding)
 
 Claudepot indexes this repo's own Claude + Codex transcripts and
@@ -47,186 +69,40 @@ bundle with no error anywhere.
 
 ```bash
 cargo test --workspace               # Rust
-cargo xtask verify-cc-parity         # CC settings-merge parity goldens (see parity-harness/README.md)
+cargo xtask verify-cc-parity         # CC settings-merge parity goldens (parity-harness/README.md)
+cargo xtask verify-docs              # README / AGENTS.md / event-channel / screenshot contracts
 pnpm test                            # React (Vitest + RTL, jsdom)
 pnpm test:coverage                   # React with coverage report
 cd panel && pnpm check:render        # the built remote panel actually mounts
-pnpm check:classes                   # every className has a CSS rule behind it
+pnpm check:classes                   # every className has a rule; every text field draws chrome
 pnpm check:a11y                      # every role="switch" has an accessible name
+pnpm check:motion                    # the reduced-motion override reaches the primitives
+pnpm check:contrast                  # the prefers-contrast override is not lost to source order
+pnpm check:catalogs                  # en↔zh key / placeholder / <Trans> tag parity
+pnpm check:envvar-layout             # needs a screen; CI runs its unit half only
 ```
 
-`panel`'s render check answers a question `vite build` cannot: whether
-the bundle *mounts*. It runs the committed output in jsdom and asserts
-**seven** passes, because for a while it only asserted the first:
+Every gate here was written after a specific failure had already
+shipped green. What each one catches, and the three or four details
+that make each one honest rather than decorative, is in
+[`docs/notes/test-gates.md`](docs/notes/test-gates.md) — read it before
+changing a gate, and especially before relaxing one.
 
-- **signed out**, with no network — the offline path a phone hits first
-  — reaching the sign-in screen with zero console errors;
-- **signed in**, against a stub host, opening a session and reaching the
-  thread's composer — and asserting that opening it pushed a history
-  entry, because the back-gesture feature guards itself and fails off,
-  so without that line the pass would stay green while exercising
-  nothing;
-- the **quick-prompt sheet**, which is the shared `PickerSheet` chrome;
-- the **slash-command sheet**, which is a different fetch, a different
-  row, and an argument step the other picker has no equivalent of;
-- **staging** that command — a distinct end state, since `stage()` closes
-  the sheet, so "sheet open with an args field" and "sheet closed with a
-  chip in the composer" cannot be asserted in one pass;
-- the **offline queue**, as a round trip: cut the wire, send, assert the
-  message was HELD and never reached the host, restore the wire, assert
-  it went out under the entry's own idempotency key;
-- the **wide two-pane layout**, declared at 1200px.
+| Gate | The question it answers that nothing else does |
+|---|---|
+| `check:render` | does the **committed** panel bundle *mount*? Seven passes: signed-out and offline, signed-in thread, the quick-prompt sheet, the slash-command sheet, staging a command, the offline queue as a round trip, the 1200px two-pane layout. `vite build` cannot answer it — it does not resolve free identifiers, so a missing import is a runtime `ReferenceError` in whatever path touches it |
+| `check:classes` | does every `className` have a CSS rule behind it, and does every bare `input` / `textarea` draw chrome? Both are valid HTML and invisible to `tsc`. Refuses a vacuous pass under 100 defined / 100 used; `lucide*` is exempt |
+| `check:a11y` | does every `role="switch"` have an accessible name? Requires an aria attribute outright — the visible text beside a switch is not a label |
+| `check:motion` / `check:contrast` | do the `prefers-reduced-motion` and `prefers-contrast: more` overrides actually *reach* the primitives, which animate from inline styles? Both turn on source order inside `tokens.css` |
+| `check:catalogs` | en↔zh parity. "Orphan" is **cross-locale only** — it cannot see a key that no source file references, and a green run is not evidence there are none |
+| `check:envvar-layout` | does the env-var pane lay out at all? Drives the real app over the debug-only MCP bridge, so CI runs the pure `evaluate()` half instead |
 
-Everything after the first exists because vite does not resolve free
-identifiers, so a missing import is a runtime `ReferenceError` in
-whatever code path touches it. Two of them shipped in one commit —
-`useEffect`, then `api` — and turned every thread into a blank screen
-while the signed-out assertion stayed green, since it never reaches
-`Thread`. Reverting either import now fails the check; verified in both
-directions.
-
-The offline pass is the only end-to-end coverage the drain has — the
-store has unit tests, the loop that reads it had none — and it is the
-one path in the panel that sends a message the user is not present for.
-Watched failing against a drain that minted a fresh key instead of
-replaying the entry's.
-
-**A `className` with no rule renders as unstyled markup, and
-`pnpm check:classes` is the only thing that says so.** It is valid HTML,
-invisible to `tsc`, and invisible to a render test that asserts on text
-— so `RemotePane` shipped against eight invented class names (`pane`,
-`pane-block`, `pane-intro`, `pane-warning`, `pane-error`,
-`pane-actions`, `remote-devices`, `status-chip`) with every other gate
-green.
-
-It was the *second* instance, which is why the answer is a gate rather
-than a third careful reading: `QuickPromptsPane` had been rendering a
-dead `pane` since it was written, and `ProtectedPathsPane` carries a
-comment from an earlier pass that found `className="btn outline"` doing
-nothing. The scan found eight more across the renderer, all now removed.
-
-Three details it needs to be honest:
-
-- **Comments are stripped first.** `ProtectedPathsPane` quotes the dead
-  `className="btn outline"` inside the comment explaining its removal,
-  and the first version reported that as a live finding.
-- **It refuses a vacuous pass.** An empty corpus on either side reports
-  zero orphans, so it fails when it finds fewer than 100 of either.
-- **`lucide*` is exempt** — `lucide-react` stamps
-  `class="lucide lucide-<name>"` onto every icon SVG, and those belong to
-  the library. Scoped to that prefix so it cannot become a general
-  escape hatch.
-
-A class that exists only to be queried by a test is a `data-testid`, not
-a class — `MarkdownRenderer`'s `md-link` was the one such case and now
-says so.
-
-**The same script's second half asks whether a text field draws chrome
-at all.** `tokens.css` gives `input, textarea` only `font` and `color` —
-no border reset, no background, no radius — so a bare one renders with
-the user-agent border, which in WebKit is a 2px INSET bevel on an input
-and a 1px grey rule on a textarea. `QuickPromptsPane` had one of each,
-six inches from fields that went through `Input`. The panel hit this
-independently; `panel/src/controls.css` records the same measurement.
-
-The fix is `primitives/fieldChrome.ts`, which `Input` and the new
-`Textarea` both read. Copying `Input`'s style block would have fixed the
-pixels and left two chromes to drift. A **global** `input, textarea`
-rule is the obvious alternative and the wrong one: `Input` paints a
-WRAPPER and clears the inner element inline, so a global border would sit
-inside the first.
-
-Getting the check itself right took three passes, and each wrong version
-looked fine:
-
-- Written as a Vitest assertion first, reading CSS through `?raw` —
-  which Vite stubs to an empty string under Vitest. 21 files, 20 total
-  characters, every class reported undefined, and it could never have
-  passed. Hence the refusal below 100 defined / 100 used.
-- The class half filtered to `remote-*`, so renaming a class to
-  `pane-list` walked straight around it. Prefix-free now.
-- The field half scanned to the first `>`, which in JSX is the arrow in
-  `onChange={(e) => …}` — so it never reached `style=` and reported **70**
-  false positives. It is brace- and string-aware now, and
-  `checkbox`/`radio`/`file` are exempt because their chrome IS the UA's.
-
-After all three, the repo has zero of either. Verified by reverting the
-`QuickPromptsPane` fix and watching the gate name exactly those two
-fields. `pnpm check:classes:self-test` forces both halves to fail so the
-guard is known to be able to.
-
-**`Input` and `Textarea` draw a focus outline, never the button
-ring.** `tokens.css` documents two treatments and says which is for
-which: a box-shadow `--focus-ring` (3px) for "filled chrome controls",
-an outline (`--bw-focus`, 2px) for "input/list/row controls" —
-`.settings-input:focus-visible` and its siblings in `envvars.css` /
-`projects.css` / `banners.css` already use the second. `Input` used the
-first: its inner element carried `pm-focus`, which pulls in the button
-ring, stacked on the wrapper's own border turning accent-coloured on
-focus. Two indicators, and the box-shadow one had nowhere to go — the
-wrapper sets no vertical padding, so the ring bled 2px past the pill's
-top and bottom edge instead of being contained by it. It read as one
-heavy, doubled box rather than a single crisp ring.
-
-`primitives/fieldChrome.ts` is the shared fix, read by both `Input` and
-the newer `Textarea`: the wrapper's border stops changing colour on
-focus, and an outline appears instead, flush with no offset — exactly
-`.settings-input`'s pattern, so a field styled through the primitive and
-one styled directly in a shard now agree. `focus.test.tsx` locks both
-halves of the split: button-shaped primitives still carry `pm-focus`,
-`Input`/`Textarea` never do, and the wrapper's `outline` (not
-`boxShadow`) is what changes when the inner element gains focus. Watched
-firing against the reverted state — `pm-focus` back on `Input`'s inner
-element failed the "neither carries pm-focus" assertion immediately.
-
-**A switch with no text content has no accessible name, and
-`pnpm check:a11y` is the only thing that says so.** A
-`<button role="switch">` holding one decorative `aria-hidden` span
-announces as "switch, not checked" with nothing saying what it
-switches — the visible text beside it is not a label, however obvious it
-looks on screen. Two shipped that way: `SettingsSection`'s `Toggle`,
-behind fourteen call sites, and `UpdatesPanel`'s, whose docstring
-asserted the label was *"rendered as a sibling by the caller … same a11y
-semantics"*. `SettingToggleRow` — the canonical version of the same row
-— had `aria-label` + `aria-describedby` right the whole time, which is
-what makes this mechanical rather than a matter of taste: the correct
-pattern was already in the tree.
-
-`Toggle`'s `label` is **required**, so tsc lists every call site rather
-than leaving one to be missed.
-
-The related-but-different failure is a name that is too LONG. A `<label>`
-wrapping both a control and its explanation takes its accessible name
-from all of that text, so `NetworkPane`'s probe toggle announced as
-"Probe latency on open Runs a HEAD request against each endpoint…" and
-`RouteForm`'s keychain checkbox as its label plus a `code`-laden note.
-Both use `htmlFor` for the name and `aria-describedby` for the detail
-now — different relationships, and assistive tech treats them
-differently. That one is **not** gated: what counts as description is a
-judgement call, and judgement calls make bad gates.
-
-The gate's own history is the reason it is written narrowly. The first
-version tried to accept a content-derived name, and the `<span>`'s
-inline style object satisfied its "contains an expression" test — so
-deleting `aria-label` from the real `SettingsSection` toggle still
-reported OK. Watched, on the actual file. It now requires an aria
-attribute outright, and both real regressions have been watched failing.
-
-**The wide pass declares a width, and that is the whole trick.** jsdom
-has no layout, so a real `ResizeObserver` measurement is always zero and
-the stub used to be a no-op — which pinned every pass to the phone step
-and made the wide layout unreachable by any check. It is asserted
-through behaviour rather than markup (`<nav>` is true of the phone
-layout too): at ≥900px, opening a thread leaves the list on screen and
-there is therefore no Back chevron. Watched failing against the
-pre-change shell, which reported `data-bp: sm`.
-
-`pnpm check:render:self-test` forces a failure so the assertions are
-known to fire. Note the harness **defers restoring globals to process
-exit**: the panel polls on a `setInterval`, jsdom's timers are Node
-timers that outlive `window.close()`, and restoring between passes let
-one fire into a world with no `document` — killing the process *after*
-a passing verdict had been printed.
+Five carry a `:self-test` that forces the assertions to fail
+(`check:classes`, `check:a11y`, `check:motion`, `check:contrast`, and
+the panel's `check:render`), `check-envvar-layout.mjs` takes
+`--self-test`, and `check:catalogs` is exercised by pointing
+`CLAUDEPOT_LOCALES_DIR` at a fixture. A check nobody has watched fail
+is indistinguishable from one that cannot fail.
 
 CI runs the core + cli tests on a Linux/macOS/Windows matrix and the
 `claudepot-tauri` crate's tests on macOS + Windows (Linux needs
@@ -235,6 +111,11 @@ compile gate). The lint job fmt/clippy-gates `xtask` itself and runs
 `cargo xtask verify-cc-parity`. Release builds preflight a five-site
 version lock-step check (tag vs `Cargo.toml`, `package.json`,
 `tauri.conf.json`, README status banner, web install-page banner).
+
+**`scripts/build-panel.sh` is not in this list and nothing notices if
+you skip it.** A source change under `panel/` that nobody rebuilt ships
+the previous committed bundle with no error anywhere — see
+"## Remote control".
 
 ## GUI (Tauri)
 
@@ -246,448 +127,107 @@ version lock-step check (tag vs `Cargo.toml`, `package.json`,
   (sliced by domain, merged in `index.ts`) — React UI, plain CSS.
 - `AccountStore.db` is `Mutex<Connection>` so stores can cross `await` points in Tauri commands.
 
-**Opening a transcript parses it once.** It used to parse it four
-times: `read_session_detail_at_path` called `scan_session` (the row
-fold) *and* `parse_events` (the event fold), and the viewer issued
-`session_read_path` and `session_chunks` in a `Promise.all`, each of
-which ran that same pair. The comment defending the double fetch said
-"typical sessions are <1 MB"; measured on this machine, 375 transcripts
-are over 1 MB, 100 over 10 MB, and the largest is **181 MB**. The two
-folds now share one `serde_json::from_str` per line
-(`scan_session_with_events`), and chunks — a pure function of the
-events — ride back on `SessionDetailDto` instead of being their own
-command. `session_chunks` was deleted rather than left unread.
+What was measured behind this shell — the transcript that was parsed
+four times, the 29,810-`stat` directory walk and the cache that absorbs
+90% of it, the session index that took a write lock to answer a read,
+launch-at-login, the status-bar pin, and the release-only page-reload
+guard — is in [`docs/notes/gui-shell.md`](docs/notes/gui-shell.md),
+together with the three optimisations that were written, measured and
+**reverted**. Read it before optimising anything here; two of those
+three look obviously right.
 
-`core_tests::scan_with_events_matches_the_two_separate_passes` pins the
-one-pass fold against the two-pass one, over a fixture with a blank
-line and a malformed line, because those are exactly where the two
-loops differed.
+### What lives in `~/.claudepot/`
 
-**What is NOT worth doing here: windowing the transcript at the IPC
-boundary.** It looks like the obvious next step and it is not — the
-181 MB file yields **0.9 MB** of event text, because base64 image
-payloads are dropped during parse (`tool_result` keeps only `text`
-parts). The cost was never the payload; it was the parse. Measure
-before adding a paging protocol the search box would then have to work
-around.
+Override the root with `CLAUDEPOT_DATA_DIR`. The authoritative list is
+whatever joins onto `claudepot_core::paths::claudepot_data_dir()`, and
+`cargo xtask verify-docs` fails when a `*.db` or `*.json` name in the
+source is missing from this file. **It checks nothing else** — the
+`.pem`, `.jsonl`, `.lock` and directory rows below are held by this
+table alone, which is why they were absent from it until 2026-09-17.
 
-**`project_list` caches only the nested half of its directory walk.**
-The recursive size+mtime walk is 29,810 `stat` calls over 11 GB here —
-1.1–1.3 s in release, paid on every mount of the Projects tab and every
-⌘R — and ~90% of it is below the top level, in the per-session folders
-CC writes beside each transcript. `src-tauri/src/project_size_cache.rs`
-holds that share in memory (not persisted: it is a pure function of the
-filesystem, so a file in the data dir would be a thing to migrate and
-invalidate for a number rebuilt in under a second). The top level is
-measured fresh every listing, so counts, transcript bytes and every
-flag that gates behaviour are exact; what lags by at most one listing
-is the nested contribution to one size column and a sort key.
+**Every database opens through
+`claudepot-core::db_pragmas::apply_standard_pragmas`**, and
+`verify-docs` fails a `Connection::open` that doesn't. Hand-rolling the
+pragma batch is the failure, not getting it wrong: `corpus.rs` rolled
+one that *looked* deliberate and silently omitted `journal_size_limit`
++ `wal_autocheckpoint`, leaving the largest database in the app outside
+the bound that exists because `sessions.db-wal` once reached 6.3 GB.
+Per-store extras (`synchronous=NORMAL`, `foreign_keys=ON`) go in a
+second batch *after* the helper, never instead of it. The helper also
+retries the `delete` → `wal` transition, which SQLite does not run the
+busy handler for.
 
-Two details are load-bearing:
+Eight SQLite databases:
 
-- **`is_empty` may not read a cached number.** It is the flag that can
-  put a project in front of a delete button. It now tests
-  `!has_subdirs` and the *top-level-only* byte sum, both from the
-  shallow pass, so it answers identically with or without a cache. That
-  is also strictly safer than the recursive test it replaces: a
-  directory holding an empty subtree summed to under 4 KiB and read as
-  "empty".
-- **Parallelising instead was measured and is not enough** — 1.25 s →
-  0.72 s, because the work is stat-bound and one slug dominates. The
-  listing runs on rayon *as well*, but the cache is what makes a repeat
-  listing cheap.
-- Eight SQLite files live in `~/.claudepot/` (override with
-  `CLAUDEPOT_DATA_DIR`; the authoritative list is whatever joins onto
-  `claudepot_core::paths::claudepot_data_dir()`, and
-  `cargo xtask verify-docs` fails when this list drifts from it).
+| File | Owner | Contract |
+|---|---|---|
+| `accounts.db` | `cli_backend` | authoritative account + verification state, linked to Keychain |
+| `boards.db` | `board::store` | **user data, not a cache** — a board's contents exist nowhere else once the writing session ends, so migrations preserve rows and nothing prunes automatically. Opened directly by GUI, CLI and the MCP subprocess with no IPC between them, so `writer_id` is self-reported: every surface renders provenance as "Reported by …", never as verified identity |
+| `sessions.db` | `session_index` | one row per `.jsonl` transcript, keyed by file_path; `(size, mtime_ns)` is the re-parse guard. Rebuild via Settings → Cleanup or `claudepot session rebuild-index`. Three invariants: a refresh with an empty plan must take **no** write lock; a per-project read must scope **both** sides of the diff; index-backed Tauri commands borrow the **shared** `SessionIndex` rather than opening their own |
+| `env-vault.db` | `env_vault::store` | the local named-secret vault (`env_secrets`, secret in a 0600 column, no OS Keychain) |
+| `keys.db` | `keys::store` | the Keys tab's API-key inventory, same at-rest pattern |
+| `memory_changes.db` | `memory_log` | append-only log of detected CLAUDE.md / memory-file writes |
+| `activity_metrics.db` | `session_live::metrics_store` | one row per session per tick for Activity Trends |
+| `corpus.db` | `corpus` | the analysis corpus: every transcript from every machine, deduped, built by `claudepot corpus index`. **Deliberately not in `sessions.db`**, whose `refresh` deletes every row it cannot see under one `config_dir` — correct for a cache, fatal for an archive. Derived data: safe to delete, one ~5-minute pass to rebuild. Outputs do *not* live here; distilled claims go to `memories` in `sessions.db`, which carries no foreign key to `sessions` and is never cascaded |
 
-  **Every one of them opens through
-  `claudepot-core::db_pragmas::apply_standard_pragmas`**, and
-  `verify-docs` fails a `Connection::open` that doesn't. Hand-rolling
-  the pragma batch is the failure, not getting it wrong: `corpus.rs`
-  hand-rolled a batch that *looked* deliberate and silently omitted
-  `journal_size_limit` + `wal_autocheckpoint`, leaving the largest
-  database in the app outside the bound that exists because
-  `sessions.db-wal` once reached 6.3 GB. The helper also retries the
-  `delete` → `wal` transition, because SQLite does **not** run the busy
-  handler for it — `busy_timeout` does not cover that statement, and
-  racing the first open of a file failed outright with "database is
-  locked" (measured: 2 failures per 320 concurrent opens). Per-store
-  extras like `synchronous=NORMAL` or `foreign_keys=ON` go in a second
-  batch *after* the helper, never instead of it.
-  - `accounts.db` — authoritative account + verification state, linked to Keychain.
-  - `boards.db` — durable agent-written boards (grid spec, typed
-    series, rows). Owned by `claudepot-core::board::store`. **User
-    data, not a cache**: a board's contents exist nowhere else once
-    the writing session ends, so migrations preserve rows and there is
-    no automatic pruning. Opened *directly* by every writer — GUI,
-    CLI, and the MCP server subprocess — with no IPC channel between
-    them, following `sessions.db`'s access pattern. That is a
-    deliberate trade whose cost is that `writer_id` is self-reported:
-    every surface renders provenance as "Reported by …", never as
-    verified identity. See `dev-docs/agent-boards-plan.md` §11.
-  - `sessions.db` — persistent cache for the Sessions tab. One row per
-    `.jsonl` transcript, keyed by file_path; `(size, mtime_ns)` is the
-    re-parse guard. Owned by `claudepot-core::session_index`. Rebuild
-    via Settings → Cleanup or `claudepot session rebuild-index`.
+JSON and JSONL state. **A corrupt file is never fatal at boot**: every
+`json_store`-backed store moves it aside to
+`<name>.corrupt.<unix-ts>` and starts empty. What differs is whether
+anyone is told — `load_or_recover` hands the caller a
+`CorruptionRecovery` marker to surface, and `load` / `load_or_default`
+discard it. The four that surface it are marked **reports** below, and
+they are the four whose silent reset would hand something back to an
+attacker or leave a door open with nothing obliging it to close.
 
-    **A refresh with nothing to apply must take no write lock.** Every
-    read entry point (`list_all`, `list_by_slug`) refreshes first, and
-    the steady state has an empty plan — so for most of this file's life
-    a *read* of the index opened a write transaction anyway, because an
-    unconditional `gc_events_older_than` sat inside it. `busy_timeout`
-    is 5 s, so a reader could block for five seconds behind any other
-    writer and then fail with "database is locked" while having nothing
-    to write. Measured: a no-op refresh against a held `BEGIN IMMEDIATE`
-    waited **5.30 s** and failed. The GC now runs on its own daily
-    stamp (`meta.last_usage_gc_ms`), which is what allows the empty
-    plan to return before the transaction. Note a DEFERRED transaction
-    with no statements in it acquires nothing — so a test for this must
-    reproduce the *write*, not just the transaction.
+| File | Owner | Contract |
+|---|---|---|
+| `agents.json` | `agent` | the v2 agents store (scheduled headless `claude -p` runs) |
+| `automations.json` | `agent` | **legacy v1**, read only by the v1 → v2 migration in `AgentStore::open_at`, never written |
+| `agent-events.json` | `agent::events::store` | capped log of agent run events |
+| `notifications.json` | `notification_log` | ≤ 500 dispatched toast + OS-banner entries behind the bell popover. Capture sites: `pushToast` in `src/hooks/useToasts.ts`, `dispatchOsNotification` in `src/lib/notify.ts` |
+| `preferences.json` | `preferences` | UI preferences, including `window_always_on_top` and the `Option<String>` locale where `None` means "follow the OS" |
+| `routes.json` / `routing-rules.json` | `routes` | third-party provider definitions and their routing rules |
+| `updates.json` | `updates` | update channel + skipped-version state |
+| `usage-snapshot.json` | `usage_snapshot` | the last usage fetch. **The panel renders this file, never a live call**, so something has to write it — `claudepot usage refresh` on a machine with no GUI, and an *older* desktop build silently drops fields it was compiled without |
+| `usage_alert_state.json` | `usage_alert` | per-window alert de-duplication |
+| `rotation-rules.json` | `rotation::store` | user-authored auto-rotation rules, hand-edit-friendly. Empty or no rules = feature off |
+| `rotation-audit.json` | `rotation::audit` | ≤ 500 rotation outcomes with rule_id, from/to and reason |
+| `rotation-breaker.json` | `rotation::breaker_store` | per-rule consecutive-failure ledgers. 3 failures running quarantines a rule until a 6-hour cooldown probe |
+| `permission-grants.json` | `permission::store` | **reports.** One grant per project_path; **the record is the capability** — `claudepot hook pre-tool-use` reads it inside every CC tool call, so deleting a row ends the grant at the next call. Schema-1 rows are migrated on read, not moved aside |
+| `peer-inbound-grant.json` | `peer::inbound::store` | **reports.** One grant, not a list: CC's `crossSessionInbound` has a single machine-wide value, so the blast radius is narrowed temporally instead of spatially. This store is the only thing obliging anything to close that window |
+| `remote-devices.json` | `remote::store` | **reports.** SHA-256 of each device token, never the token (there is a test). **The revocation list** — a silent reset would erase `revoked_at` for every device that was turned off. At most one `pending` pairing. Bounded on the way in by `remote::prune` through the single `admit` path |
+| `remote-config.json` | `remote::config` | **reports.** Server settings plus `password_hash`, `totp_secret_base32`, `totp_last_counter`, `failed_attempts` and **public-key-only** passkeys. `enabled` defaults to false. A silent reset would hand an attacker unlimited guesses *and* reopen every burned TOTP code's replay window |
+| `remote-read-state.json` | `remote::panel::read_state` | per-device unread marks, as a **count of events consumed** — not a timestamp (clock skew) and not an index (off by one). Absent ≠ zero. Writes take a process-local mutex; atomic rename is crash-safety, not concurrency-safety |
+| `quick-prompts.json` | `quick_prompt` | the panel composer's chips. **Absent and empty are different states**: no file yields the built-in four, an empty file yields nothing |
+| `pricing-history.json` | `pricing::history` | append-only record of observed model-rate changes; not regenerable |
+| `pricing-cache.json` | `pricing` | pure cache of the live pricing scrape; safe to delete |
+| `migrate-peers.json` | `migrate::peer` | per-`(peer, project)` fingerprints for delta export. **Transport state, not cache** — it must survive a `sessions.db` rebuild, or every file re-sends to every peer. `(size, mtime_ns)`, not a watermark, because `session slim` rewrites transcripts smaller in place |
+| `cc_tips_snapshots.jsonl` | `cc_tips::history` | append-only: converts CC's counter-only tips state into wall-clock time. Deleting it loses a mapping that cannot be reconstructed |
+| `cc_tips_catalog.json` | `cc_tips::catalog` | cache of the tips catalog extracted from the CC binary. Resolved through `paths::claudepot_data_dir()`, never a hand-built `$HOME/.claudepot` |
+| `doctor-parse-failures.jsonl` | `cc_doctor::parse_failures` | append-only log of inputs `cc doctor` could not parse; safe to delete |
 
-    **A per-project read refreshes only that project.** `list_by_slug`
-    used the full refresh, stat-ing every transcript on the install
-    (2,585 here) to answer a question about one directory. `refresh_slug`
-    scopes **both** sides of the diff — `walk_fs_slug` and
-    `load_db_tuples_for_slug`. Scoping only the walk would make every
-    unwalked cached row look deleted and cascade the rest of the index
-    away; there is a test on that in both directions.
+Everything else in the directory, none of which `verify-docs` can see:
 
-    **Index-backed Tauri commands take the shared `SessionIndex`**, not
-    their own. `SessionIndex::open` is not free and cannot be made free:
-    `apply_schema` begins `IMMEDIATE` on **every** open, deliberately —
-    it honours the `_pending_rescan` marker Settings → Cleanup writes,
-    drops a redundant legacy index, and runs post-write validation, none
-    of which are gated on the version changing. A "skip it when the
-    version already matches" fast path was written, measured, and
-    **reverted**: it silently ignored a user's rebuild request, and
-    `test_schema_open_drops_redundant_turns_file_path_index` caught it.
-    So the fix is not to make open cheap but to do it **once** — the GUI
-    opens the index at startup and every command borrows that handle.
-    A cold open (the CLI, or GUI startup) can still wait on the 5 s
-    `busy_timeout` behind another writer; that wait is correct, and it
-    is no longer on the interactive path.
+| Path | Owner | Notes |
+|---|---|---|
+| `remote-cert.pem`, `remote-key.pem` | `remote::tls` (`CERT_FILENAME` / `KEY_FILENAME`) | the TLS leaf the remote server binds with. **`remote-key.pem` is a private key living in the data dir** — do not sync, back up or attach this directory anywhere without knowing that |
+| `remote-ca-key.pem`, `remote-ca.crt`, `remote-ca.srl` | `scripts/mint-remote-cert.sh` | the private CA that signs the leaf, and its serial. The CA key signs anything your devices trust |
+| `.swap.lock` | `cli_backend::swap` | cross-process lock for a CLI slot swap |
+| `desktop.lock` | `desktop_lock` | cross-process lock for Desktop profile writes |
+| `agents.json.lock` | `agent::store` | held for the whole open→mutate→save of `agents.json` |
+| `agents/<agent_id>/runs/` | `agent::install`, scanned by `agent::liveness` | per-run trees (`result.json` + logs) |
+| `approvals/` | `remote::approval` | one file per request and one per decision — **one writer each**, because these two writers are in different processes and a mutex buys nothing there |
+| `bin/`, `bin/.helpers` | `routes::path_setup`, `routes::helper` | route wrapper binaries materialized on PATH for third-party providers. The agent shim puts this directory on its own PATH, so it is not only the Providers tab's |
+| `credentials/` | `cli_backend::storage` | per-account credential material handled through the verified-write Keychain pattern |
+| `desktop/<account_id>/` | `paths::desktop_profile_dir` | per-account Claude Desktop profile snapshots |
+| `imports/<bundle_id>/staging/` | `migrate::apply` | in-flight import staging |
+| `repair/` | `paths` | rename journals, per-project locks, pre-rename / pre-clean snapshots |
+| `trash/` | `trash` (under `trash/sessions`) and `artifact_lifecycle` | Settings → Cleanup's recoverable deletions — two owners, two subtrees |
 
-    The one part of open that *was* safe to skip is the WAL-sidecar
-    touch: it is a write whose only job is to create `-wal` / `-shm` so
-    the chmod in `open()` can narrow them to 0600, and in the contended
-    case they already exist (in WAL mode they live as long as any
-    connection does). It now runs only when they are actually missing.
-  - `env-vault.db` — the local named-secret vault (`env_secrets`
-    table, secret in a 0600 column). Owned by
-    `claudepot-core::env_vault::store`. Mirrors `keys.db`'s at-rest
-    pattern — no OS Keychain. See "## Env secret vault" below.
-  - `keys.db` — the Keys tab's API-key inventory. Owned by
-    `claudepot-core::keys::store`.
-  - `memory_changes.db` — append-only log of detected CLAUDE.md /
-    memory-file writes. Owned by `claudepot-core::memory_log`.
-  - `activity_metrics.db` — one row per session per tick for the
-    Activity Trends view. Owned by
-    `claudepot-core::session_live::metrics_store`.
-  - `corpus.db` — the **analysis corpus**: every transcript from every
-    machine, deduped. Owned by `claudepot-core::corpus`. Built by
-    `claudepot corpus index`, which walks the live `~/.claude/projects`
-    plus each `~/claude-corpus-archive/<host>/projects/`.
-
-    **Why this is not in `sessions.db`, which is the whole point.**
-    `sessions.db` is a *cache of one machine's live `~/.claude`*:
-    `SessionIndex::refresh` diffs every row against one `config_dir`
-    and deletes the remainder (`codec::delete_row`, cascading turns
-    and — via the v4 FK — exchanges / tool_calls / FTS). Correct for a
-    cache, fatal for an archive. Point `refresh` at an imported corpus
-    and it deletes the live rows; run it again on the live directory
-    and it deletes the imported ones. A separate file sits outside that
-    loop, so `host_id` costs a column rather than a migration, and the
-    file is rebuildable by definition.
-
-    Tables: `corpus_sessions` (deduped by CC session UUID, most
-    complete copy wins), `corpus_files` (every physical copy, per
-    host), `corpus_exchanges` + `corpus_tool_calls` (turn-level; the
-    substrate the detectors read). Derived data — safe to delete, one
-    ~5-minute pass to rebuild. Reference machine: 8,249 sessions /
-    173,572 tool calls / 848 MB.
-
-    **Outputs do not live here.** Distilled claims go to `memories` in
-    `sessions.db`, which carries no foreign key to `sessions` and is
-    never cascaded — that asymmetry is what makes the split work.
-- A dozen-plus JSON state files also live in `~/.claudepot/`
-  (`agents.json`, `routes.json`, `routing-rules.json`, `updates.json`,
-  `preferences.json`, `usage-snapshot.json`, `usage_alert_state.json`,
-  `agent-events.json`, … — again, the data-dir joins in source are
-  authoritative). Stores backed by `claudepot-core::json_store` (the
-  nine below plus `agent-events.json`) move a corrupt file aside to a
-  timestamped `<name>.corrupt.<unix-ts>` and start empty — never
-  fatal at boot. Ten carry behavior worth documenting here:
-  - `notifications.json` — ≤ 500 dispatched toast + OS-banner entries
-    surfaced by the WindowChrome bell-icon popover. Owned by
-    `claudepot-core::notification_log`. Capture sites: `pushToast` in
-    `src/hooks/useToasts.ts` and `dispatchOsNotification` in
-    `src/lib/notify.ts`.
-  - `rotation-rules.json` — user-authored auto-rotation rules.
-    Hand-edit-friendly JSON with `{schema_version, rules: [...]}`.
-    Owned by `claudepot-core::rotation::store`. Settings → Rotation
-    is the editor; the orchestrator loads the file each
-    `usage_snapshot::run_tick`. Empty file or no rules = feature off.
-  - `rotation-audit.json` — ≤ 500 rotation outcomes (applied,
-    suggested, skipped_*, failed, quarantined) with rule_id +
-    from/to + reason. Owned by `claudepot-core::rotation::audit`.
-    Rendered in the Settings → Rotation pane's "Recent activity"
-    table.
-  - `rotation-breaker.json` — per-rule consecutive-failure ledgers
-    for the auto-rotation circuit breaker. `{schema_version,
-    ledgers: {rule_id: {...}}}`. Owned by
-    `claudepot-core::rotation::breaker_store`; the breaker logic is
-    pure `claudepot-core::breaker`. A rule that fails to swap 3
-    times running is quarantined (skipped before `evaluate`) until
-    a 6-hour cooldown probe. Stale rule_ids are pruned each tick.
-    Empty file = no failures recorded.
-  - `permission-grants.json` — active permission grants.
-    `{schema_version: 2, grants: [{project_path, granted_at,
-    expires_at}], legacy?: [...]}`, one grant per project_path. Owned
-    by `claudepot-core::permission::store`. **The record is the
-    capability**: `claudepot hook pre-tool-use` reads this file inside
-    every Claude Code tool call while a grant is live and answers
-    `allow` for sessions inside a granted project, so deleting a row
-    ends the grant at the next call. The orchestrator drops lapsed
-    grants each `usage_snapshot::run_tick` and keeps CC's hook entry in
-    step. A schema-1 file (grants that wrote `bypassPermissions` into
-    `.claude/settings.local.json`) is migrated on read, not moved
-    aside: its records sit in `legacy` until the settings key has been
-    put back. Empty file or no grants = feature off. See
-    "## Permission grants".
-  - `peer-inbound-grant.json` — the single open remote-control window.
-    `{schema_version, grant: {...}|null}`. Owned by
-    `claudepot-core::peer::inbound::store`. Records that Claudepot set
-    CC's `crossSessionInbound` to `accept`, what the key held before
-    (including "absent"), and when the window closes; the orchestrator
-    reverts it each `usage_snapshot::run_tick`. **One grant, not a
-    list** — the setting has a single machine-wide value, because CC
-    only honors `accept` from user scope (a project-scope value can
-    tighten the gate but never loosen it). That is also why the
-    deadline is the whole feature: the blast radius cannot be narrowed
-    spatially, so it is narrowed temporally. Like
-    `permission-grants.json` this store **fails loud** on corruption —
-    it is the only thing obliging anything to close the window. Empty
-    file or no grant = feature off. See "## Peer messaging".
-  - `remote-devices.json` — paired devices for the remote-control
-    surface. `{schema_version, devices: [...], pending: {...}|null}`.
-    Owned by `claudepot-core::remote::store`. Holds a SHA-256 of each
-    device token and **never the token itself** — there is a test
-    asserting the plaintext never reaches disk. **This is the
-    revocation list**, which is why the store fails loud on corruption:
-    a silent reset would not just lose the device list (that fails
-    closed, safely — nothing authenticates until re-paired) but erase
-    `revoked_at` for every device that was turned off — losing the
-    record of what was let in and when it was turned off. (The refusal
-    itself does not depend on the record: `authenticate` filters to
-    `is_usable_at` and only then matches the hash, so an unknown token
-    and a revoked one are the same answer. An earlier version of this
-    note said the record was what kept a revoked token refused; that
-    overstated it.) At most one `pending` pairing window: two live codes
-    double the guessing surface for no benefit. Empty file = no paired
-    devices.
-
-    **Bounded on the way in, by `remote::prune`.** Every pairing appends
-    a `Device`, and so does every password login — a session and a
-    paired device are deliberately the same row — while revocation only
-    *marks*. So the file grew monotonically and nothing ever removed
-    anything. `DevicesFile::admit` is now the single append path and
-    prunes before it pushes, so the arriving device can never be what a
-    cap evicts. The policy, and the judgement in it: a **live** device
-    is never pruned; a lapsed **session** goes 90 days after it expires
-    (machine-issued and self-expiring, so nobody decided anything by
-    letting it lapse); a **revoked** device is kept up to 200, newest
-    first by `revoked_at` (revoking is a decision a human made about a
-    specific device, and is worth more than a lapsed session). Both are
-    equally refused by `authenticate` and are *not* equally interesting
-    to a person reading the list later — that asymmetry is the whole
-    policy. See "## Remote control".
-  - `remote-config.json` — the remote surface's server settings and
-    persisted auth state. `{schema_version, server: {enabled, bind,
-    port}, password_hash, totp_secret_base32, totp_last_counter,
-    failed_attempts, passkeys, passkey_user_handle}`. Owned by
-    `claudepot-core::remote::config`. The passkeys are **public keys
-    only** — the reason a passkey beats both of its neighbours here is
-    that reading this file gives an attacker a cracking job for the
-    password hash, working access for the TOTP secret, and nothing at
-    all for these. They are account credentials, not device records, so
-    they live here rather than on a `Device`: attaching one to a session
-    would delete it when that session expired, and revoking a lost phone
-    would destroy the way back in from every other one.
-    **`enabled` defaults to false** — a remote surface that switches
-    itself on because the app was installed is not a feature. Separate
-    from `remote-devices.json` because the write rates differ by orders
-    of magnitude: the throttle counter here moves on every failed
-    login, the revocation list there moves when someone pairs or
-    revokes, and sharing a file would rewrite the revocation list on
-    every wrong password. **Fails loud on corruption** for a sharper
-    reason than the other two: it holds the login throttle and the
-    spent-TOTP high-water mark, so a silent reset hands an attacker
-    unlimited guesses *and* reopens the replay window of every code
-    that was burned to close it. Validation refuses a publicly-routable
-    bind on the way to disk, not only at bind time. See
-    "## Remote control".
-  - `remote-read-state.json` — per-device read marks behind the panel's
-    unread badges. `{schema_version, devices: {device_id: {sessions:
-    {session_id: {through_count, at}}}}}`. Owned by
-    `claudepot-core::remote::panel::read_state`. **Recovers silently on
-    corruption**, unlike the two files above, and the asymmetry is the
-    point: those hold a revocation list and a login throttle, where a
-    silent reset hands something back to an attacker; this is a badge
-    cache, and losing it clears every badge — exactly what tapping
-    through the list would have done. The value is a **count of events
-    consumed** — not a timestamp, because a phone's clock is not the
-    machine's and comparing them would make a badge depend on clock
-    skew; and not the *index* of the last event, because the two differ
-    by one and the field was originally named for the index while every
-    caller stored the count. Absent mark ≠ zero — a session this device
-    never opened carries no badge at all, because a count against no
-    baseline is just the event total and would put a four-digit number
-    on every row of a new phone. Writes go through a process-local mutex:
-    atomic rename is crash-safety, not concurrency-safety, and two marks
-    landing together dropped each other (measured — there is a test that
-    fails without the lock). Capped at 200 sessions per device and 32
-    devices, oldest first. Empty file = no badges.
-    See "## Remote control".
-  - `quick-prompts.json` — the chips above the remote panel's
-    composer, edited in Settings → Quick prompts. `{schema_version,
-    prompts: [{id, name, text}]}`, owned by
-    `claudepot-core::quick_prompt`. A short name you tap and the longer
-    text it sends. **Absent and empty are different states**: no file
-    means "never configured" and yields the built-in four, while a file
-    that exists and is empty means "I deleted them all" and yields
-    nothing — collapsing the two would make the last delete undo itself.
-    Saved as a whole list because order is data; there is no add/remove
-    verb. Recovers silently on corruption, unlike the two remote stores
-    above: this is a list of phrases, and losing it costs retyping.
-  - `pricing-history.json` — observed model-rate changes.
-    `{schema_version, observations: [...]}`, appended (never
-    overwritten) when a live pricing scrape reports a rate that
-    differs from what we already believe. Owned by
-    `claudepot-core::pricing::history`. Empty file = no change ever
-    observed, and the bundled rate history stands alone. See
-    "## Pricing".
-  - `migrate-peers.json` — per-`(peer, project)` file fingerprints
-    for delta export (`claudepot export --since-peer <id>`).
-    `{schema_version, peers: {peer_id: {projects: {cwd: [...]}}}}`.
-    Owned by `claudepot-core::migrate::peer`. **Transport state, not
-    cache**: it must survive a `sessions.db` rebuild, because
-    rebuilding a cache would silently re-send every file to every
-    peer — which is why it is its own file rather than a table in
-    `sessions.db`, whose documented remedy is "delete and rebuild".
-    Empty file = every export is full. Fingerprints are
-    `(size, mtime_ns)` rather than a high-water mark, because
-    `session slim` rewrites transcripts *smaller* in place and
-    retention deletes them outright; a watermark skips both.
-  - `automations.json` — the **legacy v1** agents file, read only by
-    the v1 → v2 migration in `AgentStore::open_at` and never written.
-    v2 is `agents.json`. Kept documented because it still exists on
-    any install that predates the rename, and a stray file in the data
-    dir with no entry here reads as unexplained.
-  - `cc_tips_snapshots.jsonl` — append-only log converting CC's
-    counter-only tips state (`tipsHistory`, `numStartups` — integers,
-    no timestamps) into wall-clock time. Owned by
-    `claudepot-core::cc_tips::history`; see `dev-docs/cc-tips-ledger.md`
-    §6. Append-only: deleting it loses the time mapping for past
-    counters, which cannot be reconstructed.
-  - `doctor-parse-failures.jsonl` — append-only log of inputs
-    `cc doctor` could not parse, for diagnosing the user's environment.
-    Owned by `claudepot-core::cc_doctor::parse_failures`. Safe to
-    delete; it is diagnostic history, not state anything reads back.
-  - `pricing-cache.json` — cached result of the live pricing scrape.
-    Owned by `claudepot-core::pricing` (`CACHE_FILENAME`). Pure cache:
-    safe to delete, refetched on next scrape. Distinct from
-    `pricing-history.json`, which is an append-only record of observed
-    rate *changes* and is not regenerable — see "## Pricing".
-  - `cc_tips_catalog.json` — cache of the tips catalog extracted from
-    the CC binary. Owned by `claudepot-core::cc_tips::catalog`. Pure
-    cache: safe to delete, rebuilt on next extraction. Resolved
-    through `paths::claudepot_data_dir()` rather than a hand-built
-    `$HOME/.claudepot` — the hardcoded form bypassed both the
-    `CLAUDEPOT_DATA_DIR` override and the test-isolation guard, which
-    let a test write into the developer's live data root.
-
-**Launch-at-login is release-only, and a release launch re-registers it
-every time.** `tauri-plugin-autostart` writes `current_exe()` verbatim
-into `~/Library/LaunchAgents/Claudepot.plist`, so flipping the toggle
-inside a `tauri dev` build installed `target/debug/claudepot-tauri` as
-the login item; every login after that started a bare debug binary whose
-`devUrl` had no Vite behind it — a blank window that looked like a
-webview or proxy fault, and was blamed on one for a while (2026-08-26).
-Two halves, both in `lib.rs`: the plugin is registered under
-`#[cfg(not(debug_assertions))]` only, so a dev build has nothing to call
-(`GeneralPane` hides the row via `AppStatus.dev_build`); and a release
-build calls `enable()` again at setup whenever `is_enabled()`, which is a
-plain plist rewrite — no `launchctl` — so a moved bundle or a stale dev
-registration heals itself on the next launch instead of persisting until
-someone toggles the switch twice.
-
-**The status bar's pin is `window_always_on_top` in `preferences.json`,
-and a launch re-applies it.** `set_always_on_top` is window state, not
-a setting the window reads, so a fresh process starts at the normal
-level whatever the file says; `setup()` re-applies it beside the
-show-on-startup check. `preferences_set_window_always_on_top` changes
-the level *before* it persists and puts both the level and the
-in-memory field back if the save fails — file, window and button must
-never disagree, because a pressed pin over a window that sinks behind
-the next click is the one state the control exists to prevent. The
-button sits at the bar's right end, just before the service-status
-dot, which keeps the corner. It is the same kind of control as the
-sidebar toggle at the far left — it acts on the window itself rather
-than reporting state, so design.md's "a surface that only reports
-state is not a control" does not apply to it — and it lives among the
-ambient chips only because that is where its owner wanted it, not
-because it is one. `useWindowPin` is the renderer half —
-optimistic, reverting on a rejected call, and following
-`cp-prefs-changed` like every other reader of that file.
-
-**A packaged build has no reload affordance, and the guard is in the
-renderer because the ErrorBoundary's Reload must keep working.**
-`useWebviewChromeGuard` cancels the keys a webview reads as reload — F5
-and its Ctrl/Shift hard-reload variants, ⌘R / ⌃R, ⌘⇧R / ⌃⇧R — and
-suppresses the native context menu, which is where Reload lives on all
-three platforms, for any target that is not an editable field or the
-element holding a live selection (Copy / Paste / Look Up are what that
-menu is for in an app). Off in dev, where reload and Inspect Element are
-the loop.
-
-A reload here is a browser artifact: no address bar, no tab to restore,
-and nothing on screen saying the window is disposable — while it
-discards every piece of state that lives only in the renderer, an open
-modal and a half-typed secret included. But `location.reload()` is
-deliberately untouched: guarding the *input* is what leaves the
-ErrorBoundary's recovery button working, and it is also why this is not
-Tauri's navigation handler, which sees a reload and cannot tell a
-keypress from the app's own decision.
-
-Four details are load-bearing:
-
-- **It cancels and never stops propagation**, so ⌘R still reaches the
-  section handler that refreshes the list. Only Accounts and Projects
-  pass one — on the other eight sections the documented ⌘R does nothing,
-  which is how the key was reaching the webview at all.
-- **It is deliberately not behind `isShortcutContextBlocked()`.** A
-  suppression is not a shortcut: a focused field is where a reload costs
-  the most, and cancelling a keystroke the webview would have eaten
-  takes nothing from the person typing.
-- **Capture phase**, so a modal or palette input that calls
-  `stopPropagation` on its own keydown cannot hide the key from it. The
-  context-menu half is the opposite — bubble phase on `document`, after
-  React's root handlers, so every app context menu (account card,
-  project row, session row) keeps the `preventDefault` it already does.
-- **The exposure differs per platform, and only part of it is closed
-  from here.** On macOS ⌘R appears never to have reached the webview
-  at all: wry's `performKeyEquivalent` hands the key to the app menu,
-  and `app_menu.rs` binds no accelerator on View items on purpose —
-  read from that key path rather than measured, so treat the context
-  menu as the Mac story and the keys as belt-and-braces. On WebView2 F5 / Ctrl+R /
-  Ctrl+Shift+R are *browser accelerator keys*, on by default; wry can
-  turn them off (`with_browser_accelerator_keys`) and Tauri 2.11 does
-  not expose it, so the keydown is the only layer the renderer has —
-  and whether Chromium lets a page cancel those is **not verified**.
-  WebView2's own context menu is likewise still native. Closing either
-  properly means `with_webview` plus `ICoreWebView2Settings3`, which no
-  machine here can behaviourally test.
+Stores also leave timestamped siblings behind on purpose —
+`<name>.corrupt.<unix-ts>` from the recovery above, and the migration
+backups (`automations.json.pre-v2-backup`, `agents.json.bak.<stamp>`).
+A file matching one of those shapes is history, not state.
 
 ## Pricing (Activities → Cost, and every "on API" figure)
 
@@ -723,228 +263,109 @@ fast-mode session is under-reported.
 ## Permission grants (ProjectDetail → Permissions)
 
 Optional feature: for a time-boxed window (or until revoked), Claude
-Code's tool calls in one project run without permission prompts. The
-grant is a record, never a mode: the state is visible with a countdown
-and a Revoke button, and lapses on its own.
+Code's tool calls in one project run without permission prompts. **The
+grant is a record, never a mode** — visible, with a countdown and a
+Revoke button, and it lapses on its own.
 
-**It used to write `bypassPermissions` into
-`.claude/settings.local.json`, and Claude Code stopped honouring that
-in 2.1.257.** The changelog entry: *"Changed `defaultMode:
-"bypassPermissions"` in `.claude/settings.json` or
-`.claude/settings.local.json` to be ignored, like `"auto"`; set it in
-user or managed settings, or pass `--permission-mode`."* The binary
-says why — *"projectSettings and localSettings are repo-controllable"*
-— and the session starts in Manual, without falling through to a user
-value. Every grant written before this was a silent no-op on the
-installed CC (2.1.259 here) while the pane said "Bypass active": the
-`cleanupPeriodDays` inversion again, a control that kept writing a
-value upstream had stopped reading. `permission::settings::PROJECT_SCOPE_IGNORES_SINCE`
-is the pin; the resolver reports such a value as
-`PermissionDecisionSource::ProjectScopeIgnored`, and the pane renders
-it as *ignored* with a one-click removal, never as elevated.
+It used to write `bypassPermissions` into
+`.claude/settings.local.json`, and **CC stopped honouring that in
+2.1.257** (*"projectSettings and localSettings are repo-controllable"*,
+re-verified against 2.1.274). Every grant written before that was a
+silent no-op while the pane said "Bypass active".
+`permission::settings::PROJECT_SCOPE_IGNORES_SINCE` is the pin, and the
+resolver reports such a value as
+`PermissionDecisionSource::ProjectScopeIgnored` — rendered as *ignored*
+with one-click removal, never as elevated.
 
-**A grant is now Claude Code's `PreToolUse` hook answering `allow`.**
-`claudepot hook pre-tool-use` (hidden, CC invokes it) reads
-`permission-grants.json` and prints the allow decision when a live
-grant's `project_path` contains the payload's `cwd`, by path
-components. Nothing in CC's settings changes except the hook entry
-itself, which lives beside the remote-approval one in
-`~/.claude/settings.json` and exists exactly while a grant is live.
+**A grant is now CC's `PreToolUse` hook answering `allow`**
+(`claudepot hook pre-tool-use`, hidden — CC invokes it). `PermissionRequest`
+was measured and rejected: in **auto** mode — the built-in starting
+mode on Pro, Max and Team — it never fires, because the classifier has
+already decided. `PreToolUse` runs before the permission system decides
+anything.
 
-Why `PreToolUse` and not the `PermissionRequest` hook remote approvals
-use — measured on 2.1.259, in real interactive sessions driven through
-a pty, with `--debug-file`:
-
-| mode | `PermissionRequest` allow | `PreToolUse` allow |
-|---|---|---|
-| Manual | fires once, prompt skipped | fires once, prompt skipped |
-| auto | **never fires**; the classifier decided | fires once, **classifier skipped** |
-
-Auto mode is the built-in starting mode on Pro, Max and Team, so a
-grant on `PermissionRequest` would have done nothing for most users.
-`PreToolUse` runs before the permission system decides anything, and
-its `allow` is what `bypassPermissions` used to be: no prompt, and no
-2–3 s classifier round trip per call (the classifier request is absent
-from the debug log). Subagents report the parent's `cwd` and are
-covered; a protected-path write (`.claude/probe.txt`) went through.
-Headless `claude -p` does **not** consult either hook — it denies —
-which is why the first probe, run headless, said the hook never fired.
-
-Five properties hold it together:
+Five properties hold it together; the measurement table and the
+adversarial review that produced them are in the note.
 
 - **Two hooks, two lifetimes, one installer.** `cc_hook_entry` writes
-  and removes a verb-matched exec-form entry for either event through
-  `settings_mutex`; `remote::approval::install` and `permission::hook`
-  are thin over it. The approval entry leaves with `remote serve`, the
-  grant entry with the last live grant, and one's uninstall cannot
-  take the other (tested). The orchestrator tick reconciles the grant
-  entry every five minutes, which is also what re-points it at the
-  current binary after a Homebrew upgrade or an app move — a sticky
-  grant outlives both.
-- **The hook never touches the file.** It runs inside every tool call,
-  as the user, from a process CC started. `hook::load_readonly` parses
-  and nothing else: no corruption recovery, no rename-aside, no log
-  line. A corrupt file reads as "no grant", the call goes through CC's
-  normal flow, and the GUI's next tick moves the file aside and says
-  so. The CLI end-to-end test asserts the corrupt file is byte-for-byte
-  untouched and no sibling appears.
-- **Scope is the session's working directory.** Same scope
-  `bypassPermissions` had — per session, not per file touched — so a
-  granted session that runs `cd ../elsewhere && …` is approved as it
-  would have been under bypass. `/p/a-evil` is not under `/p/a`; a
-  symlinked root is matched on a second, canonicalized pass. Deny and
-  ask rules still apply (CC evaluates them regardless of a hook), and
-  so does everything no mode auto-approves.
+  and removes a verb-matched exec-form entry through `settings_mutex`;
+  the approval entry leaves with `remote serve`, the grant entry with
+  the last live grant, and one's uninstall cannot take the other.
+- **The hook never touches the file.** `hook::load_readonly` parses and
+  nothing else — no recovery, no rename-aside, no log line. A corrupt
+  file reads as "no grant" and the GUI's next tick is what moves it
+  aside.
+- **Scope is the session's working directory** — the same scope
+  `bypassPermissions` had. `/p/a-evil` is not under `/p/a`; a symlinked
+  root is matched on a second canonicalized pass. Deny and ask rules
+  still apply.
 - **A grant with no hook is an error, not a grant.** `permission_grant`
-  rolls the record back if the entry cannot be written, and the DTO
-  carries `hook_installed` so a grant whose entry has gone missing
-  renders with a warning rather than as active — the one state this
-  feature must never show, having just replaced a control that did
-  exactly that.
-- **Cost is one spawn per tool call, reads included: ~13 ms here.**
-  There is deliberately no `matcher`; a fixed list of "tools that can
-  prompt" would drift with CC. The entry's timeout is 10 s, a ceiling on
-  a wedged disk, and a killed `PreToolUse` hook blocks the call, so
-  the verb does no waiting at all.
+  rolls the record back if the entry cannot be written, and
+  `hook_installed` on the DTO makes a missing entry render as a warning
+  rather than as active.
 - **The entry points at the CLI, never at `current_exe()` blindly.**
-  From the GUI, `current_exe()` is the Tauri app, which has no clap
-  parser and no `hook` verb; an entry aimed at it would have CC launch
-  the desktop app on every tool call and block the call at the
-  timeout. The remote-approval hook was installed exactly that way from
-  the GUI before `cc_hook_entry::hook_binary` existed — found by the
-  audit-fix pass, not by a test, because every end-to-end probe ran the
-  CLI binary directly. The resolver returns `current_exe()` only when
-  that *is* the CLI, otherwise the sidecar beside the GUI
-  (`mcp_probe::cli_candidates`, whose name differs between a dev tree
-  and a bundle), and errors rather than falling back to the GUI. Both
-  hook installers go through it.
+  From the GUI `current_exe()` is the Tauri app, which has no `hook`
+  verb — an entry aimed at it would launch the desktop app on every
+  tool call and block the call at the timeout. Both installers go
+  through `cc_hook_entry::hook_binary`.
 
-The schema-1 migration runs in the orchestrator: each legacy record's
-settings key is put back (only if the layer still holds exactly the
-granted mode — a hand-changed value is left alone), the deadline is
-carried over as a hook grant unless it has already passed, and one
-bell entry says what happened. A revert that keeps failing is retried
-three times and then reported with the file to fix by hand; the key CC
-ignores anyway, so what is left behind is litter, not an elevation.
-Reviewed adversarially by Codex before building (thread
-`01a064df-b03c-77d3-99c6-b102b1fe0cba`); its checkable objections —
-the hook must not recover files, the two hook lifetimes must not race,
-the binary path must be repaired, legacy reverts need a bound — are the
-tests above. Sticky ("Never") grants survive: the record is persistent
-and one click ends it, which is what the original rationale required.
-
-- Pure logic in `claudepot-core::permission`: `mode` (PermissionMode
-  over CC's wire strings, `auto` included), `settings` (resolve /
-  read / write the nested `permissions.defaultMode` key, with the
-  project-scope ignore rule), `grants` + `store` (the JSON file and
-  its v1 migration), `eval` (expiration, clock injected), `hook` (the
-  per-call decision, the read-only load, the entry's reconcile).
-- Orchestrator at `src-tauri/src/permission_orchestrator.rs` —
-  `tick()` drops lapsed grants (`permission-reverted`, outcome
-  `expired`), migrates legacy records, reconciles the hook. Hooked
-  into `usage_snapshot::run_tick`. Zero overhead when no grants exist.
-- A project running in `bypassPermissions` from the user's own
-  `~/.claude/settings.json` shows as elevated but *not*
-  Claudepot-managed — the UI won't touch someone's own choice.
-- Verified against the **2.1.259** binary and the published settings
-  reference (2026-09-03); the `permissions.defaultMode` and `PreToolUse
-  hook` rows in `crates/xtask/cc-upstream-watch.md` re-verify it.
+Cost is one spawn per tool call, ~13 ms here; there is deliberately no
+`matcher`, since a fixed list of "tools that can prompt" would drift
+with CC. Orchestrator at `src-tauri/src/permission_orchestrator.rs`
+drops lapsed grants, migrates schema-1 records and reconciles the hook
+entry every five minutes — which is also what re-points it after a
+Homebrew upgrade or an app move.
 
 ## Peer messaging (`claudepot session live` / `send` / `inbound`)
 
-Addressing a **running** Claude Code session. CC binds one Unix socket
-per session at `$XDG_RUNTIME_DIR/cc-socks/<pid>.sock`, publishes the
-path in `~/.claude/sessions/<pid>.json` as `messagingSocketPath`, and
-writes a 0600 key file beside it holding a `peerToken`. The protocol is
-newline-delimited JSON: an auth line, then frames.
+Addressing a **running** Claude Code session over the Unix socket CC
+binds per session (`messagingSocketPath` in
+`~/.claude/sessions/<pid>.json`, newline-delimited JSON, a 0600 key
+file holding `peerToken`). Pure logic in `claudepot-core::peer`
+(`wire` / `key` / `client` / `discover` / `outcome` / `inbound`); CLI
+verbs in `cli/commands/session/send.rs`. `peerProtocol == 1` is a hard
+pin — this is an internal, feature-gated surface on a product shipping
+~27 releases a month, so a session announcing anything else is refused
+rather than addressed on a guess.
 
-Pure logic in `claudepot-core::peer`: `wire` (frames, the protocol pin,
-the 1 MiB line limit), `key` (filename derivation, token validation,
-pid-reuse check), `client` (`send_prompt`), `discover` (resolve a
-name/id/pid to exactly one session), `outcome` (classify what happened),
-`inbound` (the time-boxed grant). CLI verbs in
-`cli/commands/session/send.rs`.
+Five properties drive the design; changing any invalidates the feature.
+The evidence for each, and why `permission_response` in the binary is
+not a way in, is in
+[`docs/notes/cc-integration.md`](docs/notes/cc-integration.md).
 
-Verified against the **2.1.241** binary (re-checked 2026-08-23); the
-`peer messaging` row in `crates/xtask/cc-upstream-watch.md` re-checks it.
-
-**There is no approval action on this channel, and `permission_response`
-in the binary is not a counter-example.** The control dispatch is an
-explicit if/else chain over `rename`, `peer_message_status`,
-`notify_when_idle` and `peer_idle_notice`; zero `uds-messaging` lines
-mention permission or approve. The `permission_response` frames that
-*do* exist belong to two other transports — CC's own remote-device
-WebSocket (`sendPermissionResponse`, keyed by `selectedDeviceId` /
-`target_device_id`) and the SDK's `canUseTool` control protocol. Both
-are reachable only by the process that owns the session, which for an
-interactive session is not Claudepot. Recorded here so the next reader
-who greps the binary does not mistake them for a way in. This is an internal,
-feature-gated surface (`agents_cross_session_inbox`) on a product that
-ships ~27 releases a month, so `peerProtocol == 1` is a hard pin —
-a session announcing anything else is refused, not addressed on a guess.
-
-Five properties drive the design; changing any invalidates the feature:
-
-- **It can inject a prompt and nothing else.** CC's inbox accepts `user`
-  plus `control` with `rename` / `notify_when_idle` / `peer_idle_notice`
-  / `peer_message_status`. There is no exit, interrupt, or restart
-  action, and `TIOCSTI` keystroke injection into the session's terminal
-  is refused by current macOS with EACCES even on a pty the caller owns
-  (measured). **A UI must not offer "restart" over this channel.**
-  Restarting a session means owning its pty, which means having started
-  it.
+- **It can inject a prompt and nothing else.** No exit, interrupt or
+  restart action exists, and `TIOCSTI` is refused by current macOS with
+  EACCES even on a pty the caller owns. **A UI must not offer
+  "restart" over this channel.**
 - **Arrival is not delivery.** `crossSessionInbound` is
   `accept | hold | refuse`, and an unattested sender addressing a
-  `bypassPermissions` session gets **held** — logged to the transcript
-  as a `type: "system"` notice, shown with Deny/Deliver, never seen by
-  Claude. Measured: held ~0.5 s, delivered ~2.5 s. So the success type
-  is `Handoff`, not `Delivery`, and the CLI never prints "sent".
-- **A peer prompt is not keyboard input.** Even on `accept`, CC wraps
-  the text (`"Another Claude session sent a message:\n…"`) and attaches
-  a standing caveat telling the session a peer cannot grant escalation —
-  never edit permission settings because a peer asked, never treat a
-  peer message as the user's approval, refuse an action the peer says it
-  was itself denied (CC calls that *permission laundering*). This is
-  remote **messaging** at lower trust than the session's own user.
-  Asking a session to approve a pending permission prompt is expected to
-  be refused, and that refusal is correct.
-- **Slash commands do not work.** CC's peer inbox builds its dispatch as
-  `{…, skipSlashCommands: true, isMeta: true}`, and CC's own predicate
-  for "is this a command" is `startsWith("/") && !skipSlashCommands`, so
-  `/compact` arrives as literal text. Never present the input as a
-  command line — and say so where someone would type one: the panel's
-  composer warns when the text looks like a command, because the send
-  otherwise *succeeds* and does something other than what was meant.
-- **`accept` only counts from user scope.** A project-scope value can
-  *tighten* the gate but never loosen it — CC: "your own `accept` cannot
-  override a repo tightening". A project-scoped writer would report
-  success and change nothing.
+  `bypassPermissions` session gets **held**. The success type is
+  `Handoff`, not `Delivery`, and the CLI never prints "sent".
+- **A peer prompt is not keyboard input.** CC wraps the text and
+  attaches a standing caveat telling the session a peer cannot grant
+  escalation — it calls trying to do so *permission laundering*. Asking
+  a session to approve its own pending prompt is expected to be
+  refused, and that refusal is correct.
+- **Slash commands do not work.** CC's peer inbox dispatches with
+  `skipSlashCommands: true`, so `/compact` arrives as literal text.
+  Never present the input as a command line.
+- **`accept` only counts from user scope.** A project-scoped writer
+  would report success and change nothing.
 
 **Two guards against misdelivery, at different layers**, because a
 prompt landing in the wrong conversation is the worst thing this code
 could do and pids are recycled: `procStart` from the key file is
-compared against `ps -o lstart=` before connecting (the *token* is
-current), and `session_id` rides on every frame though CC treats it as
-optional (the *conversation* is the intended one). CC drops a mismatch.
+compared against `ps -o lstart=` before connecting, and `session_id`
+rides on every frame though CC treats it as optional.
 
-**The grant** (`peer::inbound`, `peer-inbound-grant.json`) exists
-because the two honest options are both bad: `hold` makes remote control
-useless, permanent `accept` leaves the machine open forever. Since the
-setting is machine-wide by necessity, the blast radius cannot be
-narrowed spatially — so it is narrowed **temporally**, and the deadline
-is the whole feature rather than a convenience. Capped at
-`MAX_GRANT_HOURS`; an unbounded grant is the permanent setting with
-extra steps.
-
-Running sessions re-read the setting **live** — a session started before
-the key was written delivered the next message, and went back to holding
-seconds after it was removed. That is what makes expiry meaningful
-rather than advisory.
-
-`eval::decide` checks **supersession before expiry**: if the user
-hand-changed the setting, the record is dropped and the setting is left
-alone. The deadline obliges Claudepot to stop holding the door open, not
-to force it shut on the user's own choice. Every CLI entry point calls
+**The grant** (`peer::inbound`) exists because both honest options are
+bad: `hold` makes remote control useless, permanent `accept` leaves the
+machine open forever. The setting is machine-wide by necessity, so the
+blast radius is narrowed **temporally** — the deadline is the whole
+feature, capped at `MAX_GRANT_HOURS`. Running sessions re-read the
+setting **live**, which is what makes expiry meaningful rather than
+advisory, and `eval::decide` checks **supersession before expiry** so a
+hand-changed setting is left alone. Every CLI entry point calls
 `ops::tick` first, so a window whose deadline passed while the GUI was
 closed still closes.
 
@@ -952,848 +373,167 @@ closed still closes.
 
 Reaching Claudepot from a phone or another machine. Pure logic in
 `claudepot-core::remote` (`bind` / `password` / `token` / `tls` /
-`store` + the pairing state machine in `mod`).
+`store` + the pairing state machine in `mod`); the client that ships at
+`/` is `panel/`.
 
-**The model is an appliance**, like Home Assistant or a NAS: reachable
-on the LAN — over Tailscale or not — behind one admin password, and
-whoever holds that password is admin and may do anything. There is no
-endpoint allowlist. That is coherent *only* because the password is
-treated as the entire security boundary, which is what the rest of this
-section is about: behind it sits the ability to drive Claude Code
-sessions, i.e. arbitrary code execution as this user.
+**The model is an appliance** — reachable on the LAN, over Tailscale or
+not, behind one admin password, and whoever holds that password is
+admin and may do anything. There is no endpoint allowlist. That is
+coherent *only* because the password is treated as the entire security
+boundary, and behind it sits the ability to drive Claude Code sessions,
+i.e. arbitrary code execution as this user.
 
-**`bind` is an allowlist and the highest-consequence line in the
-feature.** Permitted: loopback, RFC1918, link-local, Tailscale's
-`100.64.0.0/10`, and `0.0.0.0` (what an appliance normally does;
-refusing it only pushes users to hardcode a DHCP address). Refused:
-anything **globally routable** — that is a password prompt on the
-public internet with code execution behind it, and no configuration
-meant that. `0.0.0.0` is accepted but returned as
-`Exposure::EveryInterface` so the caller must say so: on a host that
-later acquires a public address it becomes a public listener with no
-config change. Note `100.x` is not automatically Tailscale —
-`100.0.0.0/10` and `100.128.0.0/9` are ordinary public space, and
-matching the first octet would allow routable addresses.
+The reasoning behind every rule below — the measurements on a real
+iPhone, the two failure modes an adversarial review found, what the
+panel deliberately does not do, and the four traps in minting the
+certificate — is in
+[`docs/notes/remote-control.md`](docs/notes/remote-control.md). Read it
+before changing this surface; most of the rules look arbitrary until
+you know what they replaced.
 
-**TLS is required iff the bind address is not loopback**
-(`BindAddr::requires_tls`). `http://127.0.0.1` is already a secure
-context in every browser, so loopback development needs no certificate
-and loses no browser capability. Everything else carries an admin
-password across a wire someone else can be on — and unlike the earlier
-tailnet-only design there is no WireGuard underneath a plain LAN, so
-here TLS is doing confidentiality work as well as unlocking service
-workers, PWA install, and web push. There is no downgrade switch:
-`remote::tls` stops the server rather than falling back, because a
-silent downgrade leaves the user believing traffic is protected.
+**The hard rules, each of which the feature stops being safe without:**
 
-Certificates come from a private CA (`scripts/mint-remote-cert.sh`,
-idempotent so already-trusted devices keep working) because this
-tailnet's self-hosted control server cannot issue them — `tailscale
-cert` returns *"your Tailscale account does not support getting TLS
-certs"* — and `.internal` is not a real TLD. Two of that script's
-constraints are Apple policy and both fail with errors that blame
-something else: Safari refuses a leaf valid beyond **398 days**, and
-the leaf needs `extendedKeyUsage=serverAuth`. On iOS, installing the CA
-profile is half the job; full trust must also be enabled under Settings
-> General > About > Certificate Trust Settings.
-
-**Password hashing reverses `remote::token`'s reasoning, deliberately.**
-That module argues *against* a memory-hard KDF and is right to: a
-256-bit machine token has nothing to brute force. The argument depended
-on there being no low-entropy secret. A human-chosen password is
-exactly that secret, so `remote::password` uses scrypt. Both modules are
-correct for their own input; do not unify them onto one hash.
-
-scrypt rather than argon2 on dependency-hygiene grounds — it is already
-compiled in transitively via `age`, so promoting it adds no new
-supply-chain surface. Stored hashes are PHC strings carrying their own
-algorithm and parameters, so raising the cost or moving to argon2id
-later does not invalidate existing passwords.
-
-**The throttle backs off; it never locks out.** A hard lockout on a
-LAN-reachable appliance is a denial-of-service handed to anyone on the
-wifi: they lock the owner out and risk nothing. Failures buy an
-exponentially growing delay capped at 30s — at which point an online
-search is dead while an owner who mistyped waits once. The pairing code
-in `token` *can* burn itself, because the user can always mint another
-at the machine; an admin locked out over the network cannot.
-
-**A bearer token defends against other devices, not against local
-code.** `remote-devices.json` is owner-writable and a same-UID process
-can write its own record — and can already drive CC's socket directly
-without Claudepot, since CC's own boundary there is the Unix user. The
-honest claim is narrow: this stops another *device* acting without
-credentials, and a *revoked* device acting at all. Do not write docs or
-UI copy implying more.
-
-Two failure modes are load-bearing and both were found by an
-adversarial review rather than by testing:
-
-- `verify_password` must distinguish "wrong password" from "stored hash
-  unusable". A PHC string can parse and carry no hash output
-  (`$scrypt$garbage` does), and verifying it returns the same error as a
-  wrong password — so `.is_ok()` would tell the owner their correct
-  password is wrong, forever, with nothing pointing at the file.
-- The pairing code must not consume UUID bytes whose bits are fixed.
-  Taking the first eight bytes of a UUIDv4 put the version byte at
-  character 7 and cut that position from 26 symbols to 16 — 36.9 bits
-  rather than 37.6, and invisible because the code still looked random.
-
-**TOTP (`remote::totp`) is an optional SECOND factor and must never be
-the only one.** A TOTP secret cannot be hashed — the server needs it in
-recoverable form to compute the expected code — so replacing the
-password with it would make the stored credential strictly *more*
-valuable than a scrypt hash: reading the file would give working access
-instead of a cracking job. It also has no recovery story, and the usual
-remedy (printed backup codes) is a password again with worse
-ergonomics.
-
-Two details there are load-bearing:
-
-- **Codes are burned.** `TotpState::last_used_counter` is a high-water
-  mark, so a code cannot be replayed and an *earlier* still-in-window
-  code cannot be used after a later one. Without this a code is live for
-  up to `(2 x SKEW_STEPS + 1) x PERIOD_SECS` — 90 seconds — and anyone
-  who observes one can reuse it. RFC 6238 §5.2 requires it; most
-  implementations omit it.
-- **SHA-1 is correct**, not an oversight: it is RFC 6238's default and
-  the only algorithm Google Authenticator reads from a plain
-  `otpauth://` URI, and it is used inside HMAC where the collision
-  weakness does not apply. The implementation is checked against RFC
-  6238 Appendix B's published vectors, which is what makes interop with
-  real authenticator apps a fact rather than a hope.
-
-Be honest about what it buys: when the client is the phone and the
-authenticator app is on that same phone, the second factor is close to
-ceremonial — one device compromise defeats both. It defends a credential
-used from *elsewhere*. Offer it; do not force it.
-
-**Passkeys / WebAuthn are the better end state**, and they are built:
-verification in `remote::webauthn` (ES256, hand-rolled, no attestation),
-the ceremony state and origin rules in `remote::passkey`, the four HTTP
-steps in `remote::api`. The server stores only a public key, so reading
-`remote-config.json` gives an attacker nothing — strictly better than
-both a password hash and a TOTP secret.
-
-Four properties there are load-bearing:
-
-- **Registration requires an authenticated session.** Otherwise anyone
-  who can reach the page enrols themselves. The password stays the
-  bootstrap and recovery credential.
-- **The RP ID is derived from the request, never configured.** The same
-  appliance reached by `.local` and by MagicDNS gets two credentials
-  rather than one broken one — which is correct, since a passkey is
-  scoped to an origin by design and the minted certificate covers both.
-- **`login/begin` sends an empty `allowCredentials`.** It is
-  unauthenticated of necessity, so it must reveal nothing about what is
-  registered; `residentKey: "required"` makes the platform resolve the
-  credential itself, which costs nothing on the device this is for.
-- **A passkey login mints exactly what a password login mints** — the
-  same `Device` row, expiry and revocation path. Two kinds of session
-  would be two things to remember to revoke.
-
-The prerequisite is **settled, measured on a real iPhone** against this
-deployment's private CA (2026-08-23). A privately-trusted certificate on
-a tailnet IP gives a full secure context: `isSecureContext` true, a
-service worker registering at root scope, `crypto.subtle`, the WebAuthn
-API, and `isUserVerifyingPlatformAuthenticatorAvailable()` returning true
-for Face ID. Nothing about the private CA degrades the origin.
-
-So the intended auth story is: **password as the bootstrap and recovery
-credential, passkey as the day-to-day login.** TOTP stays available and
-is expected to go unused — the reasoning above about it being close to
-ceremonial when the client and the authenticator are the same phone
-applies with more force once that phone can do Face ID instead.
-
-**The origin must be a hostname, not an IP.** WebAuthn's RP ID is
-required to be a valid domain, and an IP-address origin has none — so
-`https://100.64.x.x:8420` cannot register a passkey however capable the
-device is. This is a trap worth naming because
-`isUserVerifyingPlatformAuthenticatorAvailable()` answers "does this
-DEVICE have an authenticator" and reports `true` on exactly the origin
-that cannot use one. The first version of the probe reported only that
-flag, which is a green light measuring the wrong thing — the same shape
-of error as the port-based `Host` check. It now derives the RP ID the
-way a browser would and says so when the origin disqualifies itself.
-
-The minted certificate already covers the `.local` and MagicDNS names,
-so reaching the same server by name is enough; no re-mint is needed.
-
-Two further caveats kept separate from the measurement rather than
-folded into it:
-
-- iOS grants *standalone PWA install* and *web push* from Safari
-  specifically, and the probe was not confirmed to be running in Safari.
-  The secure context they depend on is proven; install and push are not.
-- Android reaches passkeys through the same standard, but a
-  user-installed CA sits in Android's *user* trust store, which Chrome
-  honours for browsing. That path is untested here.
-
-Still open at the HTTP layer, recorded so they are not rediscovered:
-multiple appliances on one LAN need discovery (mDNS) with a user-set
-instance name, and there is no streaming surface yet — when one is
-added it must **close** on credential revocation rather than merely
-refusing the next request. The rest of that list is done: the throttle
-is persisted, every mutation requires an `Idempotency-Key`, and `Host` /
-`Origin` are checked in `guard_origin` before any handler runs.
-
-### Wiring it into the desktop app — Settings → Remote
-
-The surface was CLI-only for its whole life: `claudepot remote
-{status,set-password,enable,disable,revoke-all,serve}`, with `serve` a
-foreground process somebody kept a terminal open for. The GUI now hosts
-it, and three decisions hold that together.
-
-**Every verb is `remote::service`, and there is exactly one of it.**
-The CLI's command file used to carry real logic — `FilePersist`, the
-recovery warning, `enable`'s preflight ordering, `revoke_all`'s refusal
-— so a Tauri command written against `claudepot_core::remote` directly
-would have reimplemented all of it. That is the `account_service` story
-again, and the `revoke_all` refusal is the one that would have hurt:
-drop it in a second implementation and the GUI's "Revoke all" reports
-`Revoked 0` over a device file whose `revoked_at` marks were already
-lost, which reads as "there was nothing to revoke" rather than "every
-stolen token is live". `ApprovalHook` and `FilePersist` moved to core
-with it. What stays per-caller is presentation.
-
-**The server runs in-process, on a tokio task
-(`src-tauri/src/remote_server.rs`).** Not a launchd/systemd daemon, and
-the reason is the approval hook rather than convenience: it is armed for
-exactly as long as a server is up, and that coupling is what makes it
-acceptable to hand a network client the ability to grant a permission at
-all. A daemon makes "as long as the surface is up" mean *always*, which
-turns a session-scoped capability — code execution as this user — into a
-permanent one. That is the trade the peer-inbound grant already refuses
-by narrowing temporally.
-
-The cost is real and is **disclosed, not discovered**: quitting
-Claudepot stops the remote surface. `RunEvent::Exit` enforces it (not
-`ExitRequested`, which can be prevented — stopping the server for a quit
-that then does not happen would leave the pane reporting a state nobody
-asked for), and the pane says so in as many words.
-
-**Three states, not two, and two liveness fields.** `server.enabled` is
-a stored preference that survives a `kill -9`; `approval::store::is_serving`
-is the heartbeat. So the pane renders *off* / *enabled, not serving* /
-*serving*, and collapsing the middle one is a review finding — a phone
-cannot reach a Mac whose preference merely says yes.
-
-`serving` and `running_here` are separate for a second reason: a
-`claudepot remote serve` in a terminal sets the heartbeat and is not
-ours. A pane with only the first would offer Stop for a process it
-cannot stop; one with only the second would report "off" while a
-terminal was serving the panel to a phone. Both are asserted in
-`RemotePane.test.tsx`, and the three-state test has been watched failing
-against a pane that collapsed them.
-
-The pane is **`group: "core"`**, for the reason Retention is: it is
-where you revoke a lost phone, and an emergency control you have to go
-hunting for is a broken one.
-
-**Quick prompts live inside it**, not in a pane of their own. They are
-the chips above the *remote panel's* composer and mean nothing anywhere
-else, so a top-level entry put one surface's detail beside Retention and
-Health. `QuickPromptsPane` stays its own component — its editor, its CSS
-and its behaviour were fine; only its position in the nav was wrong —
-and its search terms folded into the Remote pane's `keywords` so ⌘K
-still finds it.
-
-**Two chips, not one.** `RemoteServingChip` is the ambient tier for
-this surface; `RemoteWindowChip` is Claude Code's `crossSessionInbound`.
-Different capabilities with different blast radii — folding them into
-one indicator would leave a user who saw it lit unable to tell which
-door was open. The new chip reads liveness rather than the preference,
-so a CLI-started server lights it too, and renders nothing when nothing
-is serving.
-
-**Secret direction is unchanged and worth restating**, because this is
-the first surface that takes a password over IPC. It crosses *in* and is
-zeroized by `service::set_password` on every path; nothing returns it,
-and the device store holds a SHA-256 that `DeviceSummary` does not carry
-either. If TOTP enrolment is added later it needs the `key_*_copy`
-treatment — the `otpauth://` URI is a secret coming *back*, which
-`rules/architecture.md` forbids in the plain shape.
-
-Still absent by design: pairing-code display and QR, and TOTP/passkey
-enrolment from the GUI. The endpoints exist; the pane does not drive
-them yet.
+- **`bind` is an allowlist**, and the highest-consequence line here.
+  Permitted: loopback, RFC1918, link-local, Tailscale's
+  `100.64.0.0/10`, and `0.0.0.0`. Refused: anything **globally
+  routable**. `0.0.0.0` returns `Exposure::EveryInterface` so the
+  caller must say so. `100.x` is not automatically Tailscale —
+  matching the first octet would allow routable space.
+- **TLS is required iff the bind address is not loopback**
+  (`BindAddr::requires_tls`), and there is no downgrade switch:
+  `remote::tls` stops the server rather than falling back, because a
+  silent downgrade leaves the user believing traffic is protected.
+  Certificates come from a private CA (`scripts/mint-remote-cert.sh`)
+  because this tailnet's control server cannot issue them.
+- **The password is hashed with scrypt, and `remote::token` argues the
+  opposite for itself deliberately.** A 256-bit machine token has
+  nothing to brute force; a human-chosen password does. Both modules
+  are correct for their own input — **do not unify them onto one hash.**
+- **The throttle backs off; it never locks out.** A hard lockout on a
+  LAN-reachable appliance is a denial of service handed to anyone on
+  the wifi. Failures buy an exponential delay capped at 30s. The
+  *pairing code* may burn itself, because the user can mint another at
+  the machine; an admin locked out over the network cannot.
+- **`verify_password` must distinguish "wrong password" from "stored
+  hash unusable"** — a PHC string can parse and carry no hash output,
+  and `.is_ok()` would tell the owner their correct password is wrong,
+  forever, with nothing pointing at the file.
+- **A bearer token defends against other devices, not against local
+  code.** A same-UID process can write its own device record, and can
+  already drive CC's socket directly. The honest claim is narrow: this
+  stops another *device* acting without credentials, and a *revoked*
+  device acting at all. Do not write docs or UI implying more.
+- **TOTP is an optional SECOND factor and must never be the only one.**
+  Its secret cannot be hashed, so it would be strictly more valuable at
+  rest than a password hash. Codes are **burned** via a high-water
+  counter (RFC 6238 §5.2; most implementations omit it), and SHA-1 is
+  correct rather than an oversight.
+- **Passkeys are the better end state and are built** (`remote::webauthn`
+  / `remote::passkey` / `remote::api`): the server stores only a public
+  key. Registration requires an authenticated session; the RP ID is
+  derived from the request and never configured; `login/begin` sends an
+  empty `allowCredentials`; a passkey login mints exactly the same
+  `Device` row a password login does. **The origin must be a hostname,
+  not an IP** — an IP origin has no RP ID, and
+  `isUserVerifyingPlatformAuthenticatorAvailable()` reports `true` on
+  exactly the origin that cannot use one.
+- **Every verb is `remote::service`, and there is exactly one of it.**
+  A Tauri command written against `claudepot_core::remote` directly
+  would reimplement `revoke_all`'s refusal, `enable`'s preflight order
+  and the recovery warning. What stays per-caller is presentation.
+- **The server runs in-process on a tokio task**
+  (`src-tauri/src/remote_server.rs`), not as a daemon, because the
+  approval hook is armed for exactly as long as a server is up and
+  that coupling is what makes the capability acceptable. The cost is
+  disclosed, not discovered: quitting Claudepot stops the surface,
+  enforced on `RunEvent::Exit` (not `ExitRequested`, which can be
+  prevented).
+- **Three states, not two, and two liveness fields.** `server.enabled`
+  is a stored preference that survives `kill -9`;
+  `approval::store::is_serving` is the heartbeat; `running_here`
+  distinguishes our server from a `claudepot remote serve` in a
+  terminal. Collapsing any of them is a review finding, and
+  `RemotePane.test.tsx` asserts all three.
+- **Secret direction is unchanged**: the password crosses *in* over IPC
+  and is zeroized on every path of `service::set_password`; nothing
+  returns it, and `DeviceSummary` does not carry the token hash. TOTP
+  enrolment from the GUI would need the `key_*_copy` treatment — an
+  `otpauth://` URI is a secret coming *back*.
+- **Two chips, not one.** `RemoteServingChip` is this surface;
+  `RemoteWindowChip` is CC's `crossSessionInbound`. Different blast
+  radii; folding them would leave a user unable to tell which door is
+  open. The pane is `group: "core"` because it is where you revoke a
+  lost phone, and Quick prompts live inside it because they are the
+  panel composer's chips and mean nothing elsewhere.
 
 ### The panel — the client that ships at `/`
 
 `panel/` is a self-contained Vite app (its own install; **not** a
-workspace member of the Tauri renderer, which carries 328 `invoke` calls
-that mean nothing over HTTP). It builds into
-`crates/claudepot-core/src/remote/assets/panel/`, which is **committed**,
-so `cargo build` needs no Node. Rebuild with `scripts/build-panel.sh`
-after touching anything under `panel/` — nothing else notices, and the
-previous bundle ships silently.
-
-The probe moved to `/probe` rather than being deleted. It is not the
-product and never was, but it has twice been the only thing able to
-answer a question a development machine cannot — it established that a
-privately-trusted certificate on a tailnet name yields a full secure
-context, and it caught the passkey check measuring the device rather
-than the origin.
-
-The endpoints behind it, all in `remote::api` over `remote::panel`:
+workspace member of the Tauri renderer, which carries over 300
+`invoke` calls that mean nothing over HTTP). It builds into
+`crates/claudepot-core/src/remote/assets/panel/`, which is
+**committed**, so `cargo build` needs no Node. **Rebuild with
+`scripts/build-panel.sh` after touching anything under `panel/`** —
+nothing else notices, and the previous bundle ships silently. The
+committed output is ~3.8 MB embedded in every binary whether or not the
+remote surface is ever switched on: a ~426 KB base bundle plus 61
+lazy mermaid chunks, whose route table is *generated* into
+`assets/panel_chunks.rs` (a runtime directory walk would hand
+`remote::assets` the traversal surface it exists not to have).
 
 | Route | Notes |
 |---|---|
-| `GET /api/sessions` | live PID registry joined to `session_index` on session id; live always, plus the 20 most recently touched |
+| `GET /api/sessions` | live PID registry joined to `session_index`; live always, plus the 20 most recently touched. Carries `server_version`, which is what the panel's tap-to-reload bar compares |
 | `GET /api/sessions/{id}/transcript` | `tail` / `after` / `before` windows, `no-store`. **The secret-bearing endpoint** |
 | `POST /api/sessions/{id}/prompt` | the only write that reaches Claude Code, through `peer` |
 | `POST /api/sessions/{id}/read` | per-device read mark |
-| `GET /api/accounts` | read-only except `…/{email}/activate` |
+| `GET /api/accounts`, `POST …/{email}/activate` | read-only except activate, which moves **the CLI slot only** and answers **409 `live_session`** unless the caller asks for `force` |
 | `GET /api/sessions/{id}/commands`, `…/commands/{name}` | slash commands as **text**; cwd resolved from the session, never from the client |
 | `GET /api/approvals`, `POST /api/approvals/{id}` | the only route that **grants a capability**; alive only while `remote serve` is |
 | `POST /api/passkey/{register,login}/{begin,finish}` | register is authenticated, login is not |
 
-Five decisions are worth not re-litigating:
+**Panel rules that are not up for re-litigation** (reasoning in the
+note): a card is titled by the **last** user prompt, not the first, and
+the title is markdown-**stripped** while the body is markdown-rendered;
+live cards order by `last_reply_ts`; no `failed`, `stuck`, `idle_ms` or
+tool-call count is synthesised; token components travel, not one sum;
+the transcript is **masked, never scrubbed**, and the UI says so; tool
+output never renders as markdown; mermaid runs with `htmlLabels: false`
+and the desktop keeps `dangerousDisableAssetCspModification:
+["style-src"]`; there is no projects surface and no project move; there
+is no interrupt, because CC's peer inbox has no such verb; the offline
+outbox mints its idempotency key at **enqueue**; the back gesture is a
+single `popstate` closer; `/` **stages** a slash command and `…`
+**sends** a quick prompt; answering an `AskUserQuestion` sends a
+prompt and says "handed off", because whether that resolves the tool
+call has **not been measured**.
 
-- **A card is titled by the LAST prompt, not the first.** The stored
-  `first_user_prompt` names what a session started as, which on a thread
-  running for hours is a question settled long ago. `last_user_prompt`
-  scans the tail backwards, skipping the text CC writes into the *user*
-  role itself (`<command-name>`, `<bash-stdout>`, `<system-reminder>`,
-  tool results) — a card reading `<bash-stdout>` would be worse than the
-  stale title it replaced. It falls back to the stored first prompt, so
-  a session whose tail is all tool traffic still has a name.
+**Approving from the phone** (`remote::approval`) is the one thing here
+that grants rather than reads, and it uses CC's `PermissionRequest`
+hook — a different door from peer messaging, so the laundering
+reasoning in "## Peer messaging" stays enforced. Five properties hold
+it: **silence is the fall-through** (a hook that prints nothing leaves
+the normal prompt at the machine, so every failure degrades to today's
+behaviour); it is armed only while `remote serve` is up (SIGINT **and**
+SIGTERM); **the runtime gate is the half that holds**
+(`store::gate` believes the heartbeat, not the preference); the wait
+ends before CC's does (`WAIT` 110s < `HOOK_TIMEOUT_SECS` 120s < CC's
+300s clamp, which *kills* the hook and blocks the call); and **one
+writer per file** — request and decision are two files in two
+processes, where a mutex buys nothing. It has its own switch,
+`approvals_enabled`, which defaults to **true** unlike
+`server.enabled`, and is checked in `store::gate` at runtime rather
+than only at install.
 
-  The window **escalates**, 64 KB then 512 KB, and that is not a guess:
-  on a real 14 MB transcript the last 64 KB held **zero** user turns
-  while 512 KB held three. One large window would pay that on every
-  session every poll; escalating pays it only where the cheap read came
-  up empty, and the list stayed at 0.34 s. Past the cap the honest
-  answer is "no recent prompt in reach" — reading a whole transcript
-  every five seconds to name a card is not a trade worth making.
-- **Live cards are ordered by when each session last REPLIED.** Not by
-  process start — the session you opened first this morning is the one
-  you have been working in all day — and not by `last_ts` either, which
-  moves on every tool call, so a session grinding through a hundred of
-  them sat permanently at the top while having said nothing for
-  minutes. `last_reply_ts` is the timestamp of the last assistant turn
-  that was *prose*, which is the closest thing a transcript has to "a
-  job finished". `last_ts` stays as the tiebreak, so a session that has
-  never replied still sorts sensibly. It crosses to the client rather
-  than staying server-side: a list ordered by a number the client cannot
-  see is a list nobody can check.
-- **No `failed` status is synthesised.** The only available signal is
-  `SessionRow::has_error`, true of any transcript with one errored tool
-  call — routine in a long session. Painting those red would make the
-  one colour that should mean "look at this" mean "a command exited
-  non-zero". It ships as its own boolean instead.
-- **No `stuck`, no `idle_ms`, no tool-call count.** The first two are
-  `session_live::LiveRuntime` overlays and `remote serve` has no
-  runtime; the third needs a schema migration. All three are absent
-  rather than estimated — a card showing a number nobody computed is
-  worse than a card without one.
-- **Token components travel, not one sum.** `TokenUsage::total()`
-  includes cache reads, which dominate by two orders of magnitude: a
-  real session here reported 1.8 *billion*. The client renders
-  input + output.
-- **The transcript endpoint says the text is masked, never scrubbed.**
-  `session_live::redact` is explicitly incomplete and knowingly passes
-  GitHub PATs and AWS keys. A user who believes a screen is scrubbed
-  will screenshot it.
-- **Prose renders as markdown; tool output never does.** Claude writes
-  markdown, and both transcript viewers used to show it verbatim — a GFM
-  table arrived as one run-on line of pipes. Two exclusions are
-  deliberate and hold on **both** surfaces (`panel/src/app/Markdown.jsx`
-  and `sections/sessions/components/TranscriptMarkdown.tsx`):
+Be exact about what it widens: a stolen bearer token could already read
+transcripts and inject text CC refuses to treat as approval; with this,
+it can approve a tool call. That does not weaken the password
+boundary — it means the boundary has less behind it in reserve.
 
-  | Case | Renders as | Why |
-  |---|---|---|
-  | a prose turn | markdown | it is markdown |
-  | a tool call or its output | verbatim, mono | a shell comment is not a heading and a glob is not emphasis; the one thing output must be is what the command printed |
-  | any turn while a **search** is running (desktop only) | highlighted plain text | `highlight` marks matches by splitting the raw string; a match you can find beats a bold you can read |
-
-  Neither renderer enables `rehype-raw`, so embedded HTML is escaped
-  text — the input is model output quoting arbitrary files. Images
-  render as their alt text rather than being fetched. Links differ by
-  surface on purpose: the panel opens a new tab, the desktop goes
-  through `ExternalLink` and the OS opener, because a bare `<a href>`
-  inside a Tauri webview navigates **the application itself** away with
-  no back button.
-
-  **Mermaid runs with `htmlLabels: false`, and that is load-bearing.**
-  By default mermaid puts labels in a `<foreignObject>` of HTML
-  containing **unclosed `<br>`**, so the SVG it returns is
-  HTML-flavoured rather than well-formed XML. Both renderers parse it
-  with `DOMParser` as `image/svg+xml` — a deliberate guard, not an
-  accident — and both therefore failed with *"Opening and ending tag
-  mismatch: br line 1 and p"* on any diagram whose labels used `<br/>`.
-  Measured on three real diagrams: the flowchart and the state diagram
-  failed, the sequence diagram drew, and the difference was only that
-  the first two had `<br/>` labels. On the desktop it bit twice —
-  `sanitizeSvg` strips `foreignObject` outright, so even a diagram that
-  parsed would have rendered with its labels missing. Loosening the
-  parse to `text/html` would also have worked and is the wrong trade;
-  turning HTML labels off fixes both surfaces at the source, and
-  `<br/>` still breaks a line because mermaid emits tspans for it.
-
-  **The desktop's diagram styling is a runtime `<style>`, and the
-  release CSP refused it.** Mermaid puts every rule it draws with —
-  fills, `fill: none` on edge paths, `text-anchor: middle` on labels —
-  in a `<style>` element inside the SVG, inserted when the diagram
-  mounts. `tauri.conf.json` grants `style-src 'unsafe-inline'`, and in
-  dev that is what runs. In the **release bundle** Tauri hardens the
-  policy on its own: at build time it stamps a nonce on `index.html`'s
-  inline `<style>` and at runtime appends `'nonce-…'` to `style-src` —
-  and a nonce or hash source makes browsers **ignore `'unsafe-inline'`**
-  (CSP Level 3). So the installed app, and only the installed app, drew
-  every diagram with SVG defaults: black node fills, edge curves filled
-  black into crescents, labels anchored `start` so their right halves
-  poked out of the boxes. Nothing errored; the render succeeded and the
-  stylesheet was silently dropped. Reproduced in Playwright WebKit by
-  adding one `'nonce-…'` to a harness's `style-src` (the console says
-  *"Refused to apply a stylesheet because its hash, its nonce, or
-  'unsafe-inline' does not appear in the style-src directive"*), and
-  the same page drew correctly without it.
-
-  `dangerousDisableAssetCspModification: ["style-src"]` keeps the
-  written policy in force for styles; `script-src` stays under Tauri's
-  nonce/hash hardening, which is where that protection matters.
-  `MermaidBlock.test.tsx` locks both halves of the config, since either
-  one alone is a silent no-op in release and CI never runs the release
-  webview. The panel is unaffected: `remote::server` writes its own
-  header with no nonces. The general lesson: **dev does not run the
-  release CSP**, so any runtime `<style>` injection — a library's, not
-  only mermaid's — has to be checked against the built app, not
-  `tauri dev`.
-
-  Checked on the real pipeline, both ways. `pnpm tauri build` leaves the
-  processed HTML at
-  `target/release/build/claudepot-tauri-*/out/tauri-codegen-assets/*.html`,
-  brotli-compressed; with the flag its `<style>` is bare, and with the
-  flag stripped it reads `<style nonce="__TAURI_STYLE_NONCE__">` — the
-  token the runtime turns into the `'nonce-…'` source. Two traps in
-  getting there: a plain `cargo build --release -p claudepot-tauri`
-  embeds **no** frontend at all, because `generate_context!` gates
-  embedding on the `custom-protocol` feature that only the Tauri CLI
-  enables; and there is no `.html` to find until it does.
-
-  **The failure says why.** `Mermaid.jsx` captured the reason and then
-  rendered a generic sentence, so every failure looked identical from
-  outside — which is how one cause (oklch, see below) was fixed while
-  this one went on producing the same message. The reason is now
-  appended to the notice.
-
-  **`clusterBkg` is the warm page colour, not `--sf`.** `--sf` is the
-  CARD colour and in light mode it is pure white, which painted every
-  subgraph a stark white box on the diagram's own `--sf2` container and
-  read as a rendering fault rather than as depth.
-
-  **A ` ```mermaid ` fence is drawn, on both surfaces.** A diagram in an
-  answer *is* the answer; showing its source is showing the wrong
-  artifact. Both go through `securityLevel: "strict"` and both
-  lazy-import mermaid, which matters far more on the panel: mermaid and
-  its diagram packs are larger than the rest of that bundle put
-  together, so they are **60 separate chunks** served from
-  `/panel/chunks/` and the base bundle stays ~413 KB. A thread with no
-  diagram pays nothing; a flowchart pulls its own pack, not cytoscape
-  and katex.
-
-  The route table for those chunks is **generated** into
-  `assets/panel_chunks.rs` by `scripts/build-panel.sh`, because sixty
-  hand-written match arms would be wrong within one mermaid upgrade —
-  and because a runtime directory walk would hand `remote::assets` the
-  traversal surface it exists not to have. Two tests walk the directory
-  and fail in **both** directions. The cost, stated rather than buried:
-  ~3.4 MB of committed bytes embedded in every binary whether or not the
-  remote surface is ever switched on.
-
-- **A card title is markdown-stripped, not markdown-rendered.** The
-  opposite of the body, and for the obvious reason: one line has no room
-  for a heading, a fence or a list. Every `/execute-plan` session on this
-  machine was titled `## User Input ```text …`.
-
-  The rule is `claudepot-core::session::title::derive` (which the panel
-  DTO uses) and `deriveSessionTitle` in
-  `src/sections/sessions/format.ts` (which the desktop uses, because it
-  renders `SessionRow` straight over IPC). Two implementations, pinned by
-  `crates/claudepot-core/testdata/session-title-vectors.json` — **both
-  run those vectors**, the same arrangement `PriceBook::resolve` and
-  `src/costs.ts` have. Change one, change the other, add a vector.
-
-  **Underscores are never touched**, including `__bold__`. The vectors
-  caught `__init__ never runs` becoming `init never runs` — the exact
-  corruption the module claims to prevent, in the module that claims it.
-  Single `*` is left alone for the same reason (`*.log`, `2 * 3`).
-- **A home-screen app has no way to reload itself, so the panel ships
-  one.** Installed to the iOS home screen there is no address bar and no
-  reload button, and the system pull-to-refresh **cannot fire**: the
-  shell is `position: fixed; inset: 0; overflow: hidden` and scrolling
-  happens inside `.sc` containers, so the document never scrolls. Left
-  alone, a standalone panel runs last week's bundle indefinitely with
-  nothing on screen saying so — which is how a shipped mermaid fix read
-  as unfixed for an afternoon.
-
-  Two halves. `GET /api/sessions` carries `server_version`, and since
-  the bundle is embedded in that binary with `include_bytes!` the
-  server's version **is** the bundle's — they cannot disagree. The
-  client records the version it booted with and shows a one-line
-  tap-to-reload bar when a later poll reports a different one. A server
-  too old to send the field leaves it null and nothing ever goes stale,
-  so the check fails off. Settings → This device → Reload is the manual
-  half, for the case you would not notice.
-
-  It is a **tap, never an automatic reload**: reloading mid-sentence
-  loses the composer, and "the app updated itself while I was typing" is
-  a worse surprise than a bar. `location.reload()` is enough — the panel
-  is `no-store`, so a load always fetches current bytes and there is no
-  cache to bust.
-- **Usage figures come from `usage-snapshot.json`, and something has to
-  write it.** The panel renders that file, never a live `/usage` call —
-  so on a machine reached only through `remote serve` there were no
-  usage figures at all until the desktop app had run, and a window
-  added to the schema stayed invisible until someone opened the GUI.
-  `claudepot usage refresh` writes it from the CLI. Two consequences
-  worth knowing: an **older** desktop build rewrites the file on its
-  five-minute tick and silently drops fields it was compiled without —
-  which is exactly how a shipped `scoped` window read as "Anthropic
-  doesn't send it" — and the snapshot is the reason a figure can be
-  stale without anything on screen saying so, hence the `usage as of`
-  line on every row.
-- **Tool calls fold by default, and folding is not hiding.** Measured
-  across five real sessions on this machine, **59–91% of transcript
-  rows were tool ticks** — so listing each one turns a 390px column
-  into a wall of ticks with the conversation scattered through it. A
-  run of two or more collapses to one `N tool calls` row that expands
-  into exactly what it replaced; a run of *one* is left alone, because
-  a row reading "1 tool call" is strictly worse than the tick, which at
-  least names the tool. An errored call is counted on the folded row —
-  grouping must not hide the one thing in a run worth looking at.
-  Settings → Appearance → Tool calls switches it off. The preference is
-  `localStorage`, not server state: this is how one device likes to
-  read, and a phone and a laptop pointed at the same Claudepot are
-  allowed to disagree.
-- **There is no projects surface at all; accounts are writable, and the
-  earlier note here was wrong about why.** The projects tab, its screen
-  and `GET /api/projects` were deleted rather than left read-only: the
-  tab listed what the sessions list already names on every card, and a
-  route nothing calls is surface with no reader. A project *move* was
-  never offered and still is not — it rewrites path-keyed CC state
-  outside the project directory behind a rollback journal, and a
-  half-applied one leaves Claude Code pointing at a path that is gone.
-
-  The account half claimed a swap "either fails while CC is running or
-  bypasses the keychain-drift guard". `force` is consulted in exactly
-  two places in `swap::switch_inner`, **both the live-session gate**.
-  The drift check runs unconditionally and is self-healing, so it is
-  never what a remote caller skips.
-
-  What a remote caller can skip is the live-session gate, and that gate
-  is about **correctness, not security**: a running CC holds its refresh
-  token in memory and overwrites the keychain on its next refresh,
-  silently reverting the swap. A revert nobody is at the machine to see
-  is the worst outcome, so `POST /api/accounts/{email}/activate`
-  defaults to the gated `switch` and answers **409 `live_session`**;
-  `force` exists but the phone must ask for it and is told what it
-  costs. Auto-rotation has always called `switch_force` unattended on a
-  timer, so a human tapping a phone is strictly more supervised than
-  what already shipped.
-
-  **The CLI slot only.** `cli` and `desktop` are independent nouns and
-  `.claude/rules/architecture.md` says never to couple them, so the
-  panel moves the first and never the second — Claude Desktop's slot is
-  switched at the machine. `swap::switch` touches CC's keychain item and
-  nothing of Desktop's (every `Desktop` mention in that module is
-  Windows process *detection*, so a running Desktop is not mistaken for
-  CC). Reading the swap code proves today's behaviour; the lock that
-  matters is `no_route_can_switch_the_desktop_slot`, which fails the day
-  a desktop route appears — and has been watched failing against a
-  planted one. `ActivateRequest` carries no `desktop` field either, so
-  the body is not a way in. The UI names the slot for the same reason:
-  a bare "Use" next to a Desktop chip invites the reader to assume it
-  moves both.
-
-  Addressed by **email**: that is this domain's identity for an account,
-  and a uuid on the wire is an internal identifier the panel would then
-  have to render or hide. Resolution is **prefix matching**, the same as
-  everywhere else, because the sequence is shared —
-  `account_service::activate_cli` is the one implementation of
-  resolve → reconcile → compare → swap, and both `claudepot cli use` and
-  the endpoint call it. It exists because there were briefly two, and
-  the second had already dropped `resolve_email`: a prefix that worked
-  at the keyboard answered "account not found" from the phone. What
-  stays with each caller is presentation — the CLI's split-brain warning
-  and the panel's inline conflict copy say the same thing in different
-  registers. Registering, removing and verifying accounts
-  stay at the machine — they need credentials the panel never sees.
-
-**Three steps, and only the last restructures.** `data-bp` is written
-from `useBP`'s ResizeObserver on the panel's own shell, so one
-observation drives type, gutter and layout together — and a 390px split
-view renders as a phone regardless of how wide the display is. A
-container query cannot express this: `@container` matches DESCENDANTS of
-the container and never the container element itself, and the panel *is*
-the element that steps.
-
-| | Width | Navigation | Layout |
-|---|---|---|---|
-| `sm` | ≤479px | bottom tabs | one column; the thread covers the list |
-| `md` | 480–899px | bottom tabs | one column, wider gutter and larger type |
-| `lg` | ≥900px | left icon rail | list and thread side by side |
-
-The attribute was pinned to `"sm"` for the whole of the panel's life
-before this, which left the `md` and `lg` blocks in `ds-tokens.css` as
-dead CSS — the app rendered at the phone floor on every screen it was
-ever opened on.
-
-Three consequences follow from `lg` and each was a bug at least once:
-
-- **Every branch of `Panel` returns a `Shell`.** `useBP` observes
-  `ref.current` in an effect keyed on the ref OBJECT, which is stable, so
-  the effect runs exactly once after the first commit. A boot screen
-  rendered outside the shell left `ref.current` null at that moment and
-  the observer was never attached — reproducing the pinned-to-`sm`
-  failure through a different mechanism.
-- **The thread in a pane has no Back.** It never covered the list, so a
-  chevron there would undo a navigation the user did not make. Tapping a
-  rail tab does not clear the open thread either, for the same reason it
-  does clear one on a phone: there the tab would light up under a
-  transcript still covering it, here it hides nothing.
-- **The list says which row is open.** Only at `lg` — `openId` is passed
-  as null below it, because a list nobody can see does not need a
-  selection. A history row takes the accent wash; a live card takes an
-  inset ring instead, since it may already be carrying the live glow and
-  two backgrounds on one card read as a rendering fault.
-
-**The back gesture closes the thread; it used to leave the app.** The
-panel kept no history at all — one entry for its whole life — and iOS
-Safari's edge swipe and Android's back both drive session history, so
-the gesture every phone user reaches for first was pointed at the exit.
-Opening a thread now pushes an entry (`panel/src/app/Panel.jsx`); a
-`popstate` listener is the single closer, so the chevron, a tab tap, a
-swipe and the OS gesture cannot diverge — anything that closed the
-thread without popping would leave the entry behind and silently eat the
-next Back.
-
-Four things about it are load-bearing:
-
-- **Only the thread pushes.** Tabs are lateral, not deeper: the chevron
-  model already says the transcript is the one place you go *into*, and
-  an entry per tab tap would make Back walk backwards through tabs
-  instead of leaving.
-- **The URL never changes** (`pushState(state, '')`). `remote::assets`
-  serves the panel at `/` with no client router, so a path only the
-  client understands would 404 on reload.
-- **It fails off.** `historyNav()` returns null where the History API is
-  not usable, and the thread still opens and still closes by chevron —
-  exactly as before. That is not hypothetical: the render check aliases
-  `window` to Node's `globalThis`, which has neither `history` nor
-  `addEventListener`, so the unguarded version threw inside a mount
-  effect, React unmounted the whole tree, and **all seven** passes went
-  blank — including sign-in, which never opens a thread. The guard is
-  also why the check now asserts the entry: a feature that disables
-  itself is green either way.
-- **The in-transcript swipe is a second thing, not the same thing**
-  (`panel/src/app/gestures.js`). It complements the OS gesture rather
-  than duplicating it — the screen edge is already spoken for in a
-  browser tab, and a standalone home-screen app may have no OS gesture
-  at all. It routes through the same `onBack`, so it pops the same
-  entry. A drag that starts inside a horizontally scrollable element
-  with room left to scroll *that* way is not a swipe: a wide code block
-  or table is exactly the thing a reader drags sideways, and stealing
-  that would be worse than having no swipe. Checked against live
-  `scrollLeft`, not the mere presence of overflow, or one wide table
-  would disable the gesture for the whole conversation.
-
-**Offline holds the message; it does not refuse it.** The composer used
-to disable itself when the host stopped answering, which is honest and
-throws away the one thing a phone is good for — you thought of it on the
-train. `claudepot-core` is not involved: the queue is
-`panel/src/app/outbox.js`, localStorage, client-side.
-
-Four properties, each of which is why it is a module rather than
-component state:
-
-- **It survives leaving the thread**, and the reload. A queue held in
-  `Thread` dies on Back, which makes "sends when the Mac is back" false
-  the moment the user navigates — and an iOS home-screen app is evicted
-  from memory whenever the OS likes.
-- **The drain is gated on the SESSION, not on the host.** Live and
-  addressable, not merely reachable. A session that ended while you were
-  offline keeps its queue and waits; posting into a recycled pid is the
-  one outcome worse than not sending.
-- **The idempotency key is minted at enqueue and travels with the
-  entry.** A drain that sends and then loses the answer replays as the
-  same intent. Minting at drain time would make a retry a second
-  message, which is the only way this feature could send something
-  twice.
-- **A refused entry stops retrying and says why.** Without that a
-  permanently-refused message is re-sent on every poll — a failing
-  request every four seconds, forever, from a phone in a pocket.
-  `OfflineError` is deliberately not treated that way: "the Mac is not
-  answering" is the state the queue exists for. Every entry is
-  cancellable from the row it renders on, because otherwise the only way
-  to stop one is to be elsewhere when it fires.
-
-**What the design proposed and the panel does not do**, recorded so it is
-not rediscovered as an omission:
-
-- **Send does not become interrupt while Claude streams.** There is no
-  interrupt: CC's peer inbox takes `user` plus `rename` /
-  `notify_when_idle` / `peer_idle_notice` / `peer_message_status`, and
-  `TIOCSTI` is refused by current macOS with EACCES even on a pty the
-  caller owns. The design's prototype `interrupt` completes its own mock
-  stream. A button here would do nothing and say it did something.
-- **No Projects tab and no `+` new session.** The first was deleted
-  rather than left read-only (see below); the second means spawning an
-  interactive session, which `.claude/rules/architecture.md` puts outside
-  this product on purpose.
-- **No device-pick pairing screen and no push transport.** Pairing is
-  password + passkey, which is a different and stronger flow than the
-  design's mock; push was flagged as unbuilt by the designer too.
-
-**Two pickers, one sheet.** Slash commands sit behind `/` and quick
-prompts behind `…`, and they share `PickerSheet` — position, z-index,
-the filter field, the empty and failure states — because a second copy
-of that chrome is a second place for the fixed-position rule to drift.
-They differ in exactly one way, deliberately: `/` **stages** and `…`
-**sends**. A slash command expands to thousands of words and deserves a
-look before it goes; a quick prompt is a short phrase its owner wrote so
-it could be fired without ceremony.
-
-The quick prompts used to be a scrolling chip row above the composer,
-which cost a line on every thread and showed about four before running
-off the edge. `…` renders only when there is something behind it.
-
-**Answering without opening** (`remote::panel::ask`) reads exactly one
-shape: an unanswered `AskUserQuestion` tool call, whose input carries the
-question and its offered choices. Permission prompts are deliberately not
-read — a peer message cannot grant an escalation, CC calls trying to do
-so *permission laundering*, and a session asked to approve its own
-pending prompt is expected to refuse. Tapping a chip sends the label as a
-**prompt**; whether an arriving message can resolve a tool call the
-session is blocked on has **not been measured**, so the UI says "handed
-off" and leaves the question on the card. See the
-`pending AskUserQuestion shape` row in `crates/xtask/cc-upstream-watch.md`.
-
-**Sending a slash command** (`claudepot-core::cc_commands`) is possible
-only as text, and the panel does the expansion. CC's inbox dispatches
-with `skipSlashCommands: true` and its own predicate is
-`startsWith("/") && !skipSlashCommands`, so `/audit-fix` otherwise
-arrives as nine characters of prose. That flag is hardcoded at every
-injection site — it is not a setting, and no permission changes it.
-
-**Expanding here is what CC does there.** CC expands a command at the
-input layer and dispatches the *expansion* with `skipSlashCommands:
-true`, keeping the original only in `preExpansionValue` so the
-transcript can still show what was typed. This is the same step, one
-layer earlier — not a way around anything.
-
-Three things it deliberately is not:
-
-- **Not "running the command".** `allowed-tools` does not travel (272 of
-  732 command files on the reference machine declare one), nor does
-  `model` (40). Invoked properly the command runs under its own
-  restriction; sent as text it runs under the *session's*, which is
-  generally **wider**. `CommandSpec::restricts_tools` exists so every
-  surface says so, and the panel says it on the row and again on the
-  staged chip.
-- **Not a client-chosen directory.** The cwd is resolved server-side
-  from the session id. A path parameter would let one authenticated
-  device enumerate `.claude/commands` anywhere on the disk; a session id
-  can only name a directory CC is already working in. `CommandSpec.path`
-  is `#[serde(skip)]` for the same reason — there is no path for a
-  client to hand back, so there is no traversal to defend against.
-- **Not one tap.** The picker **stages**; only Send sends. These bodies
-  run to thousands of words and some dispatch subprocesses, so the last
-  thing between a mistyped filter and a 14,000-word instruction landing
-  in a live session is a deliberate press.
-
-Plugin resolution reads `installed_plugins.json`, which records one
-entry per *installation* — a plugin in eleven projects appears eleven
-times, at eleven paths, possibly at eleven versions. Entries are
-deduplicated by plugin name with a project-scoped install beating a
-user-scoped one, so the picker offers the same version the session would
-actually run, once.
-
-**Approving from the phone** (`remote::approval`) is the one thing on
-this surface that grants a capability rather than reading or messaging,
-and it does **not** contradict the paragraph above. It uses a different
-door: Claude Code's `PermissionRequest` hook, which CC fires *before*
-drawing a prompt, in a process CC started itself. No peer message, no
-keystroke injection, no laundering — the reasoning in `panel::ask`
-stays correct and stays enforced.
-
-Five properties hold it together:
-
-- **Silence is the fall-through.** CC's decision union is `allow` or
-  `deny` and has no "ask" arm, so a hook that prints nothing leaves the
-  normal prompt to be drawn at the machine. Every failure — surface off,
-  dead server, corrupt file, unparseable payload, nobody holding the
-  phone — degrades to *exactly today's behaviour*. That is what makes
-  the feature safe to add at all: the worst case is walking to the
-  machine.
-- **It is armed only while `remote serve` is up.** The hook is installed
-  on start and revoked on stop (SIGINT **and** SIGTERM — `kill` and
-  every process supervisor send the latter, so handling only Ctrl-C
-  leaves the entry behind, measured). An install that never turns the
-  remote surface on is never asked anything.
-- **The runtime gate is the half that holds.** `server.enabled` is a
-  stored preference, not liveness — it stays true after a `kill -9`. So
-  the server heartbeats every 5 s and the hook believes the heartbeat,
-  not the preference. Without it a killed server would leave every
-  permission prompt on the machine pausing for the full wait with
-  nothing able to answer.
-- **The wait ends before CC's does.** CC clamps a hook timeout to
-  `UQ_ = 300_000` ms and *kills* the process at it — and a killed hook
-  blocks the tool call, the one outcome that does not fall through. So
-  `WAIT` (110 s) sits under `HOOK_TIMEOUT_SECS` (120 s) sits under the
-  clamp, and there is a test asserting the ordering.
-- **One writer per file.** A request and its decision are two files, not
-  two fields of one: the hook writes only the request, the server only
-  the decision. Atomic rename is crash-safety, not concurrency-safety —
-  the same confusion that lost a write in `remote-read-state.json` — and
-  these writers are in different processes, where a process-local mutex
-  buys nothing. The split removes the race instead of trying to win it.
-
-Be exact about what this widens. Before it, a stolen bearer token could
-read transcripts and inject text that CC would refuse to treat as
-approval. With it, that token can approve a tool call — arbitrary code
-execution as this user, which is what the admin password was always
-guarding. It does not weaken the password boundary; it does mean the
-boundary now has less behind it in reserve. The `args` exec form is used
-so the binary path never reaches a shell parser, the decision is refused
-for any id with no live request, and the argument is redacted and capped
-on the way *in* so a secret in a command line never reaches the file.
-
-The hook is a **hidden** CLI verb (`claudepot hook permission-request`)
-because CC invokes it, not the user; `verify-docs` exempts
-`#[command(hide = true)]` verbs from the README on exactly that
-reasoning, and tests the exemption in both directions.
-
-**It has its own switch: `approvals_enabled`.** It was hard-wired to
-the server's lifetime — starting the server installed the hook, so
-wanting the panel at all meant taking the one capability that grants
-rather than reads. Those are different questions and are now two:
-Settings → Remote has the toggle, `claudepot remote approvals on|off`
-is the CLI, and `remote status` reports it. Off, the panel still lists
-sessions, reads transcripts and sends prompts; a permission prompt is
-drawn at the machine exactly as it was before this feature existed.
-
-Two things about it are load-bearing:
-
-- **The check is in `store::gate`, at runtime, not only at install.** A
-  hook entry outlives the process that wrote it — that is the premise
-  the whole module is built on and why the runtime gate exists at all —
-  so a crash, a hand-edit, or a second Claudepot must not leave the
-  capability on after the toggle went off. Uninstalling from
-  `settings.json` is tidiness (`reconcile_approval_hook`, shared by
-  `ApprovalHook::arm` and the GUI's live toggle); the gate is the line
-  that holds. `gate_from` splits that judgement from the reading of the
-  config so all eight input combinations are testable without mutating
-  `CLAUDEPOT_DATA_DIR`, which every other test in the binary races.
-- **It defaults to `true`, unlike `server.enabled`.** The asymmetry is
-  deliberate: `enabled` defaults off because a surface that switches
-  itself on at install is not a feature, whereas this field is only ever
-  read on a machine whose owner has already turned the surface on and
-  set a password. Defaulting it off would silently withdraw a working
-  capability on upgrade. `#[serde(default)]` on a bool gives `false`, so
-  this needs its own helper — and its own test, since losing the helper
-  is a silent behaviour change rather than a compile error.
+Still absent by design: pairing-code display and QR, and TOTP/passkey
+enrolment from the GUI. Still open: mDNS discovery for multiple
+appliances on one LAN, and a streaming surface — which when added must
+**close** on credential revocation, not merely refuse the next request.
 
 ## Env secret vault (Keys → Secret vault, ProjectDetail → Environment files)
 
@@ -1834,126 +574,79 @@ swap to a chosen alternate.
 
 ## Transcript retention (Settings → Retention)
 
-Reads and writes CC's `cleanupPeriodDays` — **the only Claude Code
-setting that destroys user data**, and one CC's own UI never mentions.
-Pure logic in `claudepot-core::cc_retention`; commands in
+Reads and writes CC's `cleanupPeriodDays` — **a setting that destroys
+user data, and one CC's own UI never mentions**. Pure logic in
+`claudepot-core::cc_retention` (not `retention`, which already owns
+Claudepot's own pruning horizon); commands in
 `src-tauri/src/commands/cc_retention.rs`; pane at
 `src/sections/settings/RetentionPane.tsx`.
 
-Not named `retention` in core — `claudepot-core::retention` already owns
-an unrelated concept (Claudepot's own `activity_cards` / `metrics_tick`
-pruning horizon). `cc_` matches `cc_daemon` / `cc_doctor` / `cc_tips`.
-
-Four properties drive the whole design; changing any of them invalidates
-the pane:
+Four properties drive the whole design; changing any invalidates the
+pane. The CC archaeology behind each — which version changed what, and
+the one reversal that made a passing test assert the opposite of the
+truth — is in
+[`docs/notes/cc-integration.md`](docs/notes/cc-integration.md).
 
 - **Sliding, not one-shot.** `getCutoffDate()` recomputes
   `now - cleanupPeriodDays` on *every* run, so loss is continuous.
-- **`0` is not on the duration scale — and CC now rejects it.** Through
-  CC 2.1.88 it meant *write no transcripts and delete the existing ones
-  at startup*. **CC 2.1.233 requires a minimum of 1** and refuses `0`
-  with its own message, pointing at `--no-session-persistence` or the
-  SDK's `persistSession: false` instead.
-
-  Both of those are out of reach: the flag is rejected outside
-  `--print` mode, and the option is SDK-only. **So there is no way to
-  disable transcript persistence for an interactive session, and
-  Claudepot no longer offers one** — `disable_persistence()` and
-  `retention_disable_persistence` were deleted rather than repointed,
-  because every implementation of that verb would write a value CC
-  rejects and report success. Do not re-add one without re-verifying
-  the schema; `cc_retention::MIN_CLEANUP_PERIOD_DAYS` is the pin.
-
-  A `0` written by an older Claudepot is still on disk for anyone who
-  used the old control, and it now does the **opposite** of what they
-  chose: transcripts are written, and cleanup is suppressed because the
-  key is present and invalid. That is `RetentionMode::LegacyZero`, kept
-  distinct from `Invalid` because the repair copy differs — a promise
-  withdrawn upstream, not a typo to correct.
-- **Any value CC's schema rejects suppresses cleanup entirely.** CC
-  bails when settings fail validation *and* the raw key is present, so
-  an invalid value accidentally **protects** transcripts
-  (`RetentionMode::Invalid` / `LegacyZero` / `cleanup_suppressed`). The
-  UI must say "fix the value", never "restore the default" — restoring
-  clears the error and re-arms deletion. It follows that **any control
-  that lifts suppression confirms first**: while suppressed, a preset
-  button is a one-tap destructive action on the whole backlog.
-
-  That is anything below `1` **and** anything that is not an integer —
-  the schema rejects `"thirty"`, `30.5` and `true` alike. This is why
-  `settings_writer::read_i64_setting` returns a three-state
-  `SettingValue` rather than an `Option` — collapsing "absent" and
-  "present but wrong type" reported a 30-day timer on history CC was in
-  fact leaving alone, and pointed the user at the one button that starts
-  it.
-
-  2.1.233 states the suppression out loud where 2.1.88 was silent
-  (*"Skipping cleanup: settings have validation errors but
-  cleanupPeriodDays was explicitly set"*, surfaced via `/doctor`), and
-  adds two causes Claudepot does not model: an unreadable/unparseable
-  settings file, and `--setting-sources` disabling the user-settings
-  source. Known limits, all in the same direction: CC suppresses on a
-  validation error **anywhere** in the file while this key is present,
-  and Claudepot models only this key, so a file invalid elsewhere — or
-  either new cause — reads as "cleanup armed". That errs toward warning
-  about deletion that is not happening, which is the safe direction, but
-  it is not complete.
-- **Bigger than the transcript count.** Deleting
-  `projects/<slug>/<uuid>.jsonl` also `rm -rf`s the session folder
-  `projects/<slug>/<uuid>/` beside it — `subagents/`, `workflows/`,
-  `remote-agents/`, `mcp-tasks/`, everything under them — with **no
-  per-file age check**. A second path recursively sweeps those three
-  by mtime for session folders whose transcript is already gone.
-  `TranscriptRisk::nested_below_session` counts them, because none of
-  them appear in the transcript total.
-
-  This entry said the opposite until 2026-08-28: that cleanup "never
-  walks `subagents/`", so the folder grows while history is destroyed.
-  True of 2.1.88, false at 2.1.250, and false in the direction that
-  matters — the pane told the user nested runs survived a sweep that
-  takes them, and a passing test asserted it. Found by doing the
-  `cc_sweep::SWEPT` reconciliation the watchlist row asks for, which
-  had been listed as "not verified this pass".
-- **It is not a transcript setting.** `cleanupPeriodDays` is a global
-  TTL over ~20 directories under `~/.claude`, verified against the
-  2.1.233 binary's cleanup module. `TranscriptRisk` counts `projects/`;
-  `claudepot-core::cc_sweep` counts the rest, in the unit CC actually
-  deletes — **files** for some directories, **immediate subdirectories**
-  for others. Counting the wrong unit reports zero and reads as "nothing
-  here", which is why `SweepUnit` is explicit per row. `SWEPT` also
-  classifies each directory `Content` or `Cache` so the exclusion of
-  telemetry and traces is a recorded decision, not an omission.
+- **`0` is not on the duration scale, and CC rejects it** since
+  2.1.233 (`cc_retention::MIN_CLEANUP_PERIOD_DAYS` is the pin). There
+  is **no way to disable transcript persistence for an interactive
+  session**, so Claudepot no longer offers one — `disable_persistence()`
+  was deleted rather than repointed. A `0` written by an older
+  Claudepot now does the *opposite* of what its author chose:
+  `RetentionMode::LegacyZero`, kept distinct from `Invalid` because the
+  repair copy differs.
+- **Any value CC's schema rejects suppresses cleanup entirely**, so an
+  invalid value accidentally *protects* transcripts. The UI must say
+  "fix the value", never "restore the default", and **any control that
+  lifts suppression confirms first** — while suppressed, a preset
+  button is a one-tap destructive action on the whole backlog. This is
+  why `settings_writer::read_i64_setting` returns a three-state
+  `SettingValue`: collapsing "absent" with "present but wrong type"
+  reported a 30-day timer over history CC was leaving alone.
+- **It is bigger than the transcript count, and it is not a transcript
+  setting.** Deleting `projects/<slug>/<uuid>.jsonl` also `rm -rf`s the
+  sibling session folder with no per-file age check, and the key is a
+  global TTL over ~20 directories under `~/.claude`. `TranscriptRisk`
+  counts `projects/`; `claudepot-core::cc_sweep` counts the rest **in
+  the unit CC actually deletes** — files for some directories,
+  immediate subdirectories for others, which is why `SweepUnit` is
+  explicit per row.
 
 `TranscriptRisk::scan_incomplete` is load-bearing: a scan that failed
 must never render as "nothing is scheduled for deletion".
 
-Boot check at `src-tauri/src/retention_boot_check.rs` emits **at most one**
-bell entry, choosing between two mutually-exclusive conditions that core
-guarantees cannot both hold:
+**There is a second destroying key, and Claudepot does not model it.**
+`desktopSessionCleanupPeriodDays` (CC 2.1.248+, schema
+`int().nonnegative().optional()`, re-seen in 2.1.274) is the retention
+ceiling for transcripts created or last written by a desktop-host
+surface (Claude Desktop, Cowork), **which are exempt from the
+`cleanupPeriodDays` sweep entirely**. Three consequences: its `0`
+default means "keep forever", the exact opposite of `cleanupPeriodDays`
+rejecting `0`, so a control reusing this pane's validation would be
+wrong; `TranscriptRisk` counts all of `projects/` and therefore
+**over**-reports risk for desktop-written transcripts (the safe
+direction, but a real gap); and CC's suppression check loops over both
+keys, while `cleanup_suppressed` models one. The row in
+`crates/xtask/cc-upstream-watch.md` carries the full measurement.
+
+Boot check at `src-tauri/src/retention_boot_check.rs` emits **at most
+one** bell entry, choosing between two conditions core guarantees
+cannot both hold:
 
 | Condition | Core decision fn | Category |
 |---|---|---|
 | deletion is coming | `cc_retention::warning` | `TranscriptsExpiring` |
 | deletion is switched **off** and you were not told | `cc_retention::cleanup_suppressed_warning` | `TranscriptCleanupSuppressed` |
 
-The second exists because the first deliberately returns `None` for every
-suppressed state — announcing "conversations are expiring" where deletion
-is disabled alarms the user about the one thing that is *not* happening.
-That left the suppressed states discoverable only by opening the pane,
-and the user least likely to look is the one who set "stop saving" years
-ago and considers it settled. Two categories rather than one because the
-**mute decision differs**, which is `Category`'s standing test for a
-split.
-
+Two categories rather than one because the **mute decision differs**.
 Neither has a dismissal flag — gating on the condition means fixing the
-setting silences it, while dismissing without fixing does not.
-
-Both bodies are composed in the Tauri crate from the catalog and locked
-byte-for-byte against core's `message()` under `en`, so the CLI's English
-and the GUI's cannot drift. The suppressed body additionally asserts it
-never contains "will be deleted" / "will delete": the two entries say
+setting silences it. Both bodies are locked byte-for-byte against
+core's `message()` under `en`, and the suppressed body additionally
+asserts it never contains "will be deleted": the two entries say
 opposite things, and a user who reads the wrong one takes the wrong
-action on the only CC setting that destroys data.
+action on a setting that destroys data.
 
 ## CC env variables (Global → Config → Env Variables)
 
@@ -2074,100 +767,57 @@ able to open over an already-open dialog.
 
 ## Internationalization (en + zh-CN)
 
-Two locales ship: `en` and `zh-CN`. English is the source of truth
-everywhere; a missing translation falls back to English rather than
-failing, which is why the catalogs are gated in CI (see below).
-Full design in `dev-docs/i18n-plan.md`.
+English is the source of truth everywhere; a missing translation falls
+back to English rather than failing, which is why the catalogs are
+gated. Full design in `dev-docs/i18n-plan.md` (local, untracked); the
+rules below each cost a shipped bug, and the stories are in
+[`docs/notes/i18n.md`](docs/notes/i18n.md).
 
-**Three catalogs, three owners.** They are not interchangeable:
+**Three catalogs, three owners. They are not interchangeable:**
 
-- `src/locales/<locale>/<ns>.json` — the React UI, 16 namespaces
-  (`common`, `components`, `shell`, `errors`, plus one per section).
-  Loaded statically and initialized **synchronously** in
-  `src/lib/i18n.ts` (`initAsync: false`) so the first paint is already
-  localized. `src/types/i18next.d.ts` types `t()` against the *English*
-  catalogs — a key that doesn't exist is a compile error, not a runtime
-  English leak. Adding a namespace means editing both files.
-- `src-tauri/i18n/<locale>.json` — the Rust-authored surfaces: app
-  menu, tray, and the four OS-banner modules. Hand-rolled lookup in
-  `src-tauri/src/i18n.rs` (`tr` / `tr1` / `tr_args` / `tr_n`), embedded
-  with `include_str!`. Deliberately not a crate dependency: ~120 flat
-  keys and zh needs no plural rules.
-- **Nothing in `claudepot-core`.** Core's `thiserror` strings stay
-  canonical English — the CLI prints them verbatim and the GUI uses
-  them as its fallback. Localizing core would fork the CLI's output.
+| Catalog | Covers | Loaded by |
+|---|---|---|
+| `src/locales/<locale>/<ns>.json` | the React UI, 16 namespaces | `src/lib/i18n.ts`, **synchronously** (`initAsync: false`) so the first paint is localized. `src/types/i18next.d.ts` types `t()` against the *English* catalogs, so a missing key is a compile error rather than a runtime English leak |
+| `src-tauri/i18n/<locale>.json` | app menu, tray, the four OS-banner modules | hand-rolled lookup in `src-tauri/src/i18n.rs`, `include_str!`. Deliberately not a crate dependency: ~130 flat keys and zh needs no plural rules |
+| **nothing in `claudepot-core`** | — | core's `thiserror` strings stay canonical English: the CLI prints them verbatim and the GUI uses them as its fallback. Localizing core would fork the CLI's output |
 
 **What stays English, permanently:** CLI stdout/stderr and `--json`,
 logs and tracing, core error `Display` text, and technical identifiers
-(paths, model ids, CC setting keys like `cleanupPeriodDays`, env var
-names, commands the user copies). Localizing a value the user must
-type or paste is a bug, not a feature — **type-to-confirm gates are the
-one deliberate exception**, because a zh user must be able to type the
-phrase they are shown. The surviving gate is the repair pane's
-`projects:repair.abandonPhrase`; the retention pane's was removed with
-the control it guarded (see "Transcript retention"), so
-`src/lib/i18n.test.ts` now locks one entry rather than two. The rule is
-about the pattern — a new gate goes in that list.
+(paths, model ids, CC setting keys, env var names, anything the user
+copies or types). **Type-to-confirm gates are the one deliberate
+exception** — a zh user must be able to type the phrase they are shown.
+The surviving gate is `projects:repair.abandonPhrase`, and
+`src/lib/i18n.test.ts` locks it.
 
-**Load-bearing rules, each learned the hard way:**
+**Load-bearing rules:**
 
 - **Module-level label constants freeze the boot language.** A
   `const X = { label: "Foo" }` evaluated at import time never follows a
   language switch. Use a `labelKey` resolved where rendered, or a lazy
-  `get label()` — `src/sections/settings/panes.ts` and
-  `src/sections/global/tabs.ts` are the reference implementations, and
-  they stay JSX-free so the ⌘K palette can import them without
-  dragging their section chunks into the main bundle.
+  `get label()` — `sections/settings/panes.ts` and
+  `sections/global/tabs.ts` are the reference implementations, and they
+  stay JSX-free so the ⌘K palette can import them without dragging
+  their section chunks into the main bundle.
 - **Locale preference is `Option<String>`, and `None` means follow the
   OS.** Never write a resolved locale back into `preferences.json`, or
   "follow system" stops following. `localStorage` mirrors the
-  *preference* purely so first paint is correct before IPC returns;
-  `preferences.json` is authoritative.
+  *preference* only so first paint is correct before IPC returns.
 - **`sys-locale`, not `LANG`.** Dock-launched macOS apps inherit no
   env, so env-var detection silently resolves everyone to English.
 - **CJK glyphs come from Sarasa Mono SC**, `unicode-range`-gated in
   `index.html` so an English-only session never downloads ~9 MB.
-  JetBrains Mono has no CJK coverage — this also fixes Chinese
-  *project names* in the English UI, which were falling back to a
-  proportional system face.
-- **Section labels live in `shell:sections.*`, keyed by registry
-  `labelKey`.** Log tags and `ErrorBoundary` labels use the section
-  `id` instead — machine-facing strings must not move with the UI
+- **Section labels live in `shell:sections.*`** keyed by registry
+  `labelKey`; log tags and `ErrorBoundary` labels use the section `id`
+  instead, because machine-facing strings must not move with the UI
   language.
 - **Notification category names key off the category id**
-  (`src/lib/notifications/labels.ts`), not the English label core
-  ships over IPC. The fixture test in
-  `src/lib/notifications/types.test.ts` fails when a new core category
-  lacks catalog entries — that is the moment the English fallback
-  would start leaking into a zh UI.
+  (`src/lib/notifications/labels.ts`), not the English label core ships
+  over IPC. The fixture test in `src/lib/notifications/types.test.ts`
+  fails when a new core category lacks catalog entries — the moment the
+  English fallback would start leaking into a zh UI.
 
-**The gate:** `pnpm check:catalogs` (`scripts/check-catalogs.mjs`, wired
-into `ci.yml`) enforces en↔zh key parity, `{{placeholder}}` parity,
-`<Trans>` tag parity, no orphans, no empty values, valid JSON.
-
-**"Orphan" there means a zh key with no en counterpart — a *cross-locale*
-check.** It does not detect a key that no source file references, and a
-green run is not evidence there are none: deleting the Activities live
-surfaces left 30 dead keys behind and the gate stayed green. Prune them
-by hand when you delete a component. A mechanical check is not offered
-because ~450 keys resolve dynamically — the whole `errors` namespace is
-keyed by Rust error code — so a reference scan would report hundreds of
-live keys as dead, and a gate that cries wolf gets bypassed. Plural
-parity is asserted on plural *bases*, since zh legitimately carries
-only `_other` where en carries `_one` + `_other`. Point
-`CLAUDEPOT_LOCALES_DIR` at a fixture to exercise the gate itself — a
-check nobody has watched fail is indistinguishable from one that
-cannot fail.
-
-`check:envvar-layout` was the standing example of that decay: it drives
-the real app over the debug-only MCP bridge, so CI cannot run it and
-nobody had ever seen it go red. It now has both halves covered —
-`node scripts/check-envvar-layout.mjs --self-test` forces `.envvar-list`
-to 0px against the live pane and fails if the assertions *don't* fire,
-and `scripts/check-envvar-layout.test.mjs` unit-tests the pure
-`evaluate()` half in CI. Split the judgement out of the measurement in
-any guard of this shape; the measurement may need a screen, the
-judgement never does.
+`pnpm check:catalogs` is the gate (see "## Test" for what its
+"orphan" check can and cannot see).
 
 ## Settings-file mutation boundary
 
@@ -2288,93 +938,52 @@ ssh <user>@<host> "security unlock-keychain -p <password>; bash /tmp/claude-logi
 
 ## Release validation (Linux + Windows)
 
-CI's clippy + Windows-test gates run on Linux/Windows runners that
-local macOS can't reproduce. A four-round cascade of "fix-and-pray"
-clippy commits in v0.0.18 prompted this setup:
+CI's clippy + Windows-test gates run on runners local macOS can't
+reproduce. Two validator hosts stand in, reached over the legio
+tailnet — real names in `CLAUDE.local.md`, read by
+`scripts/pre-push` from the gitignored `.validator-hosts` or from
+`CLAUDEPOT_VALIDATOR_LINUX_SSH` / `CLAUDEPOT_VALIDATOR_WINDOWS_SSH`:
 
-- **`<runner-a>`** (internal validator network, Ubuntu aarch64) —
-  runs the same command as CI's `Format / Clippy (Linux)` job:
-  ```bash
-  cargo clippy --all-targets -p claudepot-core -p claudepot-cli -- -D warnings
-  ```
-  Catches new-clippy-version lints (1.95 added `io_other_error`,
-  `manual_pattern_char_comparison`; 1.92 added `useless_format`,
-  `cloned_ref_to_slice_refs`, `iter_nth_zero`) and
-  `cfg(target_os = "macos")`-only items that the macOS-local clippy
-  never sees. `--all-targets` covers test-code lints too — without
-  it, test-only drift accumulated silently between 1.92 and 1.95
-  and surfaced as a 7-lint backlog on 2026-05-13.
+```bash
+# <runner-a>, Ubuntu aarch64 — the same command as CI's Format / Clippy (Linux)
+cargo clippy --all-targets -p claudepot-core -p claudepot-cli -- -D warnings
+# <runner-b>, Win 11 MSVC x86_64 — the same compile step as CI's Tests (windows-latest)
+cargo test -p claudepot-core -p claudepot-cli --no-run
+```
 
-- **`<runner-b>`** (internal validator network, Win 11 MSVC x86_64) —
-  runs the same compile-step as CI's `Tests (windows-latest)` job:
-  ```bash
-  cargo test -p claudepot-core -p claudepot-cli --no-run
-  ```
-  Catches Windows-only compile errors (e.g. types referenced in
-  `cfg(target_os = "windows")` arms but cfg-gated to macOS only).
+The hook is committed at `scripts/pre-push` and installed per clone
+with `scripts/install-hooks.sh`. It runs both validators **only** when
+the push contains a `refs/tags/v*` tag; branch pushes skip.
 
-Real host names and the network they sit on live in `CLAUDE.local.md`
-(gitignored).
+Four rules, each of which was learned by the gate silently not running
+(the full account is in
+[`docs/notes/assets-and-release.md`](docs/notes/assets-and-release.md)):
 
-The hook source is committed at `scripts/pre-push`. Install it
-per clone with `scripts/install-hooks.sh`. The hook auto-runs both
-validators against the pushed SHA when — and only when — the push
-contains a `refs/tags/v*` release tag. Branch pushes skip
-validation. Failure aborts the push and prints the recovery recipe
-(delete tag, fix locally, re-tag, re-push).
+- **Never hand-symlink the hook into `.git/hooks/`.** A global
+  `core.hooksPath` — set by the git-lfs installer and most dotfile
+  setups — makes git ignore that directory entirely, so a symlinked
+  hook reports "Installed" and never runs. Four tags shipped that way.
+  `install-hooks.sh` points `core.hooksPath` at a generated, gitignored
+  `.githooks/` that chains to whatever the clone previously inherited.
+- **Verify an install rather than trusting it**: `git config
+  core.hooksPath` should print a `.githooks` path, and a dry-run push
+  of a throwaway `v*` tag should print the validator banner.
+- **When a host is unreachable the hook defers to CI, and the
+  asymmetry is deliberate**: absence of evidence falls back to the
+  green `ci.yml` run for the same commit, contrary evidence never
+  does. "Runs the gate" is the operative phrase and has been misjudged
+  twice in the same direction — a host that could not reach GitHub and
+  one that could not download a crate were both reported as "clippy
+  failed" over a gate that never started. Only the gate command's own
+  exit is contrary evidence.
+- **The lookup dereferences `^{commit}` first** — an annotated tag's
+  own sha differs from the commit's, and CI indexes runs by commit — and
+  it needs an authenticated `gh`, since an unauthenticated one reads as
+  "no run" and aborts, which is the safe direction.
 
-**Never hand-symlink the hook into `.git/hooks/`.** A global
-`core.hooksPath` — set by the git-lfs installer and most dotfile
-setups — makes git ignore `.git/hooks` entirely, so a symlinked hook
-reports "Installed" and then never runs. The v0.2.7 … v0.2.10 tags
-were all pushed with the validators silently inert for exactly this
-reason. `install-hooks.sh` instead points `core.hooksPath` at a
-generated, gitignored `.githooks/` (a `--local` setting, so no other
-repo is affected) whose hooks call `scripts/<hook>` and then chain to
-whatever the clone previously inherited — the global `commit-msg`
-and git-lfs hooks keep working. Re-running is safe; the inherited
-path is recorded once in `claudepot.inheritedHooksPath`.
-
-Verify an install rather than trusting it: `git config
-core.hooksPath` should print a `.githooks` path, and a dry-run push
-of a throwaway `v*` tag should print the validator banner.
-
-**When a validator host is unreachable, the hook defers to CI** rather
-than failing. CI runs the same two gates on the same commit, so the
-hook asks `gh` whether the `ci.yml` run for that commit is green and
-accepts it in place of the missing host. Note the asymmetry: a host
-that is *reachable and fails* still aborts. Only absence of evidence
-falls back, never contrary evidence.
-
-"Runs the gate" is the operative phrase, and it has been misjudged
-twice in the same direction: a host that could not reach GitHub (v0.3.1)
-and a host that could not download a crate from crates.io (v0.6.2, a
-30 s timeout on `wayland-scanner`) were both reported as "clippy
-failed" over a gate that never started. The hook now syncs the commit
-and runs `cargo fetch --locked` as separate steps, and a failure in
-either is absence of evidence. Only the gate command's own exit is
-contrary evidence.
-
-The lookup dereferences `^{commit}` first — an annotated tag's own
-object sha differs from the commit's, and CI indexes runs by commit,
-so looking up the tag sha would silently never match. It also needs
-an authenticated `gh`; an unauthenticated one reads as "no run" and
-aborts, which is the safe direction.
-
-This exists because `--no-verify` was becoming the reflex — v0.2.10,
-v0.2.11 and v0.2.12 all shipped that way while the validator boxes
-were offline. A bypass used routinely is indistinguishable from no
-gate at all, which is how these validators sat inert for four
-releases. The workflow that keeps the gate real: push the branch,
-let CI finish, then push the tag.
-
-Validator hosts are never committed: the hook reads them from the
-gitignored `.validator-hosts` file at the repo root (shape documented
-in the `scripts/pre-push` header) or from
-`CLAUDEPOT_VALIDATOR_LINUX_SSH` / `CLAUDEPOT_VALIDATOR_WINDOWS_SSH`
-in the environment. Real host names live in `CLAUDE.local.md`.
-Bypass with `git push --no-verify` if a host is unreachable, but
-note CI is unforgiving about red main.
+The workflow that keeps the gate real: push the branch, let CI finish,
+then push the tag. `--no-verify` was becoming the reflex, and a bypass
+used routinely is indistinguishable from no gate at all.
 
 ## Architecture
 
@@ -2385,8 +994,10 @@ See `dev-docs/implementation-plan.md` for the full plan.
 - `claudepot-core` = pure Rust library, no Tauri dependency
 - `claudepot-cli` = thin clap wrapper over core
 - `src-tauri` = Tauri app consuming same core
-- `crates/xtask` = workspace automation, currently the CC-parity
-  verifier (`cargo xtask verify-cc-parity` over `parity-harness/`)
+- `crates/xtask` = workspace automation: `verify-cc-parity` (the
+  settings-merge goldens over `parity-harness/`), `verify-docs` (the
+  doc/code contracts CI enforces), `verify-screenshots` (on demand),
+  `cc-drift` (the CC watchlist report) and `screenshot-fixture`
 - Separate keychain surfaces on macOS — CC's item vs Claudepot's own
   slots, `keyring` vs `/usr/bin/security` (see rules/architecture.md)
 - Account identity = email, resolved by prefix matching
@@ -2506,7 +1117,11 @@ corrupted non-CSS files before).
 
 ## Reference
 
-`dev-docs/kannon/reference.md` — 3400-line verified reference for CC/Desktop internals.
+`dev-docs/kannon/reference.md` — 3400-line verified reference for
+CC/Desktop internals. **`dev-docs/` is gitignored**, so every pointer
+into it in this file resolves only on a machine that already has it;
+nothing there is part of a fresh clone. Tracked long-form notes live in
+`docs/notes/`.
 
 **Verify against the installed binary, not the source mirror.**
 `~/github/claude_code_src` is a third-party mirror pinned at **2.1.88**
@@ -2528,7 +1143,11 @@ validation message sits in the binary in plain text, and contradicted
 both this repo's docs and the mirror.
 
 CC ships **~27 releases a month**, so any CC claim more than a few weeks
-old is a hypothesis. `.claude/rules/cc-upstream-watch.md` carries the two
+old is a hypothesis — including the dated pins in this file. Installed
+here on 2026-09-17: **2.1.274**, against verification pins that run from
+2.1.233 to 2.1.259, and a parity harness still pinned at 2.1.88.
+`cargo xtask cc-drift` prints exactly that gap plus the changelog
+candidates; it reports candidates, not findings. `.claude/rules/cc-upstream-watch.md` carries the two
 standing rules; `crates/xtask/cc-upstream-watch.md` is the list of
 surfaces that drift and how to check each one (it sits by the tool that
 reads it, since `.claude/rules/` is loaded into every session);
@@ -2536,105 +1155,61 @@ reads it, since `.claude/rules/` is loaded into every session);
 
 ## Icon assets
 
-Full post-mortem of the v0.1.13–0.1.19 Dock-blur arc is in
-`dev-docs/icon-design-notes.md`.
-
 **The authored set lives in `assets/icon-set/`** — isometric block on
 an anodised plate, every coordinate a multiple of 16 on a 1024 grid.
 That directory is the source; `src-tauri/icons/` holds only what
 `scripts/regen-icons.sh` derives from it, plus the two masters the
 script reads directly (`icon.svg`, `icon-flat.svg`). There is
-deliberately no second copy of the artwork anywhere: the previous
-`pixel-*` masters were deleted when this landed rather than left
-beside it, because two plausible masters in one directory is how the
-wrong one gets regenerated from.
+deliberately no second copy of the artwork anywhere — two plausible
+masters in one directory is how the wrong one gets regenerated from.
 
-Load-bearing rules:
+The full v0.1.13–0.1.19 Dock-blur arc is in
+`dev-docs/icon-design-notes.md` (local, untracked); the measurements
+that produced the rules below are in
+[`docs/notes/assets-and-release.md`](docs/notes/assets-and-release.md).
 
-- **SVG must use a power-of-2-friendly grid.** The current set is on
-  16-unit multiples in a 1024 viewBox. Avoid 22, 28, 30 — they don't
-  divide 128/256 cleanly and rsvg AA-softens at every Dock size.
-- **Generate raster icons via `scripts/regen-icons.sh`,
-  not `pnpm tauri icon`.** The latter uses lossy resampling for
-  some `.icns` layers and produces ~50 dead-byte files for targets
-  we don't ship (iOS, Android, MSIX). Our script uses
-  `rsvg-convert` + `iconutil` + a manual ICO struct-pack that
-  embeds PNG-compressed layers verbatim.
-- **Three masters, not one, and the split is not cosmetic:**
-  - `icon.svg` — plated master with an `feTurbulence` grain, used at
-    48 px and up.
-  - `icon-flat.svg` — same artwork, solid plate, no filter. Used
-    **below 48 px**. The grain is computed at render size, so it
-    coarsens relative to the tile as the tile shrinks and reads as
-    dirt rather than as a finish. A single-source ladder cannot
-    express this.
-  - `assets/icon-set/windows/icon-glyph.svg` — plateless, for
-    `icon.ico`. Windows draws no enclosure and shows the icon against
-    chrome of every shade, so the plate would read as a grey card
-    floating behind the block.
+- **SVG must use a power-of-2-friendly grid** (16-unit multiples in a
+  1024 viewBox). Avoid 22, 28, 30 — they don't divide 128/256 cleanly
+  and rsvg AA-softens at every Dock size.
+- **Generate rasters with `scripts/regen-icons.sh`, not
+  `pnpm tauri icon`**, which resamples some `.icns` layers lossily and
+  writes ~50 dead-byte files for targets we don't ship. Its output
+  paths are `.gitignore`d so a stray invocation cannot re-stage them.
+- **Three masters, and the split is not cosmetic:** `icon.svg` (plated,
+  `feTurbulence` grain, 48 px and up), `icon-flat.svg` (same artwork,
+  no filter, **below 48 px** — the grain is computed at render size, so
+  it coarsens relative to the tile and reads as dirt), and
+  `assets/icon-set/windows/icon-glyph.svg` (plateless, for `icon.ico`,
+  because Windows draws no enclosure).
 - **Tray icons are generated too** (`tray-icon{,Alert}{Template,Mono}@2x.png`,
-  44×44). Template is inverted by macOS to match the menubar; Mono is
-  the same alpha filled `#808080` because Windows and Linux have no
-  template concept and a pure-black glyph vanishes on a dark taskbar.
-  - **`tray-icon` normalises the tile to 18 points tall, so the tile's
-    pixel size is irrelevant and its padding is pure loss.** The crate
-    hard-codes `let icon_height: f64 = 18.0` and derives width from the
-    aspect ratio, so only the FRACTION of the tile the glyph inks decides
-    how large it lands in the menubar. Measured against its neighbours:
-    ChatGPT.app inks 94.4% and renders 17.0pt; Claude.app inks 70.8% and
-    renders 12.8pt. Claudepot inked 77% and rendered 13.9pt — visibly
-    smaller, while passing every dimension check, because those checks
-    asserted a tile fraction rather than the thing the user sees. The
-    tray SVGs carry a cropped `viewBox` (672 of the 1024 authoring
-    canvas) and now render 16.4pt. Both variants share one viewBox
-    *size* so the block does not change scale when the alert badge
-    appears, and **the badge sets the floor on how tight the crop can
-    go** — it moved inward to (692, 332) to buy it. Its margin is derived
-    in RENDERED PIXELS and converted back: a unit here is 44/672 px, so a
-    first attempt at a 12-unit margin measured 0.79px, antialiasing
-    closed it, and the badge rendered touching two tile edges.
-    `verify-icons.py` asserts the rendered POINT HEIGHT and that nothing
-    touches the tile edge — every dimension check passed while the icon
-    was too small, so the rendered-height assertion is the one that
-    matters.
+  44×44). Template is inverted by macOS; Mono is the same alpha filled
+  `#808080` because Windows and Linux have no template concept.
+  **`tray-icon` normalises the tile to 18 points tall**, so the tile's
+  pixel size is irrelevant and its padding is pure loss — only the
+  fraction of the tile the glyph inks decides how large it lands.
+  Both variants share one viewBox *size* so the block does not change
+  scale when the alert badge appears, and the badge sets the floor on
+  how tight the crop can go.
 - **`scripts/verify-icons.py` is the structural gate** — 58 checks over
   the PNG ladder, the `.icns` layer list, ICO layer encoding, tray
-  sizes, and the grain floor. It catches the failures that still look
-  like valid files on disk: an ICO whose layers are raw BMP, an `.icns`
-  missing the 128/256 layers the Dock reaches for, a small raster that
-  kept the grain. Run it after any icon change. It needs no GUI; what
-  it explicitly does **not** check is how the artwork looks, which is
-  what launching the app is for.
-- **The bundle path and the `setIcon` path want OPPOSITE artwork, and
-  swapping them is the classic macOS icon bug:**
+  sizes and the grain floor. **The rendered point height is the
+  assertion that matters**: every dimension check passed while the tray
+  icon was visibly too small. Run it after any icon change; it does not
+  check how the artwork *looks*, which is what launching the app is for.
+- **The bundle path and the `setIcon` path want OPPOSITE artwork**, and
+  swapping them is the classic macOS icon bug:
 
   | Path | Wants |
   |---|---|
   | bundle `.icns` / `bundle.icon` list | **full bleed** — macOS applies the squircle mask, inset and shadow |
-  | `setApplicationIconImage` (`dock_icon.rs`) | **everything already applied** — drawn verbatim at slot size, no mask, no inset, no shadow |
+  | `setApplicationIconImage` (`dock_icon.rs`) | **everything already applied** — drawn verbatim at slot size |
 
-  So `dock_icon.rs` embeds `icon-dock.png`, **not** `icon.png`: 1024
-  canvas, artwork inset to 824/1024 = 0.805 (Apple's measured tile
-  fraction), superellipse corner (`|x/a|^n + |y/a|^n = 1`, n = 5) rather
-  than a circular arc, which meets the straight edge with a curvature
-  discontinuity and reads boxy beside real icons. A full-bleed image on
-  this path renders as a hard square measured **~22% larger** than every
-  neighbouring Dock icon.
-
-  The pre-2026-08 artwork hid the distinction by baking a squircle into
-  the SVG at 416/512 = 0.813 of the canvas, so one file happened to
-  serve both roles. The current set is full-bleed by design — correct
-  for the bundle — which is exactly why the second asset now exists.
-  Reference: `~/.claude/agents/icon-smith/specs.md`, measured against
-  macOS 26.5.
-- **`src-tauri/src/dock_icon.rs` calls `setApplicationIconImage`
-  at startup on macOS.** This is required — Tauri's runtime only does
-  this in dev mode. Without it, prod Dock at default size (96 px on
-  Retina) renders the `.icns` 128 layer downscaled bilinearly and looks
-  visibly soft. The 1024-px source means every Dock size is a clean
-  Lanczos downsample.
-- **`pnpm tauri icon`'s output paths are `.gitignore`'d** so a
-  stray invocation can't re-stage MSIX/iOS/Android dead bytes.
+  So `dock_icon.rs` embeds `icon-dock.png`, not `icon.png`: artwork
+  inset to 824/1024 = 0.805, superellipse corner (n = 5). A full-bleed
+  image on that path renders ~22% larger than every neighbouring Dock
+  icon. The call itself is **required** — Tauri's runtime only does it
+  in dev, and without it the prod Dock downscales the 128 layer
+  bilinearly and looks soft.
 
 ## Documentation screenshots
 
@@ -2649,74 +1224,41 @@ HOME=/tmp/claudepot-demo-home \
 pnpm screenshots                                # capture all 9
 ```
 
-**Quit the installed Claudepot first.** The debug binary carries the
-same `tauri-plugin-single-instance` identifier as the release app, so
-launched beside a running `/Applications/Claudepot.app` it hands off to
-that instance and exits 0 with nothing in its log but the startup line
-— and `pnpm screenshots` then reports "no MCP bridge on 9223", which
-reads as a bridge fault. `osascript -e 'tell application "Claudepot" to
-quit'`, capture, then `open -a Claudepot`.
+**Quit the installed Claudepot first** — the debug binary shares the
+single-instance identifier, so it hands off to the running app and
+exits 0, which then reports as "no MCP bridge on 9223".
 
-The fixture is a **fake `HOME`**, not a pair of env overrides.
-`CLAUDE_CONFIG_DIR` + `CLAUDEPOT_DATA_DIR` cover only two of the three
-places the app reads — Claude Desktop's directory resolves through
-`dirs::data_dir()` with no override and leaked a real account through
-the header. `HOME` closes every home-relative path at once.
+Three rules, with the reasoning in
+[`docs/notes/assets-and-release.md`](docs/notes/assets-and-release.md):
 
-Two things that look like fussiness and are not:
+- **The fixture is a fake `HOME`, not a pair of env overrides.**
+  `CLAUDE_CONFIG_DIR` + `CLAUDEPOT_DATA_DIR` cover two of the three
+  places the app reads; Claude Desktop's directory resolves through
+  `dirs::data_dir()` with no override and leaked a real account.
+- **The fake home goes to the app, not the build** (`HOME=… pnpm tauri
+  dev` takes rustup's toolchain with it), and **the fixture lives
+  outside the repo** (`/tmp/claudepot-demo-home`) because the app
+  displays the paths it reads.
+- **Never mask real data to take a screenshot.** It was tried and it is
+  architecturally wrong — substring replacement corrupts legitimate UI
+  and free text defeats it entirely. Full reasoning in
+  `crates/xtask/src/screenshot_fixture.rs`.
 
-- **The fake home goes to the app, not the build.** `HOME=… pnpm tauri
-  dev` reads better and fails — rustup keeps its default toolchain in
-  `$HOME/.rustup`, so the override takes the toolchain with it and
-  `cargo metadata` dies before anything compiles.
-- **The fixture lives outside the repo** (`/tmp/claudepot-demo-home`).
-  The app displays the paths it reads, so an in-repo fixture put
-  `/Users/<you>/…/claudepot-app/fixtures/…` on screen in Global →
-  Config. No amount of synthetic *data* fixes a leaking *path*.
-
-**Never mask real data to take a screenshot.** It was tried and it is
-architecturally wrong: the vocabulary is unbounded and only visible as
-you navigate (1 project name found on one surface, 79 across four), and
-substring replacement corrupts legitimate UI — a harvested `claude`
-turned `.claude/settings.json` into `vector-store/settings.json` and the
-`CLAUDE-F…` model badge into `SEARCH-INDEX-F…`. Free text defeats it
-entirely. Full reasoning in `crates/xtask/src/screenshot_fixture.rs`.
-
-`scripts/capture-screenshots.mjs` drives the app over the MCP bridge's
-WebSocket (plain JSON, no auth) and writes both `assets/screenshots/`
-and `web/public/screenshots/`. Node, not xtask, so it needs no new
-dependency. Each shot waits for a `settle` string rather than sleeping,
-and a pane that never settles is **skipped, never captured blank**.
-
-Adding a screenshot means two edits: a `SHOTS` row in the capture
-script, and a `SCREENSHOTS` row in `crates/xtask/src/verify_docs.rs`.
-
-Two checks read that table, and the split is deliberate:
-
-- **`cargo xtask verify-docs`** (runs in CI) asserts each shot exists and
-  that `assets/screenshots/` and `web/public/screenshots/` hold the same
-  bytes. Content-based, no false positives, and the fix is a file copy —
-  something a red CI run can actually ask you for.
-- **`cargo xtask verify-screenshots`** (**on demand**, not a PR gate)
-  reports shots whose sources have moved since capture. Run it before a
-  release, or after changing a view you know is captured.
-
-Freshness is not a gate for two reasons. It compares **commit dates, not
-mtimes** — `git checkout` rewrites mtimes, which is how eight screenshots
-sat three months stale unnoticed — but it compares them per *directory*,
-so any edit under `src/sections/projects` reads as "the UI changed",
-including edits to views no screenshot shows. And re-capturing needs a
-macOS GUI session, a Vite server, a debug build carrying the MCP bridge
-and a windowed app; CI has none of them, so a failure there is a wall
-rather than a signal. A gate whose remedy cannot run where it fires is
-the dynamic that made `--no-verify` a reflex for the release validators.
-
-Adjacency is not staleness. When `verify-screenshots` flags a shot whose
-captured view provably did not move, that is the check being coarse —
-say so, rather than re-capturing to silence it.
+Adding a screenshot means two edits: a `SHOTS` row in
+`scripts/capture-screenshots.mjs` and a `SCREENSHOTS` row in
+`crates/xtask/src/verify_docs.rs`. Two checks read that table, and the
+split is deliberate: **`verify-docs`** (in CI) asserts each shot exists
+and that `assets/screenshots/` and `web/public/screenshots/` hold the
+same bytes — content-based, and the fix is a file copy;
+**`verify-screenshots`** (on demand, **not** a PR gate) reports shots
+whose sources have moved, comparing commit dates per *directory*, so
+adjacency is not staleness. Re-capturing needs a macOS GUI session,
+Vite, a debug build and a window — CI has none of them, and a gate
+whose remedy cannot run where it fires is how `--no-verify` became a
+reflex elsewhere.
 
 Known limitation: `HOME` does not redirect the macOS keychain, so the
-Accounts pane's live credential probe finds nothing and each card shows
+Accounts pane's credential probe finds nothing and each card shows
 "Saved login is missing or broken".
 
 ## Conventions

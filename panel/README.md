@@ -10,7 +10,8 @@ cd panel && pnpm install && pnpm build     # or: scripts/build-panel.sh
 
 ## Why this is its own install and not a workspace member
 
-The Tauri renderer at `../src/` carries 328 `invoke` calls. Every one of
+The Tauri renderer at `../src/` carries over 300 `invoke` calls (327
+on 2026-09-17). Every one of
 them means nothing over HTTP, and a shared install would put
 `@tauri-apps/api` one auto-import away from a file that runs in Safari on
 a phone. The two apps share a design language and no code.
@@ -37,8 +38,9 @@ two-pane layout at ≥900px, and the offline queue in `outbox.js`. Three
 of its ideas are not, and cannot be from here: send-becomes-interrupt
 (CC's peer inbox has no interrupt verb), a Projects tab and a `+` new
 session (a deleted surface, and a spawn this product does not do), and
-push delivery (no transport). `../AGENTS.md` carries the reasoning under
-"### The panel".
+push delivery (no transport). `../AGENTS.md` carries the rules under
+"### The panel"; the reasoning moved to
+`../docs/notes/remote-control.md`.
 
 ## Rules that are not obvious
 
@@ -94,6 +96,6 @@ artifact, and this only changes what *you* see.
 - **A rebuild also regenerates Rust.** `scripts/build-panel.sh` writes
   `crates/claudepot-core/src/remote/assets/panel_chunks.rs` — one
   `include_bytes!` arm per emitted chunk. Mermaid splits into ~60 of
-  them, so the table is generated rather than hand-kept, and two tests in
+  them (61 on 2026-09-17), so the table is generated rather than hand-kept, and two tests in
   `remote::assets` fail if it and the directory disagree in either
   direction. Commit both.
