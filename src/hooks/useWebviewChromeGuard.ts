@@ -25,8 +25,9 @@ import { isEditable } from "./useGlobalShortcuts";
  *   by default. wry can turn those off
  *   (`with_browser_accelerator_keys`); Tauri 2.11 does not expose it,
  *   so cancelling the keydown is the layer available from here.
- * - **The webview's own context menu**, which is where Reload lives
- *   on all three platforms. It is suppressed for targets that are not
+ * - **The webview's own context menu**, which carries the browser's
+ *   Reload — WebView2's and webkit2gtk's default menus do; WKWebView's
+ *   was not measured here. It is suppressed for targets that are not
  *   text; an editable field and a live selection keep theirs, because
  *   Copy / Paste / Look Up are what that menu is for in an app.
  *

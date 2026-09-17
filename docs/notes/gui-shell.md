@@ -416,8 +416,9 @@ optimistic, reverting on a rejected call, and following
 renderer because the ErrorBoundary's Reload must keep working.**
 `useWebviewChromeGuard` cancels the keys a webview reads as reload — F5
 and its Ctrl/Shift hard-reload variants, ⌘R / ⌃R, ⌘⇧R / ⌃⇧R — and
-suppresses the native context menu, which is where Reload lives on all
-three platforms, for any target that is not an editable field or the
+suppresses the native context menu, which carries the browser's Reload
+(WebView2's and webkit2gtk's default menus do; WKWebView's was not
+measured here), for any target that is not an editable field or the
 element holding a live selection (Copy / Paste / Look Up are what that
 menu is for in an app). Off in dev, where reload and Inspect Element are
 the loop.
