@@ -50,9 +50,13 @@ impl Status {
     /// Parse the string CC writes into the PID file's `status` field.
     /// Unknown values fall back to `Idle` — conservative: don't claim
     /// activity we can't identify.
+    ///
+    /// `shell` (CC 2.1.274's fourth value) is busy: CC's own session
+    /// list renders it as "working" (`busy || shell`), and reading it as
+    /// idle put a session mid-command beside the ones sitting still.
     pub fn from_pid_field(raw: &str) -> Self {
         match raw {
-            "busy" => Self::Busy,
+            "busy" | "shell" => Self::Busy,
             "waiting" => Self::Waiting,
             _ => Self::Idle,
         }
@@ -227,6 +231,7 @@ mod tests {
         assert_eq!(Status::from_pid_field("busy"), Status::Busy);
         assert_eq!(Status::from_pid_field("idle"), Status::Idle);
         assert_eq!(Status::from_pid_field("waiting"), Status::Waiting);
+        assert_eq!(Status::from_pid_field("shell"), Status::Busy);
     }
 
     /// Unknown strings must not be silently mapped to Busy — that

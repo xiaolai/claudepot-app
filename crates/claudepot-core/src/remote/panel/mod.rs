@@ -96,7 +96,9 @@ pub enum PanelStatus {
 impl PanelStatus {
     fn from_record(r: &PidRecord) -> Self {
         match r.status.as_deref() {
-            Some("busy") => Self::Busy,
+            // `shell` is CC 2.1.274's "running a shell command", which
+            // its own session list shows as working.
+            Some("busy") | Some("shell") => Self::Busy,
             Some("waiting") => Self::Waiting,
             // CC only writes `status` behind a feature gate. Absent
             // means "we cannot tell", and claiming Busy would put a
@@ -488,6 +490,8 @@ mod tests {
         assert_eq!(PanelStatus::from_record(&rec), PanelStatus::Busy);
         rec.status = Some("waiting".into());
         assert_eq!(PanelStatus::from_record(&rec), PanelStatus::Waiting);
+        rec.status = Some("shell".into());
+        assert_eq!(PanelStatus::from_record(&rec), PanelStatus::Busy);
     }
 
     #[test]
