@@ -671,7 +671,8 @@ mod tests {
         assert!(
             secrets
                 .iter()
-                .any(|v| v.name == "ANTHROPIC_CUSTOM_HEADERS" && v.safety.pretrust_safe),
+                .any(|v| v.name == "ANTHROPIC_CUSTOM_HEADERS"
+                    && v.safety.pretrust_condition.is_some()),
             "overlap case 1 must be in the fixture"
         );
         assert!(

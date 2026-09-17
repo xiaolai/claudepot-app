@@ -128,10 +128,10 @@
     },
     {
       "name": "OTEL_LOG_ASSISTANT_RESPONSES",
-      "why": "Survivor #12. 1 includes response text, 0 keeps it redacted, unset inherits OTEL_LOG_USER_PROMPTS.",
+      "why": "Survivor #12. 1 includes response text, 0 keeps it redacted, unset inherits OTEL_LOG_USER_PROMPTS. Pre-trust-safe as of the 2.1.274 binary (a literal member of its unconditional set); the 2.1.88 mirror said otherwise.",
       "control": "toggle",
       "off": "0",
-      "safety": { "pretrust_safe": false }
+      "safety": { "pretrust_safe": true }
     },
     {
       "name": "USE_BUILTIN_RIPGREP",
@@ -211,10 +211,11 @@
 
     {
       "name": "ANTHROPIC_CUSTOM_HEADERS",
-      "why": "Overlap case 1, and the proof that CC's SAFE_ENV_VARS cannot double as a disclosure judgement: pre-trust-safe AND able to carry 'Authorization: Bearer ...' in its documented Name: Value format.",
+      "why": "Overlap case 1, and the proof that CC's pre-trust list cannot double as a disclosure judgement: its documented Name: Value format can carry 'Authorization: Bearer ...', so it is secret. Since at least 2.1.272 CC applies it pre-trust only when no header name looks credential-bearing, which is a condition, not an unknown hazard.",
       "control": "text",
       "format": "secret",
-      "safety": { "secret": true, "pretrust_safe": true, "hazards": [] }
+      "safety": { "secret": true, "pretrust_safe": false,
+        "pretrust_condition": "when_headers_benign", "hazards": [] }
     },
     {
       "name": "ANTHROPIC_FOUNDRY_API_KEY",

@@ -8,10 +8,19 @@ never needs the network or a local Claude Code checkout:
      `crates/claudepot-core/data/cc-env-evidence.json` from
        * the official docs page, cached at dev-docs/env-tools/env-vars-official.md
          (pass --refresh to re-fetch it first),
-       * Claude Code's own `utils/managedEnvConstants.ts` (SAFE_ENV_VARS,
-         PROVIDER_MANAGED_ENV_VARS, the VERTEX_REGION_CLAUDE_ prefix),
-       * `strings` over the installed Claude Code binary, for the
-         present-in-build / undocumented-in-build cross-check.
+       * the installed Claude Code binary, twice: its env-safety predicates
+         (which variables it applies from an untrusted project before the
+         trust dialog, and under what value condition; which it treats as
+         host-managed), and `strings` for the present-in-build /
+         undocumented-in-build cross-check.
+
+     The safety lists came from a third-party source mirror pinned at
+     2.1.88 until 2026-09-17. By 2.1.274 that mirror was wrong in both
+     directions — two mTLS variables it called pre-trust-safe no longer
+     are, four had become value-conditional, and 131 safe / 72
+     provider-managed names were missing — so they are read from the
+     binary now, anchored on the predicates that consume them rather than
+     on minified names.
 
   2. default / `--check` (hermetic, offline) — classifies the committed
      evidence into `crates/claudepot-core/data/cc-env-spec.json`, the artifact
@@ -58,9 +67,6 @@ DEV_DOCS = os.path.join(ROOT, "dev-docs")
 DOCS_CACHE = os.path.join(DEV_DOCS, "env-tools", "env-vars-official.md")
 OUT_HTML = os.path.join(DEV_DOCS, "artifacts", "claude-code-env-vars.html")
 DOCS_URL = "https://code.claude.com/docs/en/env-vars.md"
-CC_SRC_CONSTANTS = os.path.expanduser(
-    "~/github/claude_code_src/src/utils/managedEnvConstants.ts"
-)
 
 # ---------------------------------------------------------------------------
 # Classification tables. Everything here is evidence, not inference: each entry
@@ -382,8 +388,8 @@ def unit_for(name: str, purpose: str) -> str:
     return ""
 
 
-def safety_for(name: str, safe_set: set, provider_set: set,
-               provider_prefixes: list) -> dict:
+def safety_for(name: str, safe_set: set, safe_conditional: dict,
+               provider_set: set, provider_prefixes: list) -> dict:
     upper = name.upper()
     hazards = []
     if name in HAZARD_REDIRECT:
@@ -398,10 +404,14 @@ def safety_for(name: str, safe_set: set, provider_set: set,
         hazards.append("disable_updates")
 
     pretrust_safe = upper in safe_set
+    # Safe before trust only for some values — e.g. DISABLE_TELEMETRY only
+    # when it turns telemetry OFF. The risk is established, so it is not
+    # "unknown"; it is carried as the condition instead.
+    pretrust_condition = safe_conditional.get(upper)
     # Absence from SAFE_ENV_VARS says something is risky without saying what.
     # Naming a specific risk here would be the same sin as guessing a control
     # type, so the unestablished case is labelled as unestablished.
-    if not hazards and not pretrust_safe:
+    if not hazards and not pretrust_safe and pretrust_condition is None:
         hazards.append("unknown")
 
     blocked = None
@@ -416,6 +426,7 @@ def safety_for(name: str, safe_set: set, provider_set: set,
         "secret": name in SECRET_ENV_VARS,
         "blocked_reason": blocked,
         "pretrust_safe": pretrust_safe,
+        "pretrust_condition": pretrust_condition,
         "provider_managed": upper in provider_set
         or any(upper.startswith(p) for p in provider_prefixes),
         "hazards": hazards,
@@ -630,55 +641,150 @@ def parse_docs(md: str):
     return rows
 
 
-def _safety_source_kind() -> str:
-    """`pinned_mirror` while the safety lists come from the abandoned
-    third-party source checkout; `installed_binary` once a future
-    extraction reads them from the running Claude Code.
+# ---------------------------------------------------------------------------
+# Safety lists, read from the installed binary.
+#
+# Anchored on the two predicates that consume the lists, never on minified
+# names, and every parameter name is captured and back-referenced because the
+# minifier's choice differs between builds (2.1.272 and 2.1.274 disagree).
+# Any shape this does not recognise is a hard failure: a silently partial list
+# would be rendered to users as Claude Code's own policy.
+# ---------------------------------------------------------------------------
 
-    Derived from the path actually opened rather than declared, so it
-    cannot disagree with what was read.
-    """
-    return ("pinned_mirror" if "claude_code_src" in CC_SRC_CONSTANTS
-            else "installed_binary")
-
-
-def _safety_source_version() -> str:
-    """The version the safety source is stuck at.
-
-    Read from the published tarball sitting in the mirror checkout
-    (`claude-code-<version>.tgz`) so the number is evidence rather than a
-    literal someone maintains by hand. `unknown` when it cannot be
-    determined — an honest blank beats a stale constant, and the consumer
-    renders it as-is.
-    """
-    root = CC_SRC_CONSTANTS.split("/src/")[0]
-    try:
-        for name in sorted(os.listdir(root)):
-            m = re.fullmatch(r"claude-code-(\d+\.\d+\.\d+)\.tgz", name)
-            if m:
-                return m.group(1)
-    except OSError:
-        pass
-    return "unknown"
+PROVIDER_ANCHOR = '"CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"'
+_ENV_NAME = re.compile(r'^"([A-Za-z_][A-Za-z0-9_]*)"$')
+_TRUTHY_HELPER = re.compile(
+    r'function ([\w$]+)\(([\w$]+)\)\{if\(!\2\)return!1;if\(typeof \2==="boolean"\)return \2;'
+    r'let ([\w$]+)=String\(\2\)\.toLowerCase\(\)\.trim\(\);return\["1","true","yes","on"\]\.includes\(\3\)\}')
+_FALSY_HELPER = re.compile(
+    r'function ([\w$]+)\(([\w$]+)\)\{if\(\2===void 0\)return!1;if\(typeof \2==="boolean"\)return!\2;'
+    r'let ([\w$]+)=String\(\2\)\.toLowerCase\(\)\.trim\(\);return\["0","false","no","off"\]\.includes\(\3\)\}')
 
 
-def _ts_set(src: str, ident: str) -> list:
-    """Extract a `new Set([...])` literal from TypeScript. Comments are
-    stripped first: PROVIDER_MANAGED_ENV_VARS' own comments contain
-    apostrophes, which a naive quoted-string scan reads as members."""
-    m = re.search(ident + r"\s*=\s*new Set\(\[(.*?)\]\)", src, re.S)
+def _extract_fail(msg: str):
+    sys.exit(f"cc-env binary extraction: {msg} — the bundle shape changed; "
+             "re-read the predicate before trusting any list")
+
+
+def _chunk_around(text: str, offset: int) -> str:
+    start = text.rfind("// @bun", 0, offset)
+    end = text.find("// @bun", offset)
+    if start < 0:
+        _extract_fail("no bundle chunk boundary")
+    return text[start:end if end > 0 else len(text)]
+
+
+def _split_top_level(body: str) -> list:
+    out, cur, depth, quote = [], [], 0, None
+    for ch in body:
+        if quote:
+            cur.append(ch)
+            if ch == quote:
+                quote = None
+            continue
+        if ch in "\"'`":
+            quote = ch
+        elif ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            out.append("".join(cur).strip())
+            cur = []
+            continue
+        cur.append(ch)
+    if "".join(cur).strip():
+        out.append("".join(cur).strip())
+    return out
+
+
+def _bracketed(chunk: str, ident: str, opener: str) -> str:
+    m = re.search(r"(?:[\s,;{(]|^)" + re.escape(ident) + re.escape(opener), chunk)
     if not m:
-        sys.exit(f"Could not find {ident} in {CC_SRC_CONSTANTS}")
-    body = re.sub(r"//[^\n]*", "", m.group(1))
-    return sorted(set(re.findall(r"'([^']+)'", body)))
+        _extract_fail(f"no literal for `{ident}`")
+    i, depth = m.end() - 1, 0
+    for j in range(i, len(chunk)):
+        if chunk[j] == "[":
+            depth += 1
+        elif chunk[j] == "]":
+            depth -= 1
+            if depth == 0:
+                return chunk[i + 1:j]
+    _extract_fail(f"unterminated literal `{ident}`")
 
 
-def _ts_prefixes(src: str, ident: str) -> list:
-    m = re.search(ident + r"\s*=\s*\[(.*?)\]", src, re.S)
-    if not m:
-        sys.exit(f"Could not find {ident} in {CC_SRC_CONSTANTS}")
-    body = re.sub(r"//[^\n]*", "", m.group(1))
-    return sorted(set(re.findall(r"'([^']+)'", body)))
+def _resolve(chunk: str, body: str, seen: frozenset) -> list:
+    names = []
+    for item in _split_top_level(body):
+        m = _ENV_NAME.match(item)
+        if m:
+            names.append(m.group(1))
+            continue
+        m = re.fullmatch(r"\.\.\.([\w$]+)", item)
+        if not m:
+            _extract_fail(f"unrecognised member `{item[:60]}`")
+        ident = m.group(1)
+        if ident in seen:
+            _extract_fail(f"cyclic spread through `{ident}`")
+        names += _resolve(chunk, _bracketed(chunk, ident, "=["), seen | {ident})
+    return names
+
+
+def _provider_managed(text: str):
+    pat = (r"function [\w$]+\(([\w$]+)\)\{let ([\w$]+)=\1\.toUpperCase\(\);return ([\w$]+)\.has\(\2\)"
+           r"((?:\|\|[\w$]+\.some\(\([\w$]+\)=>\2\.startsWith\([\w$]+\)\))+)\}")
+    picked = []
+    for m in re.finditer(pat, text):
+        chunk = _chunk_around(text, m.start())
+        if not re.search(r"(?:[\s,;{(]|^)" + re.escape(m.group(3)) + r"=new Set\(\[", chunk):
+            continue
+        body = _bracketed(chunk, m.group(3), "=new Set([")
+        # The shape alone is not unique: a dangerous-environment denylist
+        # elsewhere has the same `set.has || prefixes.some` form.
+        if PROVIDER_ANCHOR in body:
+            picked.append((m, chunk, body))
+    if len(picked) != 1:
+        _extract_fail(f"expected one provider-managed predicate, found {len(picked)}")
+    m, chunk, body = picked[0]
+    prefixes = []
+    for ident in re.findall(r"([\w$]+)\.some", m.group(4)):
+        prefixes += _resolve(chunk, _bracketed(chunk, ident, "=["), frozenset())
+    return sorted(set(_resolve(chunk, body, frozenset()))), sorted(set(prefixes))
+
+
+def _pre_trust(text: str):
+    ms = list(re.finditer(
+        r"function [\w$]+\(([\w$]+),([\w$]+)\)\{let ([\w$]+)=\1\.toUpperCase\(\);return ([\w$]+)\.has\(\3\)"
+        r"\|\|([\w$]+)\.has\(\3\)&&([\w$]+)\(\2\)\|\|([\w$]+)\.has\(\3\)&&([\w$]+)\(\2\)"
+        r'\|\|\3==="([A-Z_]+)"&&!([\w$]+)\(\2\)\}', text))
+    if len(ms) != 1:
+        _extract_fail(f"expected one pre-trust predicate, found {len(ms)}")
+    m = ms[0]
+    always_id, a_id, a_pred, b_id, b_pred, header_name, _ = m.groups()[3:]
+    truthy = {x.group(1) for x in _TRUTHY_HELPER.finditer(text)}
+    falsy = {x.group(1) for x in _FALSY_HELPER.finditer(text)}
+
+    def kind(pred):
+        if pred in truthy and pred not in falsy:
+            return "when_truthy"
+        if pred in falsy and pred not in truthy:
+            return "when_falsy"
+        _extract_fail(f"value predicate `{pred}` is neither env helper")
+
+    chunk = _chunk_around(text, m.start())
+    always = sorted(set(_resolve(chunk, _bracketed(chunk, always_id, "=new Set(["), frozenset())))
+    conditional = {}
+    for ident, pred in ((a_id, a_pred), (b_id, b_pred)):
+        k = kind(pred)
+        for n in _resolve(chunk, _bracketed(chunk, ident, "=new Set(["), frozenset()):
+            conditional[n] = k
+    if header_name != "ANTHROPIC_CUSTOM_HEADERS":
+        _extract_fail(f"header special case names `{header_name}`")
+    conditional[header_name] = "when_headers_benign"
+    both = set(always) & set(conditional)
+    if both:
+        _extract_fail(f"names both unconditional and conditional: {sorted(both)}")
+    return always, dict(sorted(conditional.items()))
 
 
 def find_binary():
@@ -721,16 +827,14 @@ def rebuild_evidence(refresh: bool) -> dict:
     if not rows:
         sys.exit("Parsed 0 variables from the docs — table format changed?")
 
-    if not os.path.exists(CC_SRC_CONSTANTS):
-        sys.exit(f"Claude Code source not found at {CC_SRC_CONSTANTS}. "
-                 "Evidence rebuild needs it; --check does not.")
-    with open(CC_SRC_CONSTANTS, encoding="utf-8") as f:
-        cc_src = f.read()
-
     binary = find_binary()
     if not binary:
         sys.exit("No Claude Code binary found for the cross-check.")
     version = version_of(binary)
+    with open(binary, "rb") as f:
+        bundle = f.read().decode("latin-1")
+    provider_names, provider_prefixes = _provider_managed(bundle)
+    safe_always, safe_conditional = _pre_trust(bundle)
     # `check=True` and a non-empty assertion: without them a missing
     # `strings`, an unreadable binary, or a stripped artifact yields empty
     # output, and the run would still write an authoritative-looking
@@ -776,28 +880,16 @@ def rebuild_evidence(refresh: bool) -> dict:
         "docs_fetched_at": fetched_at,
         "docs_sha256": hashlib.sha256(md.encode("utf-8")).hexdigest(),
         "rows": rows,
-        # The Claude Code SOURCE checkout the safety lists were read from,
-        # which is not necessarily the installed binary's version. Recorded
-        # as the file's own mtime date rather than borrowing the binary's
-        # number — pairing a source date with a binary version would be the
-        # same kind of quiet lie the two provenance fields exist to prevent.
-        "cc_source_read_at": datetime.date.fromtimestamp(
-            os.path.getmtime(CC_SRC_CONSTANTS)).isoformat(),
-        # WHICH KIND of source the safety lists came from, recorded in the
-        # artifact rather than hardcoded in the Rust that renders it. The
-        # consumer discloses this to the user as provenance, and a
-        # constant on that side would go on asserting "pinned mirror" as
-        # fact after this generator moved to a different source — the
-        # exact status-surface-states-an-unverified-claim failure the
-        # disclosure exists to prevent. Change the source and the artifact
-        # says so on the next rebuild.
-        "cc_source_kind": _safety_source_kind(),
-        "cc_source_version": _safety_source_version(),
-        "cc_safe_env_vars": _ts_set(cc_src, "SAFE_ENV_VARS"),
-        "cc_provider_managed_env_vars": _ts_set(
-            cc_src, "PROVIDER_MANAGED_ENV_VARS"),
-        "cc_provider_managed_prefixes": _ts_prefixes(
-            cc_src, "PROVIDER_MANAGED_ENV_PREFIXES"),
+        # Where the safety lists came from, recorded in the artifact rather
+        # than hardcoded in the Rust that renders it: the consumer discloses
+        # this to the user as provenance.
+        "cc_source_read_at": datetime.date.today().isoformat(),
+        "cc_source_kind": "installed_binary",
+        "cc_source_version": version,
+        "cc_safe_env_vars": safe_always,
+        "cc_safe_env_vars_conditional": safe_conditional,
+        "cc_provider_managed_env_vars": provider_names,
+        "cc_provider_managed_prefixes": provider_prefixes,
         "binary_crosscheck_version": version,
         "binary_env_names": binary_names,
     }
@@ -809,6 +901,8 @@ def rebuild_evidence(refresh: bool) -> dict:
 
 def build_spec(ev: dict) -> dict:
     safe_set = {n.upper() for n in ev["cc_safe_env_vars"]}
+    safe_conditional = {k.upper(): v for k, v in
+                        ev.get("cc_safe_env_vars_conditional", {}).items()}
     provider_set = {n.upper() for n in ev["cc_provider_managed_env_vars"]}
     provider_prefixes = [p.upper() for p in ev["cc_provider_managed_prefixes"]]
     binset = set(ev["binary_env_names"])
@@ -818,7 +912,8 @@ def build_spec(ev: dict) -> dict:
     vars_out = []
     for row in ev["rows"]:
         name, purpose = row["name"], row["doc"]
-        safety = safety_for(name, safe_set, provider_set, provider_prefixes)
+        safety = safety_for(name, safe_set, safe_conditional, provider_set,
+                            provider_prefixes)
         spec = classify(name, purpose, safety)
         vars_out.append({
             "name": name,
@@ -833,7 +928,7 @@ def build_spec(ev: dict) -> dict:
     cc_bin = {n for n in binset if n.startswith(("CLAUDE_CODE_", "ANTHROPIC_"))}
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "docs_url": ev["docs_url"],
         "docs_fetched_at": ev["docs_fetched_at"],
         "docs_sha256": ev["docs_sha256"],
@@ -894,8 +989,8 @@ def check_vectors(spec: dict) -> list:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rebuild-evidence", action="store_true",
-                    help="re-derive the committed evidence (needs network / "
-                         "CC source / installed binary)")
+                    help="re-derive the committed evidence (needs network and "
+                         "an installed Claude Code binary)")
     ap.add_argument("--refresh", action="store_true",
                     help="with --rebuild-evidence, re-fetch the docs page")
     ap.add_argument("--check", action="store_true",

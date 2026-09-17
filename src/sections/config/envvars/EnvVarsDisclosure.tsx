@@ -78,14 +78,17 @@ export function EnvVarsDisclosure({ data }: { data: EnvOverview }) {
             flags have weaker provenance than the binary cross-check and
             no gate that can disable them when stale. Saying so is the
             whole point — see `spec::SafetyProvenance`. */}
-        {data.safety_provenance.from_pinned_mirror && (
-          <li>
-            {t("envvars.disclosure.safetySource", {
-              version: data.safety_provenance.mirror_version,
+        <li>
+          {t(
+            data.safety_provenance.from_pinned_mirror
+              ? "envvars.disclosure.safetySource"
+              : "envvars.disclosure.safetySourceBinary",
+            {
+              version: data.safety_provenance.source_version,
               date: data.safety_provenance.read_at,
-            })}
-          </li>
-        )}
+            },
+          )}
+        </li>
         <li>
           {t("envvars.disclosure.installed")}{" "}
           {data.installed_version ? (

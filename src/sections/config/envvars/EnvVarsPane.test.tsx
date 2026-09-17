@@ -26,6 +26,7 @@ const safety = (over: Partial<EnvSafety> = {}): EnvSafety => ({
   secret: false,
   blocked_reason: null,
   pretrust_safe: true,
+  pretrust_condition: null,
   provider_managed: false,
   hazards: [],
   ...over,
@@ -65,7 +66,7 @@ const overview = (over: Partial<EnvOverview> = {}): EnvOverview => ({
   safety_provenance: {
     read_at: "2026-04-01",
     from_pinned_mirror: true,
-    mirror_version: "2.1.88",
+    source_version: "2.1.88",
   },
   installed_version: "2.1.220",
   installed_path: "/opt/claude",
@@ -913,5 +914,28 @@ describe("EnvVarsPane navigation and reconciliation", () => {
     expect(
       screen.getByText(/cannot disable themselves when stale/i),
     ).toBeInTheDocument();
+  });
+
+  // Since 2026-09-17 the lists come from the installed binary. The line
+  // must still appear — it used to be rendered only for the mirror, which
+  // would have left the flags with no stated source at all — and must
+  // name the build rather than a mirror.
+  it("names the binary the safety flags were read from", async () => {
+    const base = overview();
+    ccEnvListSpy.mockResolvedValue({
+      ...base,
+      safety_provenance: {
+        read_at: "2026-09-17",
+        from_pinned_mirror: false,
+        source_version: "2.1.274",
+      },
+    });
+    const user = userEvent.setup();
+    render(<EnvVarsPane />);
+    await user.click(await screen.findByRole("button", { name: /about/i }));
+    expect(
+      await screen.findByText(/read from Claude Code 2\.1\.274 on 2026-09-17/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/source mirror/i)).toBeNull();
   });
 });

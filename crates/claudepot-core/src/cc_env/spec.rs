@@ -114,14 +114,38 @@ pub struct Safety {
     pub secret: bool,
     /// Not editable here at all.
     pub blocked_reason: Option<Blocked>,
-    /// Membership in CC's `SAFE_ENV_VARS`.
+    /// Applied from an untrusted project before the trust dialog, whatever
+    /// the value — membership in the unconditional half of CC's pre-trust
+    /// predicate.
     pub pretrust_safe: bool,
+    /// Applied before trust only for some values. `None` for every variable
+    /// that is either always or never applied; see [`PretrustCondition`].
+    #[serde(default)]
+    pub pretrust_condition: Option<PretrustCondition>,
     /// Membership in CC's `PROVIDER_MANAGED_ENV_VARS`, or the
     /// `VERTEX_REGION_CLAUDE_` prefix. A host-managed launch may override the
     /// value regardless of what is set here.
     pub provider_managed: bool,
     /// Never empty for a variable outside `SAFE_ENV_VARS`; see [`Hazard`].
     pub hazards: Vec<Hazard>,
+}
+
+/// When CC applies a variable before trust only for some values.
+///
+/// Read from the 2.1.274 binary, where the pre-trust predicate is
+/// value-dependent: a privacy switch is safe to turn ON from an untrusted
+/// project and not to turn off, a body-logging switch the reverse, and a
+/// custom-headers value only while no header name looks
+/// credential-bearing.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum PretrustCondition {
+    /// Only when the value is truthy (`1` / `true` / `yes` / `on`).
+    WhenTruthy,
+    /// Only when the value is explicitly falsy (`0` / `false` / `no` / `off`).
+    WhenFalsy,
+    /// Only when no header name in the value looks credential-bearing.
+    WhenHeadersBenign,
 }
 
 /// One documented environment variable.
@@ -195,19 +219,17 @@ pub struct EnvSpec {
     pub docs_sha256: String,
     /// The one Claude Code binary the cross-check was run against.
     pub binary_crosscheck_version: String,
-    /// When Claude Code's `managedEnvConstants.ts` was last read for the
-    /// safety lists. A date, not a version: the source checkout and the
-    /// installed binary can be different releases, and borrowing the
-    /// binary's number for the source would be exactly the quiet lie the
-    /// two provenance fields exist to prevent.
+    /// When the safety lists were last read. A date, kept apart from
+    /// [`Self::cc_source_version`] because the two answer different
+    /// questions.
     pub cc_source_read_at: String,
     /// Which KIND of source the safety lists were read from —
-    /// `pinned_mirror` today, `installed_binary` if a future extraction
-    /// reads them from the running build. Emitted by the generator from
-    /// the path it actually opened; see [`SafetyProvenance`] for why
-    /// this is not a constant on this side.
+    /// `installed_binary` since 2026-09-17, `pinned_mirror` before, when
+    /// they came from a third-party source checkout frozen at 2.1.88.
+    /// Emitted by the generator; see [`SafetyProvenance`] for why this is
+    /// not a constant on this side.
     pub cc_source_kind: String,
-    /// The version that source is stuck at, or `unknown`.
+    /// The version of that source, or `unknown`.
     pub cc_source_version: String,
     /// Category keys and labels, in the generator's order. Shipped rather
     /// than mirrored in the renderer, so adding or reordering a category is
@@ -284,17 +306,17 @@ impl CrosscheckValidity {
 /// tarball it found beside it.
 #[derive(Clone, Debug, Serialize, Eq, PartialEq)]
 pub struct SafetyProvenance {
-    /// `cc_source_read_at` — the mtime of the file the lists were read
-    /// from, not the date of the release they describe.
+    /// `cc_source_read_at` — when the lists were read, not the date of
+    /// the release they describe.
     pub read_at: String,
     /// True while the lists come from the pinned source mirror. Derived
     /// from the artifact's `cc_source_kind`, so a future extraction from
     /// the installed binary flips it without anyone editing Rust.
     pub from_pinned_mirror: bool,
-    /// The version that source is stuck at, or `unknown` when the
-    /// generator could not determine it. Rendered as-is — an honest
-    /// blank beats a stale constant.
-    pub mirror_version: String,
+    /// The version of that source — the Claude Code build the lists were
+    /// read from — or `unknown` when the generator could not determine it.
+    /// Rendered as-is — an honest blank beats a stale constant.
+    pub source_version: String,
 }
 
 impl EnvSpec {
@@ -308,7 +330,7 @@ impl EnvSpec {
         SafetyProvenance {
             read_at: self.cc_source_read_at.clone(),
             from_pinned_mirror: self.cc_source_kind == "pinned_mirror",
-            mirror_version: self.cc_source_version.clone(),
+            source_version: self.cc_source_version.clone(),
         }
     }
 
@@ -433,7 +455,7 @@ mod tests {
     #[test]
     fn embedded_spec_parses_and_is_indexed() {
         let s = spec();
-        assert_eq!(s.schema_version, 1);
+        assert_eq!(s.schema_version, 2);
         assert_eq!(s.documented_count, s.vars.len());
         assert!(s.vars.len() > 300, "got {} vars", s.vars.len());
         assert_eq!(
@@ -502,12 +524,14 @@ mod tests {
     }
 
     #[test]
-    fn absence_from_cc_safe_list_always_yields_a_hazard() {
+    fn absence_from_cc_safe_list_always_yields_a_hazard_or_a_condition() {
+        // A conditional variable's risk is established — it is the value
+        // direction — so it carries the condition instead of `unknown`.
         for v in &spec().vars {
-            if !v.safety.pretrust_safe {
+            if !v.safety.pretrust_safe && v.safety.pretrust_condition.is_none() {
                 assert!(
                     !v.safety.hazards.is_empty(),
-                    "{}: outside SAFE_ENV_VARS with no hazard at all",
+                    "{}: outside the pre-trust list with no hazard at all",
                     v.name
                 );
             }
@@ -515,11 +539,37 @@ mod tests {
     }
 
     #[test]
+    fn the_value_conditions_read_from_the_binary_are_carried() {
+        for (name, want) in [
+            ("DISABLE_TELEMETRY", PretrustCondition::WhenTruthy),
+            (
+                "ANTHROPIC_CUSTOM_HEADERS",
+                PretrustCondition::WhenHeadersBenign,
+            ),
+        ] {
+            let v = lookup(name).unwrap();
+            assert_eq!(v.safety.pretrust_condition, Some(want), "{name}");
+            assert!(
+                !v.safety.pretrust_safe,
+                "{name} is conditional, not always safe"
+            );
+        }
+        let always = lookup("OTEL_LOG_ASSISTANT_RESPONSES").unwrap();
+        assert!(always.safety.pretrust_safe);
+        assert_eq!(always.safety.pretrust_condition, None);
+    }
+
+    #[test]
     fn the_two_known_overlaps_are_both_axes_at_once() {
+        // Secret, and applied before trust at least for some values — the
+        // disclosure axis and the trust axis are independent.
         for name in ["ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_FOUNDRY_API_KEY"] {
             let v = lookup(name).unwrap();
             assert!(v.safety.secret, "{name} must be secret");
-            assert!(v.safety.pretrust_safe, "{name} must be pre-trust-safe");
+            assert!(
+                v.safety.pretrust_safe || v.safety.pretrust_condition.is_some(),
+                "{name} must be applied before trust, at least conditionally"
+            );
         }
     }
 
@@ -624,7 +674,7 @@ mod tests {
         let s = spec();
         let p = s.safety_provenance();
         assert_eq!(p.read_at, s.cc_source_read_at);
-        assert_eq!(p.mirror_version, s.cc_source_version);
+        assert_eq!(p.source_version, s.cc_source_version);
         assert_eq!(p.from_pinned_mirror, s.cc_source_kind == "pinned_mirror");
         // and the artifact actually carries them
         assert!(

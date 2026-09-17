@@ -42,13 +42,17 @@ export type Blocked =
 /**
  * Independent attributes, deliberately not exclusive tiers — CC's own
  * sets overlap, and they answer different questions. `pretrust_safe`
- * means "CC would apply this from an untrusted source"; `secret` means
- * "this pane must never display it". `ANTHROPIC_CUSTOM_HEADERS` is both.
+ * means "CC would apply this from an untrusted source, whatever the
+ * value"; `pretrust_condition` names the value condition when it applies
+ * only for some; `secret` means "this pane must never display it".
+ * `ANTHROPIC_CUSTOM_HEADERS` is secret and conditionally pre-trust.
  */
 export interface EnvSafety {
   secret: boolean;
   blocked_reason: Blocked | null;
   pretrust_safe: boolean;
+  /** Applied before trust only for some values; null when always or never. */
+  pretrust_condition: "when_truthy" | "when_falsy" | "when_headers_benign" | null;
   provider_managed: boolean;
   hazards: Hazard[];
 }
@@ -138,16 +142,16 @@ export interface EnvOverview {
   docs_sha256: string;
   binary_crosscheck_version: string;
   /** Where the *safety* flags came from — deliberately not the same
-   *  claim as `binary_crosscheck_version`. The `SAFE_ENV_VARS` /
-   *  `PROVIDER_MANAGED` lists behind `pre_trust_safe` and
-   *  `provider_managed` are read from a Claude Code source mirror
-   *  pinned at 2.1.88 and abandoned upstream, so there is no version to
-   *  compare and no gate that could disable them. The disclosure names
-   *  the source instead of the pane hiding rows on the strength of it. */
+   *  claim as `binary_crosscheck_version`. The pre-trust and
+   *  provider-managed lists are read from an installed Claude Code
+   *  binary (before 2026-09-17, from a source mirror pinned at 2.1.88;
+   *  `from_pinned_mirror` says which). They change far less often than
+   *  build-name presence, so the pane names their source rather than
+   *  hiding rows whenever the installed version moves. */
   safety_provenance: {
     read_at: string;
     from_pinned_mirror: boolean;
-    mirror_version: string;
+    source_version: string;
   };
   installed_version: string | null;
   installed_path: string | null;
