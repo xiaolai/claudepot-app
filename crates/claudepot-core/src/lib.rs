@@ -32,6 +32,12 @@
 #[cfg(test)]
 pub mod testing;
 
+/// Writing a script a test is about to exec; see the module docs for
+/// the `ETXTBSY` race it exists to avoid. Integration tests include the
+/// same file with `#[path]`.
+#[cfg(all(test, unix))]
+pub(crate) mod test_exec_stub;
+
 pub mod account;
 pub(crate) mod account_verification;
 pub mod activity;

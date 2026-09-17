@@ -42,6 +42,10 @@
 //!   CLAUDE_CODE_OAUTH_TOKEN=... cargo test -p claudepot-core \
 //!     --test templates_real_llm -- --ignored --nocapture
 
+#[cfg(unix)]
+#[path = "../src/test_exec_stub.rs"]
+mod test_exec_stub;
+
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -370,21 +374,17 @@ fn cron_schedule_fires_real_template_and_records_run() {
     // Wrapper script: sources the token, exports it, exec's the
     // real claude. Mode 0700 — only readable + executable by us.
     let wrapper = tmp.path().join("claude-with-token.sh");
-    std::fs::write(
-        &wrapper,
-        format!(
-            "#!/bin/sh\nexport CLAUDE_CODE_OAUTH_TOKEN=\"$(cat {token})\"\nexec {claude} \"$@\"\n",
-            token = shell_quote(&token_path.display().to_string()),
-            claude = shell_quote(claude_path.to_str().unwrap()),
-        ),
-    )
-    .expect("write wrapper");
+    let script = format!(
+        "#!/bin/sh\nexport CLAUDE_CODE_OAUTH_TOKEN=\"$(cat {token})\"\nexec {claude} \"$@\"\n",
+        token = shell_quote(&token_path.display().to_string()),
+        claude = shell_quote(claude_path.to_str().unwrap()),
+    );
+    // Unix: written by a child process — see test_exec_stub for the
+    // ETXTBSY race an in-process write leaves open.
     #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o700))
-            .expect("wrapper mode 0700");
-    }
+    test_exec_stub::write_exec_stub(&wrapper, &script, 0o700);
+    #[cfg(not(unix))]
+    std::fs::write(&wrapper, script).expect("write wrapper");
 
     let registry = TemplateRegistry::load_bundled().unwrap();
     let bp = registry

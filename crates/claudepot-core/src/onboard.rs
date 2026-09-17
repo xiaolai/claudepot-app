@@ -646,7 +646,6 @@ mod tests {
     #[cfg(unix)]
     mod auth_gate {
         use super::*;
-        use std::os::unix::fs::PermissionsExt;
 
         /// A stub that appends its argv to `argv.log` and answers
         /// `--version` with `version_line`. Any other invocation exits
@@ -655,16 +654,15 @@ mod tests {
         fn recording_stub(dir: &std::path::Path, version_line: &str) -> std::path::PathBuf {
             let log = dir.join("argv.log");
             let bin = dir.join("claude-stub.sh");
-            std::fs::write(
+            crate::test_exec_stub::write_exec_stub(
                 &bin,
-                format!(
+                &format!(
                     "#!/bin/sh\necho \"$@\" >> {log}\n\
                      if [ \"$1\" = \"--version\" ]; then {version_line}\nfi\nexit 7\n",
                     log = log.display(),
                 ),
-            )
-            .unwrap();
-            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+                0o755,
+            );
             bin
         }
 
@@ -765,7 +763,6 @@ mod tests {
     #[tokio::test]
     #[cfg(unix)]
     async fn cancel_kills_child_and_cleans_tempdir() {
-        use std::os::unix::fs::PermissionsExt;
         use std::sync::Arc;
         use std::time::Duration;
         use tokio::sync::Notify;
@@ -780,14 +777,11 @@ mod tests {
         // is the point: the gate is on the real path, not beside it.
         let stub_dir = tempfile::tempdir().expect("mk stub tempdir");
         let stub = stub_dir.path().join("claude-stub.sh");
-        std::fs::write(
+        crate::test_exec_stub::write_exec_stub(
             &stub,
             "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo '2.1.251 (Claude Code)'; exit 0; fi\nexec sleep 30\n",
-        )
-        .expect("write stub");
-        let mut perms = std::fs::metadata(&stub).unwrap().permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&stub, perms).unwrap();
+            0o755,
+        );
 
         // Snapshot any pre-existing `claudepot-onboard-*` directories
         // so stale state (from previous failed runs or parallel tests)

@@ -406,13 +406,14 @@ mod tests {
     #[cfg(unix)]
     mod probe {
         use super::*;
-        use std::os::unix::fs::PermissionsExt;
 
         /// Write an executable `/bin/sh` stub and return its path.
+        /// Through `test_exec_stub`, because exec'ing it straight after an
+        /// in-process write can fail with ETXTBSY — which is how
+        /// `the_issue_94_binary_is_refused` failed on ubuntu-latest.
         fn stub(dir: &std::path::Path, name: &str, body: &str) -> std::path::PathBuf {
             let p = dir.join(name);
-            std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
-            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            crate::test_exec_stub::write_exec_stub(&p, &format!("#!/bin/sh\n{body}\n"), 0o755);
             p
         }
 

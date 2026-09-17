@@ -14,6 +14,10 @@
 //! Run with:
 //!   cargo test -p claudepot-core --test agent_e2e -- --ignored
 
+#[cfg(unix)]
+#[path = "../src/test_exec_stub.rs"]
+mod test_exec_stub;
+
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -56,14 +60,12 @@ fn make_fake_claude(stdout: &str) -> PathBuf {
             stdout.replace('\'', "'\\''")
         )
     };
-    std::fs::write(&bin, contents).unwrap();
+    // Unix: written by a child process — see test_exec_stub for the
+    // ETXTBSY race an in-process write leaves open.
     #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut p = std::fs::metadata(&bin).unwrap().permissions();
-        p.set_mode(0o755);
-        std::fs::set_permissions(&bin, p).unwrap();
-    }
+    test_exec_stub::write_exec_stub(&bin, &contents, 0o755);
+    #[cfg(not(unix))]
+    std::fs::write(&bin, contents).unwrap();
     bin
 }
 

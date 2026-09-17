@@ -1497,7 +1497,6 @@ impl LoginProgressSink for RecordingLoginSink {
 #[tokio::test]
 #[cfg(unix)]
 async fn test_login_cancel_emits_error_phase_with_cancelled_msg() {
-    use std::os::unix::fs::PermissionsExt;
     use std::sync::Arc;
     use std::time::Duration;
     use tokio::sync::Notify;
@@ -1516,14 +1515,11 @@ async fn test_login_cancel_emits_error_phase_with_cancelled_msg() {
     // spawning `claude auth login` (issue #94), so a stub that hangs on
     // `--version` is refused and never reaches the cancel path this
     // test is about.
-    std::fs::write(
+    crate::test_exec_stub::write_exec_stub(
         &stub,
         "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo '2.1.251 (Claude Code)'; exit 0; fi\nexec sleep 30\n",
-    )
-    .expect("write stub");
-    let mut perms = std::fs::metadata(&stub).unwrap().permissions();
-    perms.set_mode(0o755);
-    std::fs::set_permissions(&stub, perms).unwrap();
+        0o755,
+    );
 
     let sink = Arc::new(RecordingLoginSink::new());
     let notify = Arc::new(Notify::new());
