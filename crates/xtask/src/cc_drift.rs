@@ -55,6 +55,17 @@ pub struct WatchRow {
     /// matching everything.
     pub tokens: Vec<String>,
     pub check: String,
+    /// The newest Claude Code version this row records having been checked
+    /// against (`Verified 2.1.250`, `Re-read in 2.1.274`, …), or `None`
+    /// when it records none. It is the row's own baseline: only releases
+    /// after it are candidates for this row.
+    pub verified: Option<String>,
+    /// Set when the row watches another binary — `Verified Desktop
+    /// 2.110.0` — whose releases are not in CC's changelog. Such a row
+    /// is never scanned against it: every CC release would count as a
+    /// candidate forever, and a check that always fires is one people
+    /// learn to skip.
+    pub other_binary: Option<String>,
 }
 
 /// A watchlist token found in an upstream release note.
@@ -103,12 +114,77 @@ pub fn parse_watchlist(md: &str) -> Result<Vec<WatchRow>> {
             owner: cells[1].to_string(),
             tokens: parse_tokens(cells[2]),
             check: cells[3].to_string(),
+            verified: parse_verified(cells[3]),
+            other_binary: parse_other_binary(cells[3]),
         });
     }
     if rows.is_empty() {
         bail!("no watchlist rows parsed from {WATCHLIST_REL} — the table format changed");
     }
     Ok(rows)
+}
+
+/// The newest version a check cell says it was verified against.
+///
+/// Rows record it in prose — `**Verified 2.1.250 (2026-08-28).**`,
+/// `**Re-read in 2.1.274 (…)**`, `Reconciled 2.1.250`, `Ran 2.1.274` — so
+/// this accepts those verbs followed by a version and keeps the highest.
+fn parse_verified(check: &str) -> Option<String> {
+    const VERBS: [&str; 7] = [
+        "verified against ",
+        "verified ",
+        "re-verified ",
+        "re-read in ",
+        "reconciled ",
+        "read ",
+        "ran ",
+    ];
+    let lower = check.to_ascii_lowercase();
+    let mut best: Option<String> = None;
+    for verb in VERBS {
+        let mut from = 0;
+        while let Some(at) = lower[from..].find(verb) {
+            let start = from + at + verb.len();
+            let version: String = lower[start..]
+                .chars()
+                .take_while(|c| c.is_ascii_digit() || *c == '.')
+                .collect();
+            let version = version.trim_end_matches('.');
+            if version.split('.').count() == 3 && version.split('.').all(|p| !p.is_empty()) {
+                let newer = best.as_deref().is_none_or(|b| is_newer(version, b));
+                if newer {
+                    best = Some(version.to_string());
+                }
+            }
+            from = start;
+        }
+    }
+    best
+}
+
+/// `Verified Desktop X.Y.Z` → `Desktop X.Y.Z`. The newest such marker
+/// wins, by the same version ordering as [`parse_verified`].
+fn parse_other_binary(check: &str) -> Option<String> {
+    const MARKER: &str = "verified desktop ";
+    let lower = check.to_ascii_lowercase();
+    let mut best: Option<String> = None;
+    let mut from = 0;
+    while let Some(at) = lower[from..].find(MARKER) {
+        let start = from + at + MARKER.len();
+        let version: String = lower[start..]
+            .chars()
+            .take_while(|c| c.is_ascii_digit() || *c == '.')
+            .collect();
+        let version = version.trim_end_matches('.').to_string();
+        if version.split('.').count() >= 2 && version.split('.').all(|p| !p.is_empty()) {
+            let newer = best.as_deref().is_none_or(|b| is_newer(&version, b));
+            if newer {
+                best = Some(version);
+            }
+        }
+        from = start;
+    }
+    best.map(|v| format!("Desktop {v}"))
 }
 
 /// Split a tokens cell into literal needles. `—` means "no text search
@@ -182,13 +258,35 @@ pub fn is_newer(a: &str, b: &str) -> bool {
 ///
 /// Pure: the caller supplies the changelog text.
 pub fn scan_changelog(rows: &[WatchRow], changelog: &str, since: &str) -> Vec<Hit> {
+    scan_with(rows, changelog, |_| since.to_string())
+}
+
+/// Each row since its own recorded verification.
+///
+/// One shared baseline cannot be right for rows verified at different
+/// versions. It used to be the parity pin, which was safe only while that
+/// pin was the oldest version anywhere (2.1.88): the day it moved to the
+/// installed build, every row verified earlier had its later changelog
+/// entries hidden and the report printed green. A row that records no
+/// verification reports everything.
+pub fn scan_changelog_per_row(rows: &[WatchRow], changelog: &str) -> Vec<Hit> {
+    scan_with(rows, changelog, |row| {
+        row.verified.clone().unwrap_or_else(|| "0.0.0".to_string())
+    })
+}
+
+fn scan_with(
+    rows: &[WatchRow],
+    changelog: &str,
+    baseline: impl Fn(&WatchRow) -> String,
+) -> Vec<Hit> {
     let mut hits = Vec::new();
     for rel in parse_changelog(changelog) {
-        if !is_newer(&rel.version, since) {
-            continue;
-        }
         for bullet in &rel.bullets {
             for row in rows {
+                if row.other_binary.is_some() || !is_newer(&rel.version, &baseline(row)) {
+                    continue;
+                }
                 for token in &row.tokens {
                     if token_matches(token, bullet) {
                         hits.push(Hit {
@@ -367,12 +465,13 @@ fn read_pins(root: &Path) -> Result<(Vec<Pin>, Vec<String>)> {
             field: "(file)".into(),
             value: v.trim().to_string(),
             kind: PinKind::Version,
-            when_stale: "settings-merge fixtures lock HISTORICAL parity only".into(),
+            when_stale: "settings-merge fixtures were verified against an older build — \
+                         re-run `bun parity-harness/dump.ts --check`"
+                .into(),
         }),
         Err(e) => problems.push(format!(
-            "parity-harness/PINNED_CC_VERSION could not be read ({e}) — it is the \
-             default baseline for --since, so without it this run cannot say what \
-             range it covered"
+            "parity-harness/PINNED_CC_VERSION could not be read ({e}) — the \
+             settings-merge fixtures have no recorded verification"
         )),
     }
 
@@ -396,9 +495,14 @@ fn read_pins(root: &Path) -> Result<(Vec<Pin>, Vec<String>)> {
                  this version\" — correct, but it is a state nobody can act on",
             ),
             (
+                "cc_source_version",
+                PinKind::Version,
+                "env pane's pre-trust / provider-managed flags describe an older build",
+            ),
+            (
                 "cc_source_read_at",
                 PinKind::Freshness,
-                "dated against the abandoned 2.1.88 mirror",
+                "when the safety lists were read from that build",
             ),
             (
                 "docs_fetched_at",
@@ -520,14 +624,43 @@ fn render_pins(installed: &str, pins: &[Pin]) {
 }
 
 /// Render the changelog scan, collapsed by surface.
-fn render_changelog(rows: &[WatchRow], text: &str, since: &str) {
-    let newer = parse_changelog(text)
-        .iter()
-        .filter(|r| is_newer(&r.version, since))
-        .count();
-    let hits = scan_changelog(rows, text, since);
+fn render_changelog(rows: &[WatchRow], text: &str, since: Option<&str>) {
+    let hits = match since {
+        Some(since) => {
+            let newer = parse_changelog(text)
+                .iter()
+                .filter(|r| is_newer(&r.version, since))
+                .count();
+            println!("changelog: {newer} releases newer than {since} (explicit --since)");
+            scan_changelog(rows, text, since)
+        }
+        None => {
+            println!("changelog: each row since its own recorded verification");
+            let never: Vec<&str> = rows
+                .iter()
+                .filter(|r| {
+                    r.verified.is_none() && r.other_binary.is_none() && !r.tokens.is_empty()
+                })
+                .map(|r| r.surface.as_str())
+                .collect();
+            if !never.is_empty() {
+                println!(
+                    "  never verified (every release counts): {}",
+                    never.join("; ")
+                );
+            }
+            for r in rows {
+                if let Some(other) = &r.other_binary {
+                    println!(
+                        "  not in this changelog (check by hand): {} — last verified {other}",
+                        r.surface
+                    );
+                }
+            }
+            scan_changelog_per_row(rows, text)
+        }
+    };
     let grouped = group_hits(&hits);
-    println!("changelog: {newer} releases newer than {since}");
     if grouped.is_empty() {
         println!("  no watchlist token mentioned — checked, green\n");
         return;
@@ -579,16 +712,11 @@ pub fn run(root: &Path, args: &[String]) -> Result<()> {
     let installed = installed_cc_version()?;
     let (pins, pin_problems) = read_pins(root)?;
 
-    // A baseline we cannot establish must NOT silently become the
-    // installed version: `is_newer(rel, installed)` is false for every
-    // release, so the scan would print "0 releases newer" and read as a
-    // clean run. Absence of evidence is reported, never rendered green.
-    let since = arg("--since").map(str::to_string).or_else(|| {
-        pins.iter()
-            .filter(|p| p.kind == PinKind::Version)
-            .find(|p| p.artifact.contains("PINNED_CC_VERSION"))
-            .map(|p| p.value.clone())
-    });
+    // `--since` overrides; otherwise every row is read from its own
+    // recorded verification. The installed version is never a baseline:
+    // `is_newer(rel, installed)` is false for every release, so the scan
+    // would print nothing and read as a clean run.
+    let since = arg("--since").map(str::to_string);
 
     println!("cc-drift: installed Claude Code {installed}");
     println!("          {} watchlist rows\n", rows.len());
@@ -596,20 +724,8 @@ pub fn run(root: &Path, args: &[String]) -> Result<()> {
     render_problems(&pin_problems);
     render_pins(&installed, &pins);
 
-    let Some(since) = since else {
-        println!(
-            "changelog: NOT CHECKED — no baseline. Pass --since <version>, or restore \
-             parity-harness/PINNED_CC_VERSION.\n"
-        );
-        println!(
-            "This is a report, not a gate. It is INCOMPLETE — do not record it as a \
-             green run."
-        );
-        return Ok(());
-    };
-
     match load_changelog(arg("--changelog")) {
-        Ok(text) => render_changelog(&rows, &text, &since),
+        Ok(text) => render_changelog(&rows, &text, since.as_deref()),
         Err(e) => {
             // A failed fetch must not read as "nothing changed".
             println!("changelog: NOT CHECKED — {e}");
@@ -627,6 +743,73 @@ pub fn run(root: &Path, args: &[String]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_row_records_its_newest_verification() {
+        assert_eq!(
+            parse_verified("binary strings. **Verified 2.1.250 (2026-08-28).** later **Re-read in 2.1.274 (x)**"),
+            Some("2.1.274".to_string())
+        );
+        assert_eq!(
+            parse_verified("Reconciled 2.1.250 and it moved"),
+            Some("2.1.250".into())
+        );
+        assert_eq!(
+            parse_verified("**Ran 2.1.274 (2026-09-17): 8 of 8**"),
+            Some("2.1.274".into())
+        );
+        assert_eq!(parse_verified("binary strings"), None);
+        // "read" inside other words must not invent a version.
+        assert_eq!(parse_verified("re-read the list; spread 2 items"), None);
+    }
+
+    #[test]
+    fn a_row_about_another_binary_is_never_scanned_against_this_changelog() {
+        assert_eq!(
+            parse_other_binary("**Verified Desktop 1.34493.1 (…)** then Verified Desktop 2.110.0"),
+            Some("Desktop 2.110.0".to_string())
+        );
+        assert_eq!(parse_other_binary("Verified 2.1.274"), None);
+        let desktop = WatchRow {
+            surface: "desktop".into(),
+            owner: "o".into(),
+            tokens: vec!["tokenCache".into()],
+            check: "c".into(),
+            verified: None,
+            other_binary: Some("Desktop 2.110.0".into()),
+        };
+        let log = "## 2.1.270\n\n- tokenCache moved\n";
+        assert!(scan_changelog_per_row(std::slice::from_ref(&desktop), log).is_empty());
+        assert!(scan_changelog(&[desktop], log, "0.0.0").is_empty());
+    }
+
+    #[test]
+    fn each_row_is_scanned_from_its_own_verification() {
+        // The false green this replaced: one baseline newer than a row's
+        // own verification hid that row's later changes.
+        let row = |surface: &str, token: &str, verified: Option<&str>| WatchRow {
+            surface: surface.into(),
+            owner: "o".into(),
+            tokens: vec![token.into()],
+            check: "c".into(),
+            verified: verified.map(str::to_string),
+            other_binary: None,
+        };
+        let rows = vec![
+            row("old", "alpha", Some("2.1.240")),
+            row("new", "beta", Some("2.1.270")),
+            row("never", "gamma", None),
+        ];
+        let log = "## 2.1.260\n\n- alpha and beta and gamma\n\n## 2.1.100\n\n- gamma\n";
+        let surfaces: Vec<(String, String)> = scan_changelog_per_row(&rows, log)
+            .into_iter()
+            .map(|h| (h.surface, h.version))
+            .collect();
+        assert!(surfaces.contains(&("old".into(), "2.1.260".into())));
+        assert!(!surfaces.iter().any(|(s, _)| s == "new"), "{surfaces:?}");
+        assert!(surfaces.contains(&("never".into(), "2.1.100".into())));
+        assert!(surfaces.contains(&("never".into(), "2.1.260".into())));
+    }
 
     const TABLE: &str = "\
 # heading
