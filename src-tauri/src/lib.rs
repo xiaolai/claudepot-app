@@ -51,6 +51,7 @@ mod webview_hardening;
 pub mod i18n;
 mod invalidation_orchestrator;
 mod live_activity_bridge;
+mod main_thread_watchdog;
 mod memory_watch;
 mod ops;
 mod peer_inbound_orchestrator;
@@ -882,6 +883,11 @@ pub fn run() {
             // the tray Health row stays current when the window is
             // closed. See `cc_doctor_watcher.rs` for cadence rationale.
             cc_doctor_watcher::spawn(app.handle().clone());
+
+            // Log (and on macOS, sample) any stall of the main thread —
+            // the one failure the rest of the log cannot show, because
+            // every background loop keeps running through it.
+            main_thread_watchdog::spawn(app.handle().clone());
 
             // Keep the exchange FTS index — which backs cross-session (⌘K
             // palette) search — converged with disk.
