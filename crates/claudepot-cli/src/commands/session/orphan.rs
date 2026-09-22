@@ -151,6 +151,8 @@ pub async fn backfill_exchanges_cmd(
             "discovered": stats.discovered,
             "indexed": stats.indexed,
             "skipped_unchanged": stats.skipped_unchanged,
+            "rows_written": stats.rows_written,
+            "conflicted": stats.conflicted.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
             "failed_count": stats.failed.len(),
             "failed": stats.failed.iter().map(|(p, e)| serde_json::json!({
                 "path": p.display().to_string(),
@@ -170,6 +172,8 @@ pub async fn backfill_exchanges_cmd(
         println!("discovered:           {}", stats.discovered);
         println!("indexed:              {}", stats.indexed);
         println!("skipped (unchanged):  {}", stats.skipped_unchanged);
+        println!("rows written:         {}", stats.rows_written);
+        println!("conflicted (retry):   {}", stats.conflicted.len());
         println!("failed:               {}", stats.failed.len());
         if !stats.failed.is_empty() {
             println!();

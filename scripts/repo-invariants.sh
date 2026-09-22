@@ -60,6 +60,10 @@ violators=$(grep -rlE "$patterns" crates/ --include='*.rs' || true)
 # interaction-demand` prints to stdout and serializes under --json.
 # Same tripwire, same verdict, second feature — it fired again on this
 # one's first CI run.
+# shared_memory/exchange_rows.rs writes these columns and, in production,
+# reads back only row ids. Its one SELECT of the text columns is
+# `#[cfg(test)] test_support::snapshot`, which compares two test
+# databases column by column and emits nothing.
 unexpected=$(echo "$violators" \
   | grep -v 'crates/claudepot-core/src/corpus.rs' \
   | grep -v 'crates/claudepot-core/src/corpus/detect.rs' \
@@ -69,6 +73,7 @@ unexpected=$(echo "$violators" \
   | grep -v 'crates/claudepot-core/src/shared_memory/indexer.rs' \
   | grep -v 'crates/claudepot-core/src/shared_memory/schema.rs' \
   | grep -v 'crates/claudepot-core/src/shared_memory/claude_exchanges.rs' \
+  | grep -v 'crates/claudepot-core/src/shared_memory/exchange_rows.rs' \
   | grep -v 'crates/claudepot-core/src/session/search/mod.rs' \
   || true)
 if [ -n "$unexpected" ]; then

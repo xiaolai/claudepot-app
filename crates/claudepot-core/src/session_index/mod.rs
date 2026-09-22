@@ -16,9 +16,12 @@
 //!                 rebuild
 //!
 //! Thread model mirrors `AccountStore`: a single `Mutex<Connection>`,
-//! serialized writes, WAL so readers don't block. Contention is
-//! effectively zero because GUI + CLI both fan in through one process
-//! at a time.
+//! serialized writes, WAL so readers don't block — plus a refresh gate,
+//! so concurrent callers on one handle share a refresh instead of each
+//! re-parsing whatever a live session just appended. Other processes
+//! (the CLI, the MCP server) open their own handles; they meet this one
+//! only at SQLite's write lock, which is why writers here hold it per
+//! file and never across a parse.
 //!
 //! Safety note — this cache never contains credentials. Prompts and
 //! transcript metadata are in scope though, so the DB file is chmod
@@ -39,6 +42,7 @@ use rayon::prelude::*;
 use rusqlite::{params, Connection};
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
 use crate::artifact_usage::{model::UsageEvent, store as usage_store};
 
@@ -64,6 +68,56 @@ pub struct SessionIndex {
     /// lock across blocking I/O that isn't SQLite-bound, so contention
     /// stays minimal.
     db: Mutex<Connection>,
+    /// Serializes whole refreshes — walk, parse and write — on this
+    /// handle, and lets a caller that queued behind one skip its own.
+    ///
+    /// Every read entry point refreshes first, and the GUI shares one
+    /// handle across the 2-minute index loop and every index-backed
+    /// command. Without this, N callers arriving together each walked
+    /// the corpus and each re-parsed whatever a live session had just
+    /// appended: a 263 MB transcript was parsed N times and its rows
+    /// rewritten N times, all serialized on the write lock anyway.
+    refresh_gate: Mutex<RefreshGate>,
+}
+
+/// State behind [`SessionIndex::refresh_gate`].
+#[derive(Default)]
+struct RefreshGate {
+    /// When the last successful *full* refresh began, and what it did.
+    ///
+    /// A caller whose arrival precedes that start instant is fully
+    /// served by it: the walk began after the caller asked, so it saw
+    /// everything the caller could have seen. The comparison is against
+    /// the START, never the finish — a refresh that finished after the
+    /// caller arrived but began before may have walked past a file the
+    /// caller then expects to find.
+    last_full: Option<(Instant, RefreshStats)>,
+}
+
+impl RefreshGate {
+    /// The answer for a caller that arrived at `arrived`, if a full
+    /// refresh that began at or after that instant has completed.
+    /// `None` means the caller must run its own.
+    fn covering(
+        &self,
+        arrived: Instant,
+        only_slug: Option<&str>,
+        gate_wait: Duration,
+    ) -> Option<RefreshStats> {
+        let (started, stats) = self.last_full.as_ref()?;
+        if *started < arrived {
+            return None;
+        }
+        Some(match only_slug {
+            None => stats.clone(),
+            // The covering refresh was install-wide; its counts are not
+            // an answer about one project directory.
+            Some(_) => RefreshStats {
+                elapsed: gate_wait,
+                ..RefreshStats::default()
+            },
+        })
+    }
 }
 
 impl SessionIndex {
@@ -135,7 +189,10 @@ impl SessionIndex {
             }
         }
 
-        Ok(Self { db: Mutex::new(db) })
+        Ok(Self {
+            db: Mutex::new(db),
+            refresh_gate: Mutex::new(RefreshGate::default()),
+        })
     }
 
     /// Run the full open / pragma / schema / touch dance. Extracted
@@ -215,16 +272,21 @@ impl SessionIndex {
     /// reads as "due", so the first refresh after an upgrade runs the
     /// GC once and records the stamp.
     fn usage_gc_due(&self, now_ms: i64) -> Result<bool, SessionIndexError> {
+        Ok(match self.last_usage_gc_ms() {
+            Some(prev) => now_ms.saturating_sub(prev) >= USAGE_GC_INTERVAL_MS,
+            None => true,
+        })
+    }
+
+    /// When the raw-`usage_event` GC last ran, if it ever has.
+    fn last_usage_gc_ms(&self) -> Option<i64> {
         let db = self.db();
         let last: Option<String> = db
             .query_row("SELECT v FROM meta WHERE k = 'last_usage_gc_ms'", [], |r| {
                 r.get(0)
             })
             .ok();
-        Ok(match last.as_deref().and_then(|v| v.parse::<i64>().ok()) {
-            Some(prev) => now_ms.saturating_sub(prev) >= USAGE_GC_INTERVAL_MS,
-            None => true,
-        })
+        last.as_deref().and_then(|v| v.parse::<i64>().ok())
     }
 
     /// Return the stored `meta.schema_version`. Primarily a test hook
@@ -339,21 +401,57 @@ impl SessionIndex {
         self.refresh_scoped(config_dir, Some(slug))
     }
 
+    /// Single-flight wrapper around [`Self::refresh_ungated`]; see
+    /// [`RefreshGate`] for the coalescing rule.
     fn refresh_scoped(
         &self,
         config_dir: &Path,
         only_slug: Option<&str>,
     ) -> Result<RefreshStats, SessionIndexError> {
-        let started_at = std::time::Instant::now();
+        let arrived = Instant::now();
+        let mut gate = crate::sync::recover_lock(&self.refresh_gate, "session_index.refresh");
+        let gate_wait = arrived.elapsed();
+        if let Some(stats) = gate.covering(arrived, only_slug, gate_wait) {
+            tracing::debug!(
+                gate_wait_ms = gate_wait.as_millis() as u64,
+                slug = only_slug,
+                "session_index: refresh served by one that began after this call"
+            );
+            return Ok(stats);
+        }
+        let started = Instant::now();
+        let stats = self.refresh_ungated(config_dir, only_slug, gate_wait)?;
+        if only_slug.is_none() {
+            gate.last_full = Some((started, stats.clone()));
+        }
+        Ok(stats)
+    }
+
+    fn refresh_ungated(
+        &self,
+        config_dir: &Path,
+        only_slug: Option<&str>,
+        gate_wait: Duration,
+    ) -> Result<RefreshStats, SessionIndexError> {
+        let started_at = Instant::now();
         let walk = match only_slug {
             Some(slug) => codec::walk_fs_slug(config_dir, slug)?,
             None => codec::walk_fs(config_dir)?,
         };
+        let walk_elapsed = started_at.elapsed();
 
         // Snapshot the DB side of the diff under a short-lived lock
         // so the rayon scan that follows runs without holding it.
+        //
+        // Time spent waiting for `self.db()` is accumulated separately
+        // from time spent writing. A refresh that took 60 s used to log
+        // one `elapsed_ms`, which could not say whether it was parsing,
+        // waiting on another holder of the connection, or writing.
+        let mut db_wait = Duration::ZERO;
         let db_tuples = {
+            let t = Instant::now();
             let db = self.db();
+            db_wait += t.elapsed();
             match only_slug {
                 Some(slug) => codec::load_db_tuples_for_slug(&db, slug)?,
                 None => codec::load_db_tuples(&db)?,
@@ -363,6 +461,12 @@ impl SessionIndex {
         let fs_tuples: Vec<diff::IndexTuple> =
             walk.entries.iter().map(|e| e.tuple.clone()).collect();
         let plan = diff::diff_fs_vs_db(&fs_tuples, &db_tuples);
+        // Files the cache already held before this pass. Their raw usage
+        // events older than the last GC cutoff were counted when first
+        // inserted and must not be counted again — see
+        // `usage_store::reconcile_events_for_file`.
+        let previously_indexed: std::collections::HashSet<&str> =
+            db_tuples.iter().map(|t| t.file_path.as_str()).collect();
 
         // Build a `file_path -> &FsEntry` lookup so the upsert loop
         // can recover the slug + absolute path for each scan.
@@ -388,6 +492,7 @@ impl SessionIndex {
         // replacement between walk and parse stores a stale inode,
         // which mismatches on the next walk and forces a re-scan.
         type ScanOk = (SessionRow, Vec<UsageEvent>, Vec<TurnRecord>, u64);
+        let scan_started = Instant::now();
         let scan_results: Vec<Result<ScanOk, (std::path::PathBuf, String)>> = plan
             .to_upsert
             .par_iter()
@@ -399,6 +504,7 @@ impl SessionIndex {
                 })
             })
             .collect();
+        let scan_elapsed = scan_started.elapsed();
 
         let mut scanned: Vec<ScanOk> = Vec::with_capacity(scan_results.len());
         let mut failed: Vec<(std::path::PathBuf, String)> = walk.stat_failed;
@@ -429,12 +535,21 @@ impl SessionIndex {
         let scanned_count = scanned.len();
         let deleted_count = plan.to_delete.len();
         let mut usage_events_written = 0usize;
+        let mut turns_written = 0usize;
+        let gc_probe = Instant::now();
         let gc_due = self.usage_gc_due(indexed_at_ms)?;
+        let evicted_before_ms = self
+            .last_usage_gc_ms()
+            .map(|gc| gc.saturating_sub(USAGE_EVENT_TTL_MS));
+        db_wait += gc_probe.elapsed();
         if scanned_count == 0 && deleted_count == 0 && !gc_due {
             let elapsed = started_at.elapsed();
             tracing::debug!(
                 total_on_disk = walk.entries.len(),
                 elapsed_ms = elapsed.as_millis() as u64,
+                walk_ms = walk_elapsed.as_millis() as u64,
+                db_wait_ms = db_wait.as_millis() as u64,
+                gate_wait_ms = gate_wait.as_millis() as u64,
                 "session_index: refresh no-op (no write lock taken)"
             );
             return Ok(RefreshStats {
@@ -445,28 +560,30 @@ impl SessionIndex {
                 elapsed,
             });
         }
+        let write_elapsed;
         {
+            let t = Instant::now();
             let mut db = self.db();
+            db_wait += t.elapsed();
+            let write_started = Instant::now();
             let tx = db.transaction()?;
             for (row, events, turns, inode) in &scanned {
                 codec::upsert_row(&tx, row, *inode, indexed_at_ms)?;
                 let file_path = row.file_path.to_string_lossy();
-                // Per-turn rows: replace-all in the same transaction so
-                // the cache is internally consistent. A re-scan that
-                // grew the transcript by 5 turns ends up with exactly
-                // those 5 new rows; one that shrank it (slim) ends up
-                // with the new shorter set.
-                turns::replace_turns(&tx, &file_path, turns)?;
-                // Order matters: subtract the existing per-day counts
-                // BEFORE deleting the raw events that produced them,
-                // otherwise the ensuing inserts double-bump the daily
-                // rollup on every re-scan.
-                usage_store::subtract_daily_for_file(&tx, &file_path)?;
-                usage_store::delete_events_for_file(&tx, &file_path)?;
-                for ev in events {
-                    usage_store::insert_event(&tx, ev, &file_path, &row.project_path)?;
-                    usage_events_written += 1;
-                }
+                // Per-turn rows, in the same transaction so the cache is
+                // internally consistent. A re-scan that grew the
+                // transcript by 5 turns writes exactly those 5 rows; one
+                // that shrank it (slim) ends up with the new shorter set.
+                turns_written += turns::replace_turns(&tx, &file_path, turns)?;
+                // Raw usage events and their daily rollup, likewise
+                // written only from the first event that differs.
+                usage_events_written += usage_store::reconcile_events_for_file(
+                    &tx,
+                    &file_path,
+                    &row.project_path,
+                    events,
+                    evicted_before_ms.filter(|_| previously_indexed.contains(file_path.as_ref())),
+                )?;
             }
             for gone in &plan.to_delete {
                 codec::delete_row(&tx, gone)?;
@@ -491,6 +608,10 @@ impl SessionIndex {
                 )?;
             }
             tx.commit()?;
+            // Includes SQLite's own busy wait for the database write
+            // lock, which another *connection* (another process, or a
+            // store with its own handle) can hold.
+            write_elapsed = write_started.elapsed();
         }
 
         let elapsed = started_at.elapsed();
@@ -500,7 +621,13 @@ impl SessionIndex {
             failed = failed.len(),
             total_on_disk = walk.entries.len(),
             usage_events = usage_events_written,
+            turns = turns_written,
             elapsed_ms = elapsed.as_millis() as u64,
+            walk_ms = walk_elapsed.as_millis() as u64,
+            scan_ms = scan_elapsed.as_millis() as u64,
+            db_wait_ms = db_wait.as_millis() as u64,
+            write_ms = write_elapsed.as_millis() as u64,
+            gate_wait_ms = gate_wait.as_millis() as u64,
             "session_index: refresh complete"
         );
 
@@ -2116,6 +2243,180 @@ mod tests {
             first + 1,
             "re-scan must replace the file's events, not duplicate them"
         );
+    }
+
+    #[test]
+    fn a_rescan_keeps_every_stored_turn_and_usage_row_and_adds_the_new_ones() {
+        // Re-scanning used to delete every turn and every raw usage event
+        // of the file and insert them all again — about 3,400 event rows a
+        // refresh for one live session on the reference machine. A row that
+        // survives a re-scan now keeps its identity (its rowid), and the
+        // daily rollup still equals a from-scratch index of the same file.
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        let mut lines = artifact_session_lines("/a", "S1");
+        lines.extend(sample_lines("/a", "S1"));
+        let path = write_session(cfg.path(), "-a", "S1", &lines);
+        idx.refresh(cfg.path()).unwrap();
+        let fp = path.to_string_lossy().into_owned();
+        let ids = |sql: &str| -> Vec<i64> {
+            let db = idx.db();
+            let mut stmt = db.prepare(sql).unwrap();
+            stmt.query_map([&fp], |r| r.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        let events_before = ids("SELECT id FROM usage_event WHERE file_path = ?1 ORDER BY id");
+        let turns_before =
+            ids("SELECT rowid FROM session_turns WHERE file_path = ?1 ORDER BY rowid");
+        assert!(!events_before.is_empty() && !turns_before.is_empty());
+
+        // The session continues: another hook fires, another turn lands.
+        lines.push(format!(
+            r#"{{"type":"attachment","timestamp":"{}","sessionId":"S1","attachment":{{"type":"hook_success","hookName":"PreToolUse:Bash","command":"node /h.js","durationMs":7,"exitCode":0}}}}"#,
+            recent_ts(30)
+        ));
+        lines.push(
+            r#"{"type":"assistant","message":{"role":"assistant","model":"claude-opus-4-7","content":[{"type":"text","text":"again"}],"usage":{"input_tokens":2,"output_tokens":3}},"timestamp":"2026-04-10T10:00:05Z","cwd":"/a","sessionId":"S1"}"#
+                .to_string(),
+        );
+        write_session(cfg.path(), "-a", "S1", &lines);
+        assert_eq!(idx.refresh(cfg.path()).unwrap().scanned, 1);
+
+        let events_after = ids("SELECT id FROM usage_event WHERE file_path = ?1 ORDER BY id");
+        let turns_after =
+            ids("SELECT rowid FROM session_turns WHERE file_path = ?1 ORDER BY rowid");
+        assert_eq!(&events_after[..events_before.len()], &events_before[..]);
+        assert!(
+            events_after.len() > events_before.len(),
+            "the new hook event lands"
+        );
+        assert_eq!(&turns_after[..turns_before.len()], &turns_before[..]);
+        assert!(turns_after.len() > turns_before.len(), "the new turn lands");
+
+        // Same rollup as indexing the final file from scratch.
+        let daily = |idx: &SessionIndex| -> Vec<(i64, String, String, i64, i64, i64, i64)> {
+            let db = idx.db();
+            let mut stmt = db
+                .prepare(
+                    "SELECT day_unix_s, kind, artifact_key, fire_count, error_count, \
+                     total_duration_ms, duration_count FROM usage_daily \
+                     WHERE fire_count != 0 ORDER BY day_unix_s, kind, artifact_key",
+                )
+                .unwrap();
+            stmt.query_map([], |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                    r.get(6)?,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+        };
+        let (fresh, _fresh_tmp) = open_index();
+        fresh.refresh(cfg.path()).unwrap();
+        assert_eq!(daily(&idx), daily(&fresh));
+    }
+
+    #[test]
+    fn a_rescan_after_gc_does_not_count_evicted_events_again() {
+        // The raw-event GC evicts events older than 30 days and leaves
+        // their day in `usage_daily` counted. The full rewrite then
+        // re-inserted every event of a re-scanned transcript, evicted ones
+        // included, so each re-scan after a GC counted those days again.
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        let hook = |ts: String, ms: u32| {
+            format!(
+                r#"{{"type":"attachment","timestamp":"{ts}","sessionId":"S1","attachment":{{"type":"hook_success","hookName":"PreToolUse:Bash","command":"node /h.js","durationMs":{ms},"exitCode":0}}}}"#
+            )
+        };
+        let old_ts = recent_ts(40 * 86_400);
+        let mut lines = vec![
+            format!(
+                r#"{{"type":"user","message":{{"role":"user","content":"hi"}},"timestamp":"{old_ts}","cwd":"/a","sessionId":"S1"}}"#
+            ),
+            hook(old_ts.clone(), 1),
+            hook(recent_ts(60), 2),
+        ];
+        write_session(cfg.path(), "-a", "S1", &lines);
+        // The first refresh indexes both events, then its GC evicts the
+        // 40-day-old one.
+        idx.refresh(cfg.path()).unwrap();
+        let old_day = {
+            let ms = chrono::DateTime::parse_from_rfc3339(&old_ts)
+                .unwrap()
+                .timestamp_millis();
+            crate::artifact_usage::schema::day_floor_unix_s(ms)
+        };
+        let old_day_count = |idx: &SessionIndex| -> i64 {
+            idx.db()
+                .query_row(
+                    "SELECT fire_count FROM usage_daily \
+                     WHERE day_unix_s = ?1 AND artifact_key = 'PreToolUse:Bash|node /h.js'",
+                    [old_day],
+                    |r| r.get(0),
+                )
+                .unwrap()
+        };
+        assert_eq!(old_day_count(&idx), 1);
+
+        lines.push(hook(recent_ts(30), 3));
+        write_session(cfg.path(), "-a", "S1", &lines);
+        assert_eq!(idx.refresh(cfg.path()).unwrap().scanned, 1);
+        assert_eq!(
+            old_day_count(&idx),
+            1,
+            "the evicted event must not be counted twice"
+        );
+    }
+
+    #[test]
+    fn a_waiting_caller_is_served_only_by_a_refresh_that_began_after_it_arrived() {
+        let t0 = Instant::now();
+        let later = t0 + Duration::from_millis(5);
+        let stats = RefreshStats {
+            scanned: 3,
+            total_on_disk: 9,
+            ..RefreshStats::default()
+        };
+        let gate = RefreshGate {
+            last_full: Some((later, stats)),
+        };
+        // Arrived before that refresh started: served by it.
+        let served = gate.covering(t0, None, Duration::ZERO).unwrap();
+        assert_eq!((served.scanned, served.total_on_disk), (3, 9));
+        // A slug caller is served too, but not handed install-wide counts.
+        let slug = gate.covering(t0, Some("-a"), Duration::ZERO).unwrap();
+        assert_eq!((slug.scanned, slug.total_on_disk), (0, 0));
+        // Arrived after it started: the walk may have passed a file this
+        // caller expects to find, so it must run its own.
+        assert!(gate
+            .covering(later + Duration::from_millis(1), None, Duration::ZERO)
+            .is_none());
+        // Nothing has run yet.
+        assert!(RefreshGate::default()
+            .covering(t0, None, Duration::ZERO)
+            .is_none());
+    }
+
+    #[test]
+    fn back_to_back_refreshes_both_run() {
+        // The gate coalesces WAITING callers only. A call that arrives
+        // after the previous refresh finished must still see new files.
+        let (idx, _tmp) = open_index();
+        let cfg = TempDir::new().unwrap();
+        write_session(cfg.path(), "-a", "S1", &sample_lines("/a", "S1"));
+        assert_eq!(idx.refresh(cfg.path()).unwrap().scanned, 1);
+        write_session(cfg.path(), "-a", "S2", &sample_lines("/a", "S2"));
+        assert_eq!(idx.refresh(cfg.path()).unwrap().scanned, 1);
     }
 
     #[test]

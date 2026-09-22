@@ -41,8 +41,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use rusqlite::params;
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
+use super::exchange_rows::{self, ExchangeRow, ReconcileWrites, ToolCallRow};
 use crate::redaction::{apply as redact_apply, RedactionPolicy};
 use crate::session::{parse_events_public, SessionEvent};
 use crate::session_index::SessionIndex;
@@ -54,7 +55,20 @@ pub struct ClaudeExchangeStats {
     pub indexed: usize,
     pub skipped_unchanged: usize,
     pub failed: Vec<(PathBuf, String)>,
+    /// Files left for the next pass because another writer indexed them,
+    /// or removed their `sessions` row, between this pass's snapshot and
+    /// its write. Not a failure — but not indexed at this file's current
+    /// content either, which a caller that needs a specific file indexed
+    /// (redaction) must not mistake for success.
+    pub conflicted: Vec<PathBuf>,
+    /// Rows actually inserted, updated or deleted across `exchanges` and
+    /// `tool_calls`. An indexed file whose parse reproduced its stored
+    /// rows contributes nothing here.
+    pub rows_written: usize,
 }
+
+/// A file's `exchange_state` tuple: `(size, mtime_ns, inode)`.
+type FileTuple = (i64, i64, i64);
 
 /// Walk `<claude_config_dir>/projects/**/*.jsonl` and populate
 /// `exchanges` + `tool_calls` for every Claude `sessions` row whose
@@ -73,6 +87,26 @@ pub struct ClaudeExchangeStats {
 /// Appended turns were therefore never indexed: a transcript could grow
 /// all session long while its new content never reached `exchanges` or
 /// the FTS index.
+///
+/// The guard is the tuple and only the tuple: an edit that preserves a
+/// file's size, mtime and inode is not seen. Every rewrite Claudepot
+/// itself makes (`session redact`, `session slim`) replaces the file by
+/// rename, which moves the inode.
+///
+/// ## Locking
+///
+/// Each changed file is parsed with no lock held, then written in its own
+/// `BEGIN IMMEDIATE` transaction under the index mutex. This used to run
+/// as ONE transaction holding the `SessionIndex` mutex for the whole pass,
+/// parse included, so a live 263 MB transcript kept both the mutex and the
+/// database write lock for up to a minute of every two, and every other
+/// writer of `sessions.db` failed with "database is locked".
+///
+/// A file's transaction first re-reads its `exchange_state` row and
+/// abandons the write when it no longer matches the snapshot this pass
+/// planned against — another process (the CLI's backfill, `session
+/// redact`'s re-index) got there first, possibly with newer content. The
+/// file is reported in `conflicted` and the next pass re-evaluates it.
 pub fn backfill_claude_exchanges(
     idx: &SessionIndex,
     claude_config_dir: &Path,
@@ -88,45 +122,64 @@ pub fn backfill_claude_exchanges(
     let discovered = walk_claude_projects(&projects_root, &mut stats);
     stats.discovered = discovered.len();
 
-    let db = idx.db();
-    let tx = db.unchecked_transaction()?;
-
-    // 2a. Which transcripts does `sessions` know about? `exchanges` has a
-    //     FK onto `sessions.file_path`, so a file the index hasn't seen
-    //     yet cannot be written — it waits for the next refresh.
-    let known = load_known_claude_sessions(&tx)?;
-    // 2b. What did THIS module last index, and at which file tuple?
-    let existing = load_claude_exchange_state(&tx)?;
+    // 2. Snapshot, under a short lock:
+    //    a. which transcripts `sessions` knows about — `exchanges` has an
+    //       FK onto `sessions.file_path`, so a file the index hasn't seen
+    //       yet cannot be written; it waits for the next refresh;
+    //    b. what THIS module last indexed, and at which file tuple.
+    let (known, existing) = {
+        let db = idx.db();
+        (
+            load_known_claude_sessions(&db)?,
+            load_claude_exchange_state(&db)?,
+        )
+    };
 
     for entry in &discovered {
         if !known.contains(&entry.file_path) {
             stats.skipped_unchanged += 1;
             continue;
         }
-        match upsert_claude_exchanges_in_savepoint(&tx, entry, existing.get(&entry.file_path)) {
-            Ok(Outcome::Indexed) => stats.indexed += 1,
-            Ok(Outcome::Skipped) => stats.skipped_unchanged += 1,
+        let snapshot = existing.get(&entry.file_path).copied();
+        if snapshot == Some(entry.tuple()) {
+            stats.skipped_unchanged += 1;
+            continue;
+        }
+        let rows = match parse_claude_rows(entry) {
+            Ok(rows) => rows,
             Err(e) => {
-                tracing::warn!(
-                    path = %entry.file_path,
-                    error = %e,
-                    "shared_memory: claude exchange backfill error"
-                );
-                stats.failed.push((PathBuf::from(&entry.file_path), e));
+                record_failure(&mut stats, entry, e);
+                continue;
             }
+        };
+        match write_claude_file(idx, entry, snapshot, &rows) {
+            Ok(Some(writes)) => {
+                stats.indexed += 1;
+                stats.rows_written += writes.total();
+            }
+            Ok(None) => stats.conflicted.push(PathBuf::from(&entry.file_path)),
+            Err(e) => record_failure(&mut stats, entry, e),
         }
     }
 
-    tx.commit()?;
     Ok(stats)
+}
+
+fn record_failure(stats: &mut ClaudeExchangeStats, entry: &ClaudeFile, error: String) {
+    tracing::warn!(
+        path = %entry.file_path,
+        error = %error,
+        "shared_memory: claude exchange backfill error"
+    );
+    stats.failed.push((PathBuf::from(&entry.file_path), error));
 }
 
 /// `file_path` of every Claude transcript the session index knows about.
 fn load_known_claude_sessions(
-    tx: &rusqlite::Transaction<'_>,
+    db: &Connection,
 ) -> Result<std::collections::HashSet<String>, rusqlite::Error> {
     let mut stmt =
-        tx.prepare("SELECT file_path FROM sessions WHERE source_kind = 'claude_code'")?;
+        db.prepare("SELECT file_path FROM sessions WHERE source_kind = 'claude_code'")?;
     let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
     let mut out = std::collections::HashSet::new();
     for r in rows {
@@ -141,6 +194,12 @@ struct ClaudeFile {
     size: i64,
     mtime_ns: i64,
     inode: i64,
+}
+
+impl ClaudeFile {
+    fn tuple(&self) -> FileTuple {
+        (self.size, self.mtime_ns, self.inode)
+    }
 }
 
 fn walk_claude_projects(root: &Path, stats: &mut ClaudeExchangeStats) -> Vec<ClaudeFile> {
@@ -183,14 +242,7 @@ fn walk(dir: &Path, out: &mut Vec<ClaudeFile>, stats: &mut ClaudeExchangeStats, 
         if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
             continue;
         }
-        let size = meta.len() as i64;
-        let mtime_ns = meta
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
-            .map(|d| d.as_nanos() as i64)
-            .unwrap_or(0);
-        let inode = inode_of(&meta);
+        let (size, mtime_ns, inode) = tuple_of(&meta);
         out.push(ClaudeFile {
             file_path: path.to_string_lossy().into_owned(),
             size,
@@ -200,28 +252,136 @@ fn walk(dir: &Path, out: &mut Vec<ClaudeFile>, stats: &mut ClaudeExchangeStats, 
     }
 }
 
-fn inode_of(meta: &fs::Metadata) -> i64 {
-    crate::fs_utils::file_identity(meta) as i64
+/// The `(size, mtime_ns, inode)` staleness tuple of a file, exactly as the
+/// walk records it — the one definition both the walk and
+/// [`reindex_file_verified`] compare against.
+fn tuple_of(meta: &fs::Metadata) -> FileTuple {
+    let size = meta.len() as i64;
+    let mtime_ns = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos() as i64)
+        .unwrap_or(0);
+    let inode = crate::fs_utils::file_identity(meta) as i64;
+    (size, mtime_ns, inode)
+}
+
+/// Why [`reindex_file_verified`] could not confirm a file re-indexed.
+#[derive(Debug, thiserror::Error)]
+pub enum ReindexError {
+    #[error("refresh the session index: {0}")]
+    Refresh(#[from] crate::session_index::SessionIndexError),
+    #[error("read the exchange index: {0}")]
+    Sql(#[from] rusqlite::Error),
+    #[error("stat {}: {source}", path.display())]
+    Stat {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    #[error(
+        "{} is still indexed at its previous content after {attempts} attempts",
+        path.display()
+    )]
+    Stale { path: PathBuf, attempts: u32 },
+}
+
+/// How many refresh-and-backfill rounds [`reindex_file_verified`] runs
+/// before giving up. A round only fails to land when another writer
+/// indexed the file between its snapshot and its write; that writer is
+/// either done or has itself indexed the new content by the next round.
+const REINDEX_ATTEMPTS: u32 = 3;
+
+/// Re-index the transcript at `file` and confirm its exchange rows now
+/// come from its current bytes.
+///
+/// For a caller about to tell the user that content is gone — `session
+/// redact` — "the backfill ran" is not enough: a pass may leave a file in
+/// `conflicted` for the next one, or skip it because the session index has
+/// not seen it yet, and either way the old text stays searchable. This
+/// runs refresh + backfill until the file's `exchange_state` matches its
+/// on-disk tuple, and fails with [`ReindexError::Stale`] if it never does.
+///
+/// A file with no `exchange_state` row at all was never indexed, so there
+/// is nothing stale to evict, and that is success.
+pub fn reindex_file_verified(
+    idx: &SessionIndex,
+    claude_config_dir: &Path,
+    file: &Path,
+) -> Result<(), ReindexError> {
+    for _ in 0..REINDEX_ATTEMPTS {
+        idx.refresh(claude_config_dir)?;
+        backfill_claude_exchanges(idx, claude_config_dir)?;
+        let meta = fs::metadata(file).map_err(|source| ReindexError::Stat {
+            path: file.to_path_buf(),
+            source,
+        })?;
+        match indexed_tuple(idx, file)? {
+            None => return Ok(()),
+            Some(t) if t == tuple_of(&meta) => return Ok(()),
+            Some(_) => {}
+        }
+    }
+    Err(ReindexError::Stale {
+        path: file.to_path_buf(),
+        attempts: REINDEX_ATTEMPTS,
+    })
+}
+
+/// The `exchange_state` tuple recorded for `file`. The row is keyed by the
+/// walk's spelling of the path (`<config>/projects/<slug>/<name>.jsonl`),
+/// which a caller-supplied path need not match byte for byte, so rows
+/// ending in the same file name are compared by canonical path when the
+/// exact spelling finds nothing.
+fn indexed_tuple(idx: &SessionIndex, file: &Path) -> Result<Option<FileTuple>, rusqlite::Error> {
+    let db = idx.db();
+    let exact = db
+        .query_row(
+            "SELECT size, mtime_ns, inode FROM exchange_state WHERE file_path = ?1",
+            [file.to_string_lossy()],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?;
+    if exact.is_some() {
+        return Ok(exact);
+    }
+    let (Some(name), Ok(canonical)) = (
+        file.file_name(),
+        crate::path_utils::canonicalize_simplified(file),
+    ) else {
+        return Ok(None);
+    };
+    let mut stmt = db.prepare(
+        "SELECT file_path, size, mtime_ns, inode FROM exchange_state \
+         WHERE file_path LIKE '%' || ?1",
+    )?;
+    let rows = stmt.query_map([name.to_string_lossy()], |r| {
+        Ok((r.get::<_, String>(0)?, (r.get(1)?, r.get(2)?, r.get(3)?)))
+    })?;
+    for row in rows {
+        let (path, tuple) = row?;
+        if crate::path_utils::canonicalize_simplified(Path::new(&path)).ok()
+            == Some(canonical.clone())
+        {
+            return Ok(Some(tuple));
+        }
+    }
+    Ok(None)
 }
 
 /// Per-file skip-vs-reindex state: the `(size, mtime_ns, inode)` of each
 /// transcript as of the last time THIS module wrote its exchanges. A file
 /// with no entry has never been indexed and will be.
 fn load_claude_exchange_state(
-    tx: &rusqlite::Transaction<'_>,
-) -> Result<std::collections::HashMap<String, (i64, i64, i64, i64)>, rusqlite::Error> {
+    db: &Connection,
+) -> Result<std::collections::HashMap<String, FileTuple>, rusqlite::Error> {
     // Read the marker THIS module wrote (`exchange_state`), not the
     // `sessions` tuple — `session_index::refresh` owns that one and keeps
     // it equal to disk, so comparing against it made every changed file
     // look unchanged and skipped its re-index. A file `sessions` knows
     // about but that has never been through here has no marker, so it is
     // absent from this map and gets indexed.
-    //
-    // The trailing `1` keeps the tuple shape stable for callers; the
-    // exchange count is no longer part of the decision (a transcript with
-    // no user turns legitimately yields zero exchanges, and re-indexing
-    // it on every pass just to rediscover that was wasted work).
-    let mut stmt = tx.prepare(
+    let mut stmt = db.prepare(
         "SELECT es.file_path, es.size, es.mtime_ns, es.inode \
          FROM exchange_state es \
          JOIN sessions s ON s.file_path = es.file_path \
@@ -231,57 +391,14 @@ fn load_claude_exchange_state(
     let mut out = std::collections::HashMap::new();
     while let Some(row) = rows.next()? {
         let path: String = row.get(0)?;
-        let s: i64 = row.get(1)?;
-        let m: i64 = row.get(2)?;
-        let i: i64 = row.get(3)?;
-        out.insert(path, (s, m, i, 1));
+        out.insert(path, (row.get(1)?, row.get(2)?, row.get(3)?));
     }
     Ok(out)
 }
 
-enum Outcome {
-    Indexed,
-    Skipped,
-}
-
-fn upsert_claude_exchanges_in_savepoint(
-    tx: &rusqlite::Transaction<'_>,
-    entry: &ClaudeFile,
-    existing: Option<&(i64, i64, i64, i64)>,
-) -> Result<Outcome, String> {
-    tx.execute_batch("SAVEPOINT claude_exchanges")
-        .map_err(|e| format!("savepoint: {e}"))?;
-    let outcome = upsert_claude_exchanges(tx, entry, existing);
-    match outcome {
-        Ok(o) => {
-            tx.execute_batch("RELEASE claude_exchanges")
-                .map_err(|e| format!("release: {e}"))?;
-            Ok(o)
-        }
-        Err(e) => {
-            let _ = tx.execute_batch("ROLLBACK TO claude_exchanges; RELEASE claude_exchanges");
-            Err(e)
-        }
-    }
-}
-
-fn upsert_claude_exchanges(
-    tx: &rusqlite::Transaction<'_>,
-    entry: &ClaudeFile,
-    existing: Option<&(i64, i64, i64, i64)>,
-) -> Result<Outcome, String> {
-    // The caller has already established the file is in `sessions`. The
-    // only question here is whether THIS module has indexed it at its
-    // current on-disk tuple. No marker (never indexed) or a moved tuple
-    // (the transcript grew) means re-index. Comparing against the
-    // `sessions` tuple instead — as this used to — always said "unchanged"
-    // once a refresh had run, so appended turns never got indexed.
-    if let Some((size, mtime, inode, _)) = existing {
-        if *size == entry.size && *mtime == entry.mtime_ns && *inode == entry.inode {
-            return Ok(Outcome::Skipped);
-        }
-    }
-
+/// Parse one transcript into the rows its exchanges should have. No lock
+/// is held: on a 263 MB transcript this is the slow part.
+fn parse_claude_rows(entry: &ClaudeFile) -> Result<Vec<ExchangeRow>, String> {
     let events =
         parse_events_public(Path::new(&entry.file_path)).map_err(|e| format!("parse: {e}"))?;
 
@@ -314,42 +431,17 @@ fn upsert_claude_exchanges(
         .and_then(|s| s.to_str())
         .unwrap_or("unknown-project");
 
-    // Pair events into exchanges.
     let exchanges = pair_events_into_exchanges(&format!("{slug}/{session_id}"), &events);
+    Ok(exchanges.into_iter().map(to_row).collect())
+}
 
-    // Wipe + reinsert the per-file exchanges. FK cascade + FTS
-    // trigger keep tool_calls and exchange_fts in sync.
-    tx.execute(
-        "DELETE FROM exchanges WHERE file_path = ?1",
-        [&entry.file_path],
-    )
-    .map_err(|e| format!("delete exchanges: {e}"))?;
-
-    for ex in &exchanges {
-        let snippet = build_snippet(&ex.user_text, &ex.assistant_text);
-        tx.execute(
-            "INSERT INTO exchanges (
-                id, file_path, source_kind, turn_index, role_pair,
-                timestamp_ms, user_text, assistant_text,
-                line_start, line_end, is_sidechain, parent_id, snippet_text
-            ) VALUES (
-                ?1, ?2, 'claude_code', ?3, 'user_assistant',
-                ?4, ?5, ?6,
-                NULL, NULL, 0, NULL, ?7
-            )",
-            params![
-                ex.id,
-                entry.file_path,
-                ex.turn_index,
-                ex.timestamp_ms,
-                ex.user_text,
-                ex.assistant_text,
-                snippet,
-            ],
-        )
-        .map_err(|e| format!("insert exchange: {e}"))?;
-
-        for (ordinal, tc) in ex.tool_calls.iter().enumerate() {
+fn to_row(ex: ClaudeExchange) -> ExchangeRow {
+    let snippet_text = build_snippet(&ex.user_text, &ex.assistant_text);
+    let tool_calls = ex
+        .tool_calls
+        .into_iter()
+        .enumerate()
+        .map(|(ordinal, tc)| ToolCallRow {
             // `<exchange_id>\u{1f}<ordinal>\u{1f}<tool_use_id>`.
             //
             // The ordinal is load-bearing. `tool_use_id` is NOT reliably
@@ -357,34 +449,78 @@ fn upsert_claude_exchanges(
             // can replay the same `tool_use` id twice in a turn, and the
             // id used to be `<exchange_id>\u{1f}<tool_use_id>` — which
             // then collided on the `tool_calls.id` primary key. The whole
-            // file's savepoint rolled back with
+            // file's write rolled back with
             // "UNIQUE constraint failed: tool_calls.id", so that
             // transcript stayed permanently absent from the exchange
             // index. Observed on a real corpus, where it also kept
             // search's un-indexed-remainder probe permanently non-empty.
-            let tc_id = format!("{}\u{001f}{}\u{001f}{}", ex.id, ordinal, tc.tool_use_id);
-            tx.execute(
-                "INSERT INTO tool_calls (
-                    id, exchange_id, tool_name, tool_input_json,
-                    tool_result_text, is_error, timestamp_ms
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![
-                    tc_id,
-                    ex.id,
-                    tc.tool_name,
-                    tc.tool_input_json,
-                    tc.tool_result_text,
-                    tc.is_error as i64,
-                    tc.timestamp_ms,
-                ],
-            )
-            .map_err(|e| format!("insert tool_call: {e}"))?;
-        }
+            id: format!("{}\u{001f}{}\u{001f}{}", ex.id, ordinal, tc.tool_use_id),
+            tool_name: tc.tool_name,
+            tool_input_json: Some(tc.tool_input_json),
+            tool_result_text: tc.tool_result_text,
+            is_error: tc.is_error,
+            timestamp_ms: tc.timestamp_ms,
+        })
+        .collect();
+    ExchangeRow {
+        id: ex.id,
+        turn_index: i64::from(ex.turn_index),
+        timestamp_ms: ex.timestamp_ms,
+        user_text: ex.user_text,
+        assistant_text: ex.assistant_text,
+        line_start: None,
+        line_end: None,
+        snippet_text,
+        tool_calls,
+    }
+}
+
+/// Write one file's rows, if nobody else has since the snapshot.
+///
+/// `Ok(None)` is the conflict case: the file's `exchange_state` moved away
+/// from `snapshot`, or its `sessions` row is gone. Nothing is written.
+fn write_claude_file(
+    idx: &SessionIndex,
+    entry: &ClaudeFile,
+    snapshot: Option<FileTuple>,
+    rows: &[ExchangeRow],
+) -> Result<Option<ReconcileWrites>, String> {
+    let mut db = idx.db();
+    // IMMEDIATE, not the DEFERRED default: the snapshot re-check below is
+    // a read, and a DEFERRED transaction that reads and then writes can
+    // lose the upgrade to another connection's commit and fail with
+    // SQLITE_BUSY_SNAPSHOT — which the busy handler does not retry.
+    let tx = db
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|e| format!("begin: {e}"))?;
+
+    let current: Option<FileTuple> = tx
+        .query_row(
+            "SELECT size, mtime_ns, inode FROM exchange_state WHERE file_path = ?1",
+            [&entry.file_path],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()
+        .map_err(|e| format!("read exchange_state: {e}"))?;
+    let still_known: bool = tx
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sessions \
+             WHERE file_path = ?1 AND source_kind = 'claude_code')",
+            [&entry.file_path],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("read sessions: {e}"))?;
+    if current != snapshot || !still_known {
+        // Dropping `tx` rolls back; nothing was written.
+        return Ok(None);
     }
 
-    // Record the tuple we just indexed AT. Inside the same savepoint as
-    // the writes above, so a file that fails partway leaves no marker and
-    // is retried next pass rather than being mistaken for done.
+    let writes = exchange_rows::reconcile(&tx, &entry.file_path, "claude_code", rows)
+        .map_err(|e| format!("write exchanges: {e}"))?;
+
+    // Record the tuple we just indexed AT, in the same transaction as the
+    // rows, so a file that fails partway leaves no marker and is retried
+    // next pass rather than being mistaken for done.
     tx.execute(
         "INSERT INTO exchange_state (file_path, size, mtime_ns, inode) \
          VALUES (?1, ?2, ?3, ?4) \
@@ -396,7 +532,8 @@ fn upsert_claude_exchanges(
     )
     .map_err(|e| format!("upsert exchange_state: {e}"))?;
 
-    Ok(Outcome::Indexed)
+    tx.commit().map_err(|e| format!("commit: {e}"))?;
+    Ok(Some(writes))
 }
 
 // ─── pairing ─────────────────────────────────────────────────
@@ -791,5 +928,261 @@ mod tests {
             .query_row("SELECT assistant_text FROM exchanges", [], |r| r.get(0))
             .unwrap();
         assert_eq!(assistant, "first chunk\nsecond chunk");
+    }
+
+    // ─── incremental writes ──────────────────────────────────────
+
+    /// One transcript exercising the pairing edge cases: a message id
+    /// repeated across lines (usage charged once, text kept), a tool_use id
+    /// repeated inside one turn, an empty result, a line carrying a result
+    /// for the previous turn AND the next prompt, a line carrying two
+    /// prompts, a CRLF line, and a result with no matching call.
+    fn edge_case_transcript() -> String {
+        let ts = |s: u32| format!("2026-05-15T11:30:{s:02}.000Z");
+        let meta = |s: u32| {
+            format!(
+                "\"timestamp\":\"{}\",\"sessionId\":\"sid\",\"cwd\":\"/proj\"",
+                ts(s)
+            )
+        };
+        [
+            format!(r#"{{"type":"user","message":{{"role":"user","content":"refactor the auth flow"}},{}}}"#, meta(0)),
+            format!(r#"{{"type":"assistant","message":{{"id":"m1","role":"assistant","model":"claude-opus-4-7","content":[{{"type":"text","text":"reading the file"}},{{"type":"tool_use","id":"tu_1","name":"Read","input":{{"file_path":"/proj/auth.rs"}}}}],"usage":{{"input_tokens":10,"output_tokens":5}}}},{}}}"#, meta(1)),
+            format!(r#"{{"type":"user","message":{{"role":"user","content":[{{"type":"tool_result","tool_use_id":"tu_1","content":"fn login() {{}}","is_error":false}}]}},{}}}"#, meta(2)),
+            format!(r#"{{"type":"assistant","message":{{"id":"m1","role":"assistant","model":"claude-opus-4-7","content":[{{"type":"text","text":"zebrafish pattern found"}}],"usage":{{"input_tokens":10,"output_tokens":5}}}},{}}}"#, meta(3)),
+            format!(r#"{{"type":"assistant","message":{{"id":"m2","role":"assistant","model":"claude-opus-4-7","content":[{{"type":"tool_use","id":"tu_2","name":"Bash","input":{{"command":"cargo test"}}}},{{"type":"tool_use","id":"tu_2","name":"Bash","input":{{"command":"cargo test --retry"}}}}]}},{}}}"#, meta(4)),
+            format!(r#"{{"type":"user","message":{{"role":"user","content":[{{"type":"tool_result","tool_use_id":"tu_2","content":"","is_error":false}},{{"type":"text","text":"and the second question"}}]}},{}}}"#, meta(5)),
+            format!(r#"{{"type":"user","message":{{"role":"user","content":[{{"type":"text","text":"first ask"}},{{"type":"text","text":"second ask"}}]}},{}}}"#, meta(6)),
+            format!(r#"{{"type":"assistant","message":{{"id":"m3","role":"assistant","model":"claude-opus-4-7","content":[{{"type":"text","text":"done"}}]}},{}}}{}"#, meta(7), "\r"),
+            format!(r#"{{"type":"user","message":{{"role":"user","content":[{{"type":"tool_result","tool_use_id":"tu_9","content":"orphan","is_error":true}}]}},{}}}"#, meta(8)),
+        ]
+        .iter()
+        .map(|l| format!("{l}\n"))
+        .collect()
+    }
+
+    const EDGE_TERMS: &[&str] = &["reading", "zebrafish", "second", "ask", "done", "auth"];
+
+    /// Refresh + backfill `body` as a brand-new index; the reference a
+    /// history of incremental passes must equal.
+    fn fresh_index_of(body: &str) -> (TempDir, SessionIndex, String) {
+        let tmp = TempDir::new().unwrap();
+        let idx = open_idx(&tmp);
+        let cfg = tmp.path().join("claude");
+        let dir = cfg.join("projects").join("-proj");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("sid.jsonl");
+        fs::write(&path, body).unwrap();
+        idx.refresh(&cfg).unwrap();
+        let stats = backfill_claude_exchanges(&idx, &cfg).unwrap();
+        assert!(stats.failed.is_empty(), "{:?}", stats.failed);
+        (tmp, idx, path.to_string_lossy().into_owned())
+    }
+
+    #[test]
+    fn backfill_after_every_append_matches_one_backfill_of_the_whole_file() {
+        use super::super::exchange_rows::test_support::snapshot;
+        use std::io::Write;
+
+        let body = edge_case_transcript();
+        // Every line boundary, and the middle of every line: the index is
+        // re-read while Claude Code is half-way through writing a line.
+        let mut cuts: Vec<usize> = Vec::new();
+        let mut start = 0;
+        for (i, b) in body.bytes().enumerate() {
+            if b == b'\n' {
+                cuts.push(start + (i - start) / 2);
+                cuts.push(i + 1);
+                start = i + 1;
+            }
+        }
+
+        let tmp = TempDir::new().unwrap();
+        let idx = open_idx(&tmp);
+        let cfg = tmp.path().join("claude");
+        let dir = cfg.join("projects").join("-proj");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("sid.jsonl");
+        fs::write(&path, "").unwrap();
+        let live = path.to_string_lossy().into_owned();
+
+        let mut written = 0;
+        for cut in cuts {
+            // Append, never rewrite: the file keeps its inode, as a live
+            // transcript does.
+            let mut f = fs::OpenOptions::new().append(true).open(&path).unwrap();
+            f.write_all(&body.as_bytes()[written..cut]).unwrap();
+            drop(f);
+            written = cut;
+
+            idx.refresh(&cfg).unwrap();
+            let stats = backfill_claude_exchanges(&idx, &cfg).unwrap();
+            assert!(stats.failed.is_empty(), "cut {cut}: {:?}", stats.failed);
+            assert!(
+                stats.conflicted.is_empty(),
+                "cut {cut}: {:?}",
+                stats.conflicted
+            );
+
+            let (_ref_dir, reference, ref_path) = fresh_index_of(&body[..cut]);
+            let norm = |s: super::super::exchange_rows::test_support::Snapshot, p: &str| {
+                let strip = |v: Vec<String>| -> Vec<String> {
+                    v.into_iter().map(|r| r.replace(p, "<file>")).collect()
+                };
+                (strip(s.0), strip(s.1), s.2)
+            };
+            assert_eq!(
+                norm(snapshot(&idx.db(), EDGE_TERMS), &live),
+                norm(snapshot(&reference.db(), EDGE_TERMS), &ref_path),
+                "after {cut} of {} bytes the incrementally maintained rows differ \
+                 from a fresh index of the same bytes",
+                body.len()
+            );
+        }
+    }
+
+    #[test]
+    fn a_growing_transcript_writes_only_what_it_appended() {
+        // The measured failure: every pass deleted and re-inserted every
+        // row of every transcript that had grown, so a live 263 MB one was
+        // rewritten in full every two minutes.
+        let tmp = TempDir::new().unwrap();
+        let idx = open_idx(&tmp);
+        let claude_config = tmp.path().join("claude");
+        let path = stage_claude_session(&claude_config, "-proj", "sid");
+        refresh_sessions(&idx, &claude_config);
+        let first = backfill_claude_exchanges(&idx, &claude_config).unwrap();
+        assert_eq!(first.rows_written, 2, "one exchange + one tool call");
+
+        let mut body = fs::read_to_string(&path).unwrap();
+        body.push_str(
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"and now the tests"}]},"timestamp":"2026-05-15T11:31:00.000Z","sessionId":"sid","cwd":"/proj"}
+{"type":"assistant","message":{"role":"assistant","model":"claude-opus-4-7","content":[{"type":"tool_use","id":"tu_2","name":"Bash","input":{"command":"cargo test"}}]},"timestamp":"2026-05-15T11:31:01.000Z","sessionId":"sid","cwd":"/proj"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_2","content":"ok","is_error":false}]},"timestamp":"2026-05-15T11:31:02.000Z","sessionId":"sid","cwd":"/proj"}
+"#,
+        );
+        fs::write(&path, body).unwrap();
+        refresh_sessions(&idx, &claude_config);
+        let second = backfill_claude_exchanges(&idx, &claude_config).unwrap();
+        assert_eq!(second.indexed, 1);
+        assert_eq!(
+            second.rows_written, 2,
+            "the new exchange and its tool call — the first exchange is untouched"
+        );
+    }
+
+    #[test]
+    fn a_file_another_writer_indexed_meanwhile_is_left_for_the_next_pass() {
+        // Another process (the CLI's backfill, `session redact`'s re-index)
+        // wrote this file's rows after this pass took its snapshot. This
+        // pass's parse may be OLDER than what it would overwrite — for a
+        // redaction, older means the text that was just removed.
+        let tmp = TempDir::new().unwrap();
+        let idx = open_idx(&tmp);
+        let claude_config = tmp.path().join("claude");
+        let path = stage_claude_session(&claude_config, "-proj", "sid");
+        refresh_sessions(&idx, &claude_config);
+        backfill_claude_exchanges(&idx, &claude_config).unwrap();
+
+        let meta = fs::metadata(&path).unwrap();
+        let (size, mtime_ns, inode) = tuple_of(&meta);
+        let entry = ClaudeFile {
+            file_path: path.to_string_lossy().into_owned(),
+            size,
+            mtime_ns,
+            inode,
+        };
+        // Planned as if the file had never been indexed.
+        let stale_rows = vec![ExchangeRow {
+            id: "claude_code:-proj/sid:0".into(),
+            turn_index: 0,
+            timestamp_ms: None,
+            user_text: "stale plan".into(),
+            assistant_text: String::new(),
+            line_start: None,
+            line_end: None,
+            snippet_text: String::new(),
+            tool_calls: vec![],
+        }];
+        assert_eq!(write_claude_file(&idx, &entry, None, &stale_rows), Ok(None));
+
+        let db = open_raw(&tmp.path().join("sessions.db"));
+        let user: String = db
+            .query_row("SELECT user_text FROM exchanges", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            user, "please refactor the auth flow",
+            "nothing may be written"
+        );
+    }
+
+    #[test]
+    fn reindex_file_verified_evicts_rewritten_text() {
+        let tmp = TempDir::new().unwrap();
+        let idx = open_idx(&tmp);
+        let claude_config = tmp.path().join("claude");
+        let path = stage_claude_session(&claude_config, "-proj", "sid");
+        refresh_sessions(&idx, &claude_config);
+        backfill_claude_exchanges(&idx, &claude_config).unwrap();
+
+        // `session redact`'s shape: rewrite to a sibling, rename over.
+        let redacted = fs::read_to_string(&path)
+            .unwrap()
+            .replace("refactor the auth flow", "refactor the [REDACTED] flow");
+        let tmp_file = path.with_extension("jsonl.tmp");
+        fs::write(&tmp_file, redacted).unwrap();
+        fs::rename(&tmp_file, &path).unwrap();
+
+        reindex_file_verified(&idx, &claude_config, &path).unwrap();
+
+        let db = open_raw(&tmp.path().join("sessions.db"));
+        let hits: i64 = db
+            .query_row(
+                "SELECT count(*) FROM exchange_fts WHERE exchange_fts MATCH 'auth'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            hits, 0,
+            "the redacted word must be gone from the text index"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reindex_file_verified_fails_when_the_file_cannot_be_reindexed() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = TempDir::new().unwrap();
+        let idx = open_idx(&tmp);
+        let claude_config = tmp.path().join("claude");
+        let path = stage_claude_session(&claude_config, "-proj", "sid");
+        refresh_sessions(&idx, &claude_config);
+        backfill_claude_exchanges(&idx, &claude_config).unwrap();
+
+        // New content that cannot be read, so no pass can index it.
+        let mut body = fs::read_to_string(&path).unwrap();
+        body.push('\n');
+        fs::write(&path, body).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+        if fs::read(&path).is_ok() {
+            // Running as root: permissions do not stop the read, so this
+            // setup cannot produce an unindexable file.
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+            return;
+        }
+        let err = reindex_file_verified(&idx, &claude_config, &path).unwrap_err();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(
+            matches!(
+                err,
+                ReindexError::Stale {
+                    attempts: REINDEX_ATTEMPTS,
+                    ..
+                }
+            ),
+            "got {err}"
+        );
     }
 }

@@ -2,8 +2,8 @@
 //! `session_turns` table introduced alongside the per-turn extractor
 //! in `session.rs`. Kept separate from `codec.rs` so the per-session
 //! aggregate path stays focused on its own UPSERT pipeline; the
-//! turn-row replace-all semantics are a different shape and mixing
-//! the two in one file makes both harder to reason about.
+//! turn rows are a per-file set, a different shape, and mixing the
+//! two in one file makes both harder to reason about.
 //!
 //! The two public-to-the-crate entry points mirror the `codec.rs`
 //! pattern: a writer (`replace_turns`) called inside the refresh
@@ -15,11 +15,19 @@ use rusqlite::{params, Connection};
 
 use super::SessionIndexError;
 
-/// Replace every per-turn row for `file_path` with the freshly-scanned
+/// Make `file_path`'s per-turn rows equal to the freshly-scanned
 /// `turns`. Called inside the same transaction as the session
 /// aggregate upsert so the cache stays internally consistent: either
 /// both the session row and its per-turn detail update, or neither
 /// does.
+///
+/// Writes only what differs. A live transcript re-scans on every pass,
+/// and this used to `DELETE` every turn and re-insert them all, so a
+/// long session rewrote its whole turn history every two minutes to
+/// record the last few. An upsert whose `WHERE` finds the stored row
+/// identical writes nothing; turns the scan no longer produces (a
+/// slimmed or rewritten transcript) are deleted. Returns the rows
+/// actually written.
 ///
 /// Each `user_prompt_preview` is independently `sk-ant-`-redacted at
 /// write time. The per-row redaction matters because a transcript
@@ -30,18 +38,30 @@ pub(super) fn replace_turns(
     db: &Connection,
     file_path: &str,
     turns: &[TurnRecord],
-) -> Result<(), SessionIndexError> {
-    db.execute(
-        "DELETE FROM session_turns WHERE file_path = ?1",
-        params![file_path],
-    )?;
-    let mut stmt = db.prepare_cached(SQL_INSERT_TURN)?;
+) -> Result<usize, SessionIndexError> {
+    let mut written = 0usize;
+    let scanned: std::collections::HashSet<i64> =
+        turns.iter().map(|t| t.turn_index as i64).collect();
+    let stored: Vec<i64> = {
+        let mut stmt =
+            db.prepare_cached("SELECT turn_index FROM session_turns WHERE file_path = ?1")?;
+        let rows = stmt.query_map(params![file_path], |r| r.get::<_, i64>(0))?;
+        rows.collect::<rusqlite::Result<_>>()?
+    };
+    {
+        let mut stmt = db
+            .prepare_cached("DELETE FROM session_turns WHERE file_path = ?1 AND turn_index = ?2")?;
+        for gone in stored.iter().filter(|i| !scanned.contains(i)) {
+            written += stmt.execute(params![file_path, gone])?;
+        }
+    }
+    let mut stmt = db.prepare_cached(SQL_UPSERT_TURN)?;
     for t in turns {
         let preview = t
             .user_prompt_preview
             .as_deref()
             .map(super::codec::redact_secrets_for_turns);
-        stmt.execute(params![
+        written += stmt.execute(params![
             file_path,
             t.turn_index as i64,
             t.ts_ms,
@@ -56,7 +76,7 @@ pub(super) fn replace_turns(
             premium_kind_of(&t.premium).as_column(),
         ])?;
     }
-    Ok(())
+    Ok(written)
 }
 
 /// The bucket a turn's premium names. A turn is one message, so at most
@@ -293,13 +313,36 @@ LIMIT ?1
 #[allow(dead_code)]
 const _: &str = TURN_RANK_EXPR;
 
-const SQL_INSERT_TURN: &str = r#"
+// The `WHERE` on the update arm is what makes an unchanged turn free:
+// SQLite skips the update, and `execute` reports zero rows changed.
+const SQL_UPSERT_TURN: &str = r#"
 INSERT INTO session_turns (
     file_path, turn_index, ts_ms, model,
     tokens_input, tokens_output, tokens_cache_creation, tokens_cache_read,
     user_prompt_preview,
     tokens_cache_creation_1h, tokens_web_search, premium_kind
 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+ON CONFLICT (file_path, turn_index) DO UPDATE SET
+    ts_ms = excluded.ts_ms,
+    model = excluded.model,
+    tokens_input = excluded.tokens_input,
+    tokens_output = excluded.tokens_output,
+    tokens_cache_creation = excluded.tokens_cache_creation,
+    tokens_cache_read = excluded.tokens_cache_read,
+    user_prompt_preview = excluded.user_prompt_preview,
+    tokens_cache_creation_1h = excluded.tokens_cache_creation_1h,
+    tokens_web_search = excluded.tokens_web_search,
+    premium_kind = excluded.premium_kind
+WHERE ts_ms IS NOT excluded.ts_ms
+   OR model IS NOT excluded.model
+   OR tokens_input IS NOT excluded.tokens_input
+   OR tokens_output IS NOT excluded.tokens_output
+   OR tokens_cache_creation IS NOT excluded.tokens_cache_creation
+   OR tokens_cache_read IS NOT excluded.tokens_cache_read
+   OR user_prompt_preview IS NOT excluded.user_prompt_preview
+   OR tokens_cache_creation_1h IS NOT excluded.tokens_cache_creation_1h
+   OR tokens_web_search IS NOT excluded.tokens_web_search
+   OR premium_kind IS NOT excluded.premium_kind
 "#;
 
 // Test-only, paired with `load_turns` above.

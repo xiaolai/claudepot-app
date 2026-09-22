@@ -921,9 +921,12 @@ pub fn run() {
                                 "search index: session refresh failed; palette search uses JSONL scan"
                             );
                         } else {
-                            match claudepot_core::shared_memory::claude_exchanges::backfill_claude_exchanges(
+                            let started = std::time::Instant::now();
+                            let result = claudepot_core::shared_memory::claude_exchanges::backfill_claude_exchanges(
                                 &idx, &cfg,
-                            ) {
+                            );
+                            let elapsed_ms = started.elapsed().as_millis() as u64;
+                            match result {
                                 // Per-file failures leave those transcripts
                                 // out of the FTS index. NOT fatal — search
                                 // still finds them, because
@@ -937,18 +940,31 @@ pub fn run() {
                                     indexed = stats.indexed,
                                     skipped = stats.skipped_unchanged,
                                     failed = stats.failed.len(),
+                                    conflicted = stats.conflicted.len(),
+                                    rows_written = stats.rows_written,
+                                    elapsed_ms,
                                     first_error = %stats.failed[0].1,
                                     first_path = %stats.failed[0].0.display(),
                                     "search index: exchange backfill finished WITH FAILURES — \
                                      those transcripts fall back to the slow scan path"
                                 ),
-                                Ok(stats) if stats.indexed > 0 => tracing::info!(
-                                    target = "claudepot_tauri",
-                                    discovered = stats.discovered,
-                                    indexed = stats.indexed,
-                                    skipped = stats.skipped_unchanged,
-                                    "search index: exchange backfill complete"
-                                ),
+                                // `rows_written` is the number to watch: it
+                                // is what the pass cost the disk. A live
+                                // transcript re-indexes every pass, so it
+                                // should track what was appended, not the
+                                // transcript's size.
+                                Ok(stats) if stats.indexed > 0 || !stats.conflicted.is_empty() => {
+                                    tracing::info!(
+                                        target = "claudepot_tauri",
+                                        discovered = stats.discovered,
+                                        indexed = stats.indexed,
+                                        skipped = stats.skipped_unchanged,
+                                        conflicted = stats.conflicted.len(),
+                                        rows_written = stats.rows_written,
+                                        elapsed_ms,
+                                        "search index: exchange backfill complete"
+                                    )
+                                }
                                 // Steady state: nothing changed. Don't narrate.
                                 Ok(_) => {}
                                 Err(e) => tracing::warn!(
