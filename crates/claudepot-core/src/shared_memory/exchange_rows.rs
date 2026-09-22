@@ -258,8 +258,11 @@ pub(crate) mod test_support {
                         rusqlite::types::ValueRef::Null => "NULL".to_string(),
                         rusqlite::types::ValueRef::Integer(v) => v.to_string(),
                         rusqlite::types::ValueRef::Real(v) => v.to_string(),
+                        // Verbatim, not `{:?}`: Debug doubles every `\`,
+                        // so a Windows path would no longer match the
+                        // raw path callers normalize away.
                         rusqlite::types::ValueRef::Text(t) => {
-                            format!("{:?}", String::from_utf8_lossy(t))
+                            format!("text:{}", String::from_utf8_lossy(t))
                         }
                         rusqlite::types::ValueRef::Blob(b) => format!("blob{b:?}"),
                     })
