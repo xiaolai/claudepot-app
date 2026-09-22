@@ -6,6 +6,54 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.6.6 — beta (released 2026-09-23)
+
+One theme: the background index stopped rewriting whole transcripts.
+On the reference machine macOS recorded Claudepot writing **34 GB in
+20 hours** — 471 KB every second, sustained — nearly all of it the
+2-minute search-index pass re-inserting a live 263 MB transcript it
+had already indexed.
+
+### Fixed
+
+- **A growing transcript was rewritten in full every two minutes.**
+  For every transcript that had changed, the search index deleted all
+  of its rows and inserted them again, so one long session cost its
+  whole size in disk writes per pass. Each pass now compares the
+  transcript with what is stored and writes only the rows that differ
+  — an append costs what was appended. The same change applies to the
+  session index's per-turn rows and usage events.
+- **Index refreshes took up to 75 seconds and other writers failed with
+  "database is locked".** The index held its database lock for the
+  whole pass, parsing included. It now parses with no lock held and
+  writes one transcript at a time, and concurrent reads share a single
+  refresh instead of each starting their own. Several screens that
+  opened their own connection to the index per call now use the app's
+  shared one.
+- **`claudepot session redact` could report text as unsearchable while
+  it was still in the index.** It now re-indexes the rewritten file and
+  fails unless that file is indexed at its new content.
+- **Artifact usage counted old days twice.** After the daily cleanup of
+  raw events older than 30 days, the next re-scan of a transcript
+  re-inserted them and added their days to the daily totals a second
+  time. Totals inflated before this release stay inflated until
+  Settings → Cleanup rebuilds the index.
+- **Links from memories to a conversation turn disappeared** whenever
+  that transcript grew, because the turn's row was deleted and
+  re-created on every pass.
+
+### Added
+
+- **A record of main-thread stalls.** If the window and menu-bar icon
+  stop responding, the log now says so and for how long, and on macOS
+  a stall past 15 seconds saves a stack sample of the process as
+  `main-thread-stall-*.txt` beside the log — at most one an hour, the
+  newest five kept. One such freeze was observed and could not be
+  diagnosed after the fact; the next one can.
+- **Index timings in the log.** A refresh reports how long it spent
+  walking, parsing, waiting and writing, and a search-index pass
+  reports how many rows it actually wrote.
+
 ## 0.6.5 — beta (released 2026-09-18)
 
 Mostly one theme: making the numbers and the readings true. Cost
