@@ -460,3 +460,102 @@ Four details are load-bearing:
   WebView2's own context menu is likewise still native. Closing either
   properly means `with_webview` plus `ICoreWebView2Settings3`, which no
   machine here can behaviourally test.
+
+## The index loop, and the 34 GB it wrote (2026-09-22)
+
+The GUI stayed up for 33 hours with its window and tray icon
+unresponsive while the 2-minute index loop (`lib.rs`, "search index")
+kept logging, and it was restarted without anyone learning what the main
+thread was doing. The freeze itself is **still unexplained**; what the
+investigation did establish is below, and the watchdog at the end exists
+so the next one is not.
+
+**What was measured.** macOS's resource report
+(`/Library/Logs/DiagnosticReports/claudepot-tauri_*.diag`, event
+"disk writes") recorded **34.36 GB written in 72,949 s** — 471 KB/s,
+sustained — with 3,074 stack samples. The release binary is stripped,
+so the frames were symbolicated by disassembling around each return
+address and reading the SQL string each call site loads: 820 samples in
+`INSERT INTO tool_calls`, 729 in `INSERT INTO exchanges` (with the FTS
+trigger beneath it), 901 in the backfill's `COMMIT`. **80% of the
+writes were `backfill_claude_exchanges`; 89% were the loop.** Refreshes
+that normally take 50–300 ms took 13–75 s whenever one long session was
+live, and every other writer of `sessions.db` logged "database is
+locked".
+
+**The mechanism.** For every transcript whose `(size, mtime, inode)`
+moved, the backfill deleted all of that file's exchange rows and
+re-inserted them, and the whole pass ran inside one transaction holding
+the `SessionIndex` mutex — parse included. A live transcript moves on
+every pass, and the one live here was 263 MB, so it was rewritten in
+full every two minutes and the write lock was held for most of each
+two. `session_index::refresh` did the same, on a smaller scale, to
+`session_turns` and `usage_event` (about 3,400 event rows a refresh).
+
+**What replaced it: write only what differs.** `exchange_rows::reconcile`
+(both the Claude and the Codex backfill), `turns::replace_turns` and
+`usage_store::reconcile_events_for_file` make a file's rows equal to a
+fresh parse and touch only rows that differ. An `UPDATE … WHERE <any
+column IS NOT the new value>` that finds nothing to change dirties no
+page — measured, 2,000 unchanged upserts over a 38.8 MB table added
+**0 bytes** to the WAL, one changed row 53 KB — so an append costs what
+was appended. The end state is exactly delete-and-reinsert's, and
+`backfill_after_every_append_matches_one_backfill_of_the_whole_file`
+pins that at every line boundary and mid-line cut of an edge-case
+transcript. Two latent bugs went with the full rewrite: `memory_links` rows
+pointing at an exchange were cascade-deleted on every pass, because the
+exchange was deleted before its identical replacement was inserted; and
+every re-scan after the daily raw-event GC re-inserted the evicted
+events, counting their days in `usage_daily` a second time. A re-scan of
+a file the cache already held now skips events older than the last GC
+cutoff (`a_rescan_after_gc_does_not_count_evicted_events_again`).
+Rollups inflated before this fix stay inflated until Settings → Cleanup
+rebuilds the index.
+
+**Why not the obvious incremental design.** Indexing only the bytes
+appended since a stored offset was designed first and sent to Codex in
+refute mode. It survives on paper, but needs: one line-framing policy
+shared by full and incremental parses (today's parser indexes a final
+line with no newline, which an offset would then replay), migration of
+every legacy row before the unchanged-file skip, invalidating the cursor
+when `forget` or an older binary rewrites the rows, and a coherent seed
+snapshot across processes. Exchange-granular resumption is not enough
+either: the longest exchange here was 64.6 MB, and a 46 MB subagent
+transcript was a single exchange. Reconciling by row id has none of that
+machinery, at the cost of still *reading and parsing* each changed file
+every pass — about 1 s of CPU for 263 MB, against the writes it removes.
+Revisit only if that parse becomes the measured cost.
+
+**The lock is held per file, not per pass.** Each changed file is parsed
+with no lock, then written in its own `BEGIN IMMEDIATE` transaction that
+first re-reads the file's `exchange_state` row and abandons the write if
+another process indexed the file since this pass's snapshot — that
+process may have written *newer* content, such as a redaction. Such a
+file is reported as `conflicted`, which is why `session redact` now
+calls `reindex_file_verified` and fails unless the file is indexed at
+its rewritten bytes; "the backfill ran" used to be reported as "the
+removed content is no longer searchable".
+
+**One refresh at a time per handle.** Every read entry point refreshes
+first, so N index-backed calls arriving together each walked the corpus
+and each re-parsed and rewrote the live transcript. `RefreshGate`
+serializes whole refreshes and lets a waiting caller return if a
+refresh that *began* after it arrived has finished (the start, not the
+finish: a refresh that began earlier may have walked past the file the
+caller wants). The per-call `SessionIndex::open`s in `artifact_usage`,
+`top_costly_prompts`, `session_worktree_groups`, `session_index_rebuild`
+and the invalidation and agent-event orchestrators now borrow the shared
+handle through `shared_or_open` — they bypassed the gate, and each open
+queued for the write lock (`apply_schema` begins `IMMEDIATE`).
+
+The refresh log line now carries `walk_ms`, `scan_ms`, `db_wait_ms`,
+`write_ms` and `gate_wait_ms`, and the backfill line carries
+`rows_written` and `elapsed_ms`. A 60 s refresh used to be one number
+that could not say whether it was parsing, waiting or writing.
+
+**The main-thread watchdog** (`main_thread_watchdog.rs`) pings the main
+thread from its own OS thread once a second, logs a stall at 5 s and its
+end, and on macOS runs `/usr/bin/sample` once a stall reaches 15 s,
+leaving `main-thread-stall-*.txt` beside the log (at most one an hour,
+newest five kept). The samples are unsymbolicated for the same reason
+as above; the system frames and the string-reference method are enough.

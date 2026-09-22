@@ -129,6 +129,9 @@ pub async fn tick(app: &AppHandle, config_dir: PathBuf) {
         config_dir,
         orchestrator: state,
         emit_capped,
+        index: app
+            .try_state::<crate::commands::shared_memory::SharedMemoryIndex>()
+            .and_then(|s| s.0.clone()),
     };
 
     tick_inner(&env, dispatcher, Utc::now).await;
@@ -163,6 +166,9 @@ struct ProdTickEnv {
     config_dir: PathBuf,
     orchestrator: Arc<EventOrchestrator>,
     emit_capped: Arc<dyn Fn(usize, usize) + Send + Sync>,
+    /// The app's shared session index — `list_all_sessions` would open a
+    /// private connection per tick, taking the write lock to do it.
+    index: Option<Arc<claudepot_core::session_index::SessionIndex>>,
 }
 
 impl TickEnv for ProdTickEnv {
@@ -179,7 +185,9 @@ impl TickEnv for ProdTickEnv {
         events_store::save(ledger)
     }
     fn list_sessions(&self) -> Vec<SessionRow> {
-        match claudepot_core::session::list_all_sessions(&self.config_dir) {
+        let rows = crate::commands::shared_memory::shared_or_open(self.index.clone())
+            .and_then(|idx| idx.list_all(&self.config_dir));
+        match rows {
             Ok(rows) => rows,
             Err(e) => {
                 tracing::warn!(error = %e, "agent_event_orchestrator: session index failed");

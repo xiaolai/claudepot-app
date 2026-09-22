@@ -159,6 +159,12 @@ pub fn delete_events_for_file(db: &Connection, file_path: &str) -> SqlResult<usi
 /// `(ts_ms / 86_400_000) * 86_400` — equivalent for ts_ms ≥ 0, which
 /// every realistic session timestamp is.
 pub fn subtract_daily_for_file(db: &Connection, file_path: &str) -> SqlResult<()> {
+    subtract_daily_from(db, file_path, i64::MIN)
+}
+
+/// [`subtract_daily_for_file`] restricted to the events with
+/// `id >= from_id` — the tail [`reconcile_events_for_file`] replaces.
+fn subtract_daily_from(db: &Connection, file_path: &str, from_id: i64) -> SqlResult<()> {
     db.execute(
         "INSERT INTO usage_daily (
             day_unix_s, kind, artifact_key, plugin_id,
@@ -172,16 +178,125 @@ pub fn subtract_daily_for_file(db: &Connection, file_path: &str) -> SqlResult<()
             -COALESCE(SUM(duration_ms), 0),
             -SUM(CASE WHEN duration_ms IS NOT NULL THEN 1 ELSE 0 END)
          FROM usage_event
-         WHERE file_path = ?1
+         WHERE file_path = ?1 AND id >= ?2
          GROUP BY (ts_ms / 86400000) * 86400, kind, artifact_key, plugin_id
          ON CONFLICT (day_unix_s, kind, artifact_key) DO UPDATE SET
             fire_count        = fire_count + excluded.fire_count,
             error_count       = error_count + excluded.error_count,
             total_duration_ms = total_duration_ms + excluded.total_duration_ms,
             duration_count    = duration_count + excluded.duration_count",
-        params![file_path],
+        params![file_path, from_id],
     )?;
     Ok(())
+}
+
+/// Make `file_path`'s raw events equal to `events`, with `usage_daily`
+/// tracking them, writing only from the first event that differs.
+///
+/// Stored events are compared in `id` order, which is the order the
+/// extractor produced them in, so a transcript that only grew keeps
+/// every stored event as a common prefix and an append costs just the
+/// appended events. From the first difference on, the stored tail is
+/// subtracted from the daily rollup and deleted, and the new tail is
+/// inserted — the same arithmetic subtract-all / delete-all / insert-all
+/// did, applied to a suffix. That full rewrite ran for every re-scanned
+/// transcript on every pass: a live session rewrote its whole event
+/// history (about 3,400 rows a refresh on the reference machine) to
+/// record the last few.
+///
+/// `evicted_before_ms` is the cutoff the raw-event GC last applied, for a
+/// file indexed before: events older than it were counted into
+/// `usage_daily` when first inserted and have since been evicted, so they
+/// are neither re-inserted nor counted again. Re-inserting them — which the
+/// full rewrite did on every re-scan after a GC — added each one to its
+/// day's rollup a second time. `None` for a file indexed for the first
+/// time, whose old events have never been counted.
+///
+/// Returns the number of event rows deleted plus inserted.
+pub fn reconcile_events_for_file(
+    db: &Connection,
+    file_path: &str,
+    project_path: &str,
+    events: &[UsageEvent],
+    evicted_before_ms: Option<i64>,
+) -> SqlResult<usize> {
+    let events: Vec<&UsageEvent> = events
+        .iter()
+        .filter(|e| evicted_before_ms.is_none_or(|cutoff| e.ts_ms >= cutoff))
+        .collect();
+    let stored: Vec<(i64, StoredEvent)> = {
+        let mut stmt = db.prepare_cached(
+            "SELECT id, ts_ms, session_id, project_path, kind, artifact_key,
+                    plugin_id, outcome, duration_ms, extra_json
+               FROM usage_event WHERE file_path = ?1 ORDER BY id",
+        )?;
+        let rows = stmt.query_map(params![file_path], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                StoredEvent {
+                    ts_ms: r.get(1)?,
+                    session_id: r.get(2)?,
+                    project_path: r.get(3)?,
+                    kind: r.get(4)?,
+                    artifact_key: r.get(5)?,
+                    plugin_id: r.get(6)?,
+                    outcome: r.get(7)?,
+                    duration_ms: r.get(8)?,
+                    extra_json: r.get(9)?,
+                },
+            ))
+        })?;
+        rows.collect::<SqlResult<_>>()?
+    };
+
+    let common = stored
+        .iter()
+        .zip(&events)
+        .take_while(|((_, s), e)| s.matches(e, project_path))
+        .count();
+
+    let mut written = 0usize;
+    if let Some((first_stale_id, _)) = stored.get(common) {
+        subtract_daily_from(db, file_path, *first_stale_id)?;
+        written += db.execute(
+            "DELETE FROM usage_event WHERE file_path = ?1 AND id >= ?2",
+            params![file_path, first_stale_id],
+        )?;
+    }
+    for event in &events[common..] {
+        insert_event(db, event, file_path, project_path)?;
+        written += 1;
+    }
+    Ok(written)
+}
+
+/// One stored `usage_event` row, in the shape [`UsageEvent`] is compared
+/// against.
+struct StoredEvent {
+    ts_ms: i64,
+    session_id: String,
+    project_path: String,
+    kind: String,
+    artifact_key: String,
+    plugin_id: Option<String>,
+    outcome: String,
+    duration_ms: Option<i64>,
+    extra_json: Option<String>,
+}
+
+impl StoredEvent {
+    /// Would inserting `e` for `project_path` store exactly this row?
+    fn matches(&self, e: &UsageEvent, project_path: &str) -> bool {
+        self.ts_ms == e.ts_ms
+            && self.session_id == e.session_id
+            && self.project_path == project_path
+            && self.kind == e.kind.as_str()
+            && self.artifact_key == e.artifact_key
+            && self.plugin_id == e.plugin_id
+            && self.outcome == e.outcome.as_str()
+            && self.duration_ms == e.duration_ms.map(|d| d as i64)
+            && self.extra_json == e.extra_json
+    }
 }
 
 /// Garbage-collect raw events older than `cutoff_ms`. Returns the

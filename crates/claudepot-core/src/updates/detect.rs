@@ -118,7 +118,18 @@ fn cli_filename() -> &'static str {
 /// `which` because the user's `claude` may be a function (this is the
 /// case in some plugin-aware shells); we walk PATH ourselves.
 pub fn resolve_active_cli_binary() -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
+    resolve_active_cli_binary_in(std::env::var_os("PATH").as_deref())
+}
+
+/// [`resolve_active_cli_binary`] against an explicit `PATH` value.
+///
+/// Separate so a test can ask about an empty `PATH` without clearing the
+/// process-wide variable. Tests run in parallel threads of one process,
+/// and every other test that spawns `git` or `sh` by name resolves it
+/// through that variable — `shared_memory::git`'s HEAD test failed
+/// whenever it ran inside another test's empty-`PATH` window.
+fn resolve_active_cli_binary_in(path: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
+    let path = path?;
     let target = cli_filename();
     for dir in std::env::split_paths(&path) {
         let candidate = dir.join(target);
@@ -147,12 +158,20 @@ fn is_active_match(active: Option<&Path>, p: &Path) -> bool {
 
 /// Enumerate all detectable CC CLI installs on this machine.
 pub fn detect_cli_installs() -> Vec<CliInstall> {
-    detect_cli_installs_at(dirs::home_dir().as_deref())
+    detect_cli_installs_at(
+        dirs::home_dir().as_deref(),
+        std::env::var_os("PATH").as_deref(),
+    )
 }
 
-fn detect_cli_installs_at(home: Option<&Path>) -> Vec<CliInstall> {
+/// `path_var` is the `PATH` value to resolve the active binary against —
+/// explicit for the reason [`resolve_active_cli_binary_in`] gives.
+fn detect_cli_installs_at(
+    home: Option<&Path>,
+    path_var: Option<&std::ffi::OsStr>,
+) -> Vec<CliInstall> {
     let mut out: Vec<CliInstall> = Vec::new();
-    let active = resolve_active_cli_binary();
+    let active = resolve_active_cli_binary_in(path_var);
     let active_ref = active.as_deref();
 
     // Native curl install
@@ -692,13 +711,8 @@ mod tests {
 
     #[test]
     fn empty_path_yields_no_active_binary() {
-        let saved = std::env::var_os("PATH");
-        std::env::set_var("PATH", "");
-        let r = resolve_active_cli_binary();
-        if let Some(p) = saved {
-            std::env::set_var("PATH", p);
-        }
-        assert!(r.is_none());
+        assert!(resolve_active_cli_binary_in(Some(std::ffi::OsStr::new(""))).is_none());
+        assert!(resolve_active_cli_binary_in(None).is_none());
     }
 
     #[test]
@@ -784,13 +798,8 @@ mod tests {
         std::fs::create_dir_all(&bin_dir).unwrap();
         std::fs::write(bin_dir.join(cli_filename()), b"#!/bin/sh\n").unwrap();
 
-        // Empty PATH so resolve_active_cli_binary returns None.
-        let saved_path = std::env::var_os("PATH");
-        std::env::set_var("PATH", "");
-        let r = detect_cli_installs_at(Some(tmp.path()));
-        if let Some(p) = saved_path {
-            std::env::set_var("PATH", p);
-        }
+        // Empty PATH so the active-binary lookup finds nothing.
+        let r = detect_cli_installs_at(Some(tmp.path()), Some(std::ffi::OsStr::new("")));
 
         let active = r.iter().filter(|c| c.is_active).collect::<Vec<_>>();
         assert_eq!(active.len(), 1, "exactly one install should be active");
@@ -799,7 +808,7 @@ mod tests {
 
     #[test]
     fn detect_cli_installs_at_handles_no_home() {
-        let r = detect_cli_installs_at(None);
+        let r = detect_cli_installs_at(None, std::env::var_os("PATH").as_deref());
         // On a host without `claude` on PATH and no home, the result
         // should be empty. If the test host has a real `claude` it
         // will appear as Unknown — accept that as a valid outcome.

@@ -228,6 +228,11 @@ jobs:
       # systemd-user; tests that require it self-skip when systemd
       # isn't reachable inside the runner sandbox, so the lane stays
       # green even when systemd is absent.
+      # The shim calls back into the `claudepot` CLI to write
+      # result.json, and the test refuses to run without it.
+      - name: Build the claudepot CLI the agent shim calls back into
+        run: cargo build -p claudepot-cli
+
       - name: Agent E2E (--ignored)
         run: cargo test -p claudepot-core --test agent_e2e -- --ignored
 

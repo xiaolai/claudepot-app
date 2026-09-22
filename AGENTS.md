@@ -28,7 +28,7 @@ notes are not; it is not a signal that the notes are optional.
 | Note | Covers |
 |---|---|
 | [`docs/notes/remote-control.md`](docs/notes/remote-control.md) | the appliance security model, the certificate work, every design decision inside the phone panel |
-| [`docs/notes/gui-shell.md`](docs/notes/gui-shell.md) | the renderer and data-dir measurements, and three optimisations that were reverted |
+| [`docs/notes/gui-shell.md`](docs/notes/gui-shell.md) | the renderer and data-dir measurements, three optimisations that were reverted, and the index loop's 34 GB of writes |
 | [`docs/notes/test-gates.md`](docs/notes/test-gates.md) | the failure each gate was written after |
 | [`docs/notes/cc-integration.md`](docs/notes/cc-integration.md) | retention, permission grants and peer messaging, against dated CC versions |
 | [`docs/notes/i18n.md`](docs/notes/i18n.md) | the three catalogs and the bugs behind each rule |
@@ -165,7 +165,7 @@ Eight SQLite databases:
 |---|---|---|
 | `accounts.db` | `cli_backend` | authoritative account + verification state, linked to Keychain |
 | `boards.db` | `board::store` | **user data, not a cache** — a board's contents exist nowhere else once the writing session ends, so migrations preserve rows and nothing prunes automatically. Opened directly by GUI, CLI and the MCP subprocess with no IPC between them, so `writer_id` is self-reported: every surface renders provenance as "Reported by …", never as verified identity |
-| `sessions.db` | `session_index` | one row per `.jsonl` transcript, keyed by file_path; `(size, mtime_ns)` is the re-parse guard. Rebuild via Settings → Cleanup or `claudepot session rebuild-index`. Three invariants: a refresh with an empty plan must take **no** write lock; a per-project read must scope **both** sides of the diff; index-backed Tauri commands borrow the **shared** `SessionIndex` rather than opening their own |
+| `sessions.db` | `session_index` | one row per `.jsonl` transcript, keyed by file_path; `(size, mtime_ns)` is the re-parse guard. Rebuild via Settings → Cleanup or `claudepot session rebuild-index`. Four invariants: a refresh with an empty plan must take **no** write lock; a per-project read must scope **both** sides of the diff; index-backed Tauri commands borrow the **shared** `SessionIndex` rather than opening their own (`shared_or_open`); a re-scan of a changed transcript writes **only the rows that differ** — delete-and-reinsert of a live 263 MB transcript every two minutes was 34 GB in 20 hours (`docs/notes/gui-shell.md`) |
 | `env-vault.db` | `env_vault::store` | the local named-secret vault (`env_secrets`, secret in a 0600 column, no OS Keychain) |
 | `keys.db` | `keys::store` | the Keys tab's API-key inventory, same at-rest pattern |
 | `memory_changes.db` | `memory_log` | append-only log of detected CLAUDE.md / memory-file writes |

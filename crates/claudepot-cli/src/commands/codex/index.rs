@@ -32,6 +32,8 @@ struct JsonReport {
     deleted: usize,
     failed_count: usize,
     failed: Vec<JsonFailure>,
+    /// Files another writer changed mid-run; the next run retries them.
+    conflicted: Vec<PathBuf>,
     codex_sessions_root: PathBuf,
     db: PathBuf,
 }
@@ -83,6 +85,7 @@ pub async fn index(codex_home: Option<PathBuf>, db: Option<PathBuf>, json: bool)
                     error: e.clone(),
                 })
                 .collect(),
+            conflicted: stats.conflicted.clone(),
             codex_sessions_root,
             db: db_path,
         };
@@ -95,6 +98,7 @@ pub async fn index(codex_home: Option<PathBuf>, db: Option<PathBuf>, json: bool)
         println!("skipped (unchanged): {}", stats.skipped_unchanged);
         println!("deleted (vanished):  {}", stats.deleted);
         println!("failed:              {}", stats.failed.len());
+        println!("conflicted (retry):  {}", stats.conflicted.len());
         if !stats.failed.is_empty() {
             println!();
             println!("Failed files:");

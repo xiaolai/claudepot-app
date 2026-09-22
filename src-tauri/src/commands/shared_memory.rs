@@ -31,6 +31,27 @@ use tauri::State;
 /// the UI renders as a banner instead of crashing.
 pub struct SharedMemoryIndex(pub Option<Arc<SessionIndex>>);
 
+/// The startup handle when there is one; a fresh connection only when
+/// startup failed to open it.
+///
+/// Code in this process that reads or refreshes `sessions.db` goes
+/// through here rather than calling `SessionIndex::open` itself. Opening
+/// is not free — `apply_schema` begins `IMMEDIATE`, so every open queues
+/// for the write lock — and a second handle bypasses the shared handle's
+/// refresh gate, so it re-parses whatever a live session just appended
+/// and rewrites those rows a second time.
+pub(crate) fn shared_or_open(
+    shared: Option<Arc<SessionIndex>>,
+) -> Result<Arc<SessionIndex>, claudepot_core::session_index::SessionIndexError> {
+    match shared {
+        Some(idx) => Ok(idx),
+        None => {
+            SessionIndex::open(&claudepot_core::paths::claudepot_data_dir().join("sessions.db"))
+                .map(Arc::new)
+        }
+    }
+}
+
 fn require_idx(state: &State<'_, SharedMemoryIndex>) -> Result<Arc<SessionIndex>, ErrorDto> {
     state.0.as_ref().cloned().ok_or_else(|| {
         ErrorDto::new(

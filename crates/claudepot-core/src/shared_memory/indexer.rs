@@ -28,7 +28,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
+
+use super::exchange_rows::{self, ExchangeRow, ToolCallRow};
 
 use crate::codex_session::{parse_codex_rollout_jsonl, CodexConversation};
 use crate::session_index::SessionIndex;
@@ -162,6 +164,9 @@ pub struct CodexIndexerStats {
     pub deleted: usize,
     /// Per-file failures: `(path, error_string)`.
     pub failed: Vec<(PathBuf, String)>,
+    /// Files left for the next run because another writer changed their
+    /// cached row between this run's snapshot and its write.
+    pub conflicted: Vec<PathBuf>,
 }
 
 /// Walk `$CODEX_HOME/sessions/**/*.jsonl` and synchronize the
@@ -181,29 +186,35 @@ pub fn backfill_codex(
     let discovered = walk_codex_sessions(codex_sessions_root, &mut stats);
     stats.discovered = discovered.len();
 
-    let db = idx.db();
-    // Single outer transaction for atomic apply. Each per-file
-    // write is wrapped in a SAVEPOINT (M15) so that a per-file
-    // failure (e.g. PRIMARY KEY collision in tool_calls) only
-    // rolls back that file's writes, not the entire batch.
-    let tx = db.unchecked_transaction()?;
-
-    // Load existing Codex cache state.
-    let existing: std::collections::HashMap<String, (i64, i64, i64)> =
-        load_codex_cache_tuples(&tx)?;
+    // Snapshot the cache under a short lock. Each file is then parsed
+    // with no lock held and written in its own short transaction: this
+    // used to be one transaction over the whole run, parse included,
+    // which held `sessions.db`'s write lock — and the app's index loop
+    // off it — for as long as the run took.
+    let existing: std::collections::HashMap<String, FileTuple> = {
+        let db = idx.db();
+        load_codex_cache_tuples(&db)?
+    };
 
     // Index pass.
     for entry in &discovered {
-        let previously_indexed = existing.contains_key(&entry.file_path);
-        match upsert_codex_session_in_savepoint(&tx, entry, existing.get(&entry.file_path)) {
-            Ok(IndexOutcome::Indexed) => stats.indexed += 1,
-            Ok(IndexOutcome::Skipped) => stats.skipped_unchanged += 1,
+        let snapshot = existing.get(&entry.file_path).copied();
+        if snapshot == Some((entry.size, entry.mtime_ns, entry.inode)) {
+            stats.skipped_unchanged += 1;
+            continue;
+        }
+        let written = parse_codex_file(entry)
+            .and_then(|(post_parse, conv)| write_codex_file(idx, &post_parse, snapshot, &conv));
+        match written {
+            Ok(true) => stats.indexed += 1,
+            Ok(false) => stats.conflicted.push(PathBuf::from(&entry.file_path)),
             Err(e) => {
+                let previously_indexed = snapshot.is_some();
                 tracing::warn!(
                     path = %entry.file_path,
                     error = %e,
                     previously_indexed,
-                    "shared_memory: codex backfill error (savepoint rolled back)"
+                    "shared_memory: codex backfill error (file left unwritten)"
                 );
                 stats.failed.push((PathBuf::from(&entry.file_path), e));
                 // H6 — stale-row cleanup: if a previously-indexed
@@ -212,12 +223,9 @@ pub fn backfill_codex(
                 // keep pointing at content that no longer matches
                 // disk. Force-delete here so search results
                 // reflect on-disk truth.
-                //
-                // The DELETE runs in the outer transaction (not
-                // the rolled-back savepoint), so it persists at
-                // outer commit.
                 if previously_indexed {
-                    if let Err(e2) = tx.execute(
+                    let db = idx.db();
+                    if let Err(e2) = db.execute(
                         "DELETE FROM sessions WHERE file_path = ?1 AND source_kind = 'codex'",
                         [&entry.file_path],
                     ) {
@@ -238,51 +246,28 @@ pub fn backfill_codex(
     // since v4 → enforces).
     let on_disk: std::collections::HashSet<&str> =
         discovered.iter().map(|e| e.file_path.as_str()).collect();
-    for path in existing.keys() {
-        if !on_disk.contains(path.as_str()) {
+    let gone: Vec<&String> = existing
+        .keys()
+        .filter(|path| !on_disk.contains(path.as_str()))
+        .collect();
+    if !gone.is_empty() {
+        let mut db = idx.db();
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        for path in gone {
             tx.execute(
                 "DELETE FROM sessions WHERE file_path = ?1 AND source_kind = 'codex'",
                 [path],
             )?;
             stats.deleted += 1;
         }
+        tx.commit()?;
     }
 
-    tx.commit()?;
     Ok(stats)
 }
 
-/// Run `upsert_codex_session` inside a SAVEPOINT. On success the
-/// savepoint is released (merged into the outer txn); on failure
-/// it's rolled back so the per-file error doesn't poison the
-/// batch.
-///
-/// SQLite SAVEPOINT names must be ASCII identifiers; we use a
-/// fixed name (`codex_upsert`) since SAVEPOINTs nest by stack order
-/// and we never have two nested codex upserts at the same depth.
-fn upsert_codex_session_in_savepoint(
-    tx: &rusqlite::Transaction<'_>,
-    entry: &CodexDiscovery,
-    existing: Option<&(i64, i64, i64)>,
-) -> Result<IndexOutcome, String> {
-    tx.execute_batch("SAVEPOINT codex_upsert")
-        .map_err(|e| format!("savepoint: {e}"))?;
-    match upsert_codex_session(tx, entry, existing) {
-        Ok(outcome) => {
-            tx.execute_batch("RELEASE codex_upsert")
-                .map_err(|e| format!("release: {e}"))?;
-            Ok(outcome)
-        }
-        Err(e) => {
-            // Best-effort rollback. If this also fails, we propagate
-            // the original parse/write error to the caller; the
-            // outer transaction will fail on next write, which is
-            // acceptable degradation for what should be a rare path.
-            let _ = tx.execute_batch("ROLLBACK TO codex_upsert; RELEASE codex_upsert");
-            Err(e)
-        }
-    }
-}
+/// A cached file's `(size, mtime_ns, inode)`.
+type FileTuple = (i64, i64, i64);
 
 // ─── walk ─────────────────────────────────────────────────────
 
@@ -391,9 +376,9 @@ fn inode_of(meta: &fs::Metadata) -> i64 {
 // ─── load cache ───────────────────────────────────────────────
 
 fn load_codex_cache_tuples(
-    tx: &rusqlite::Transaction<'_>,
-) -> Result<std::collections::HashMap<String, (i64, i64, i64)>, rusqlite::Error> {
-    let mut stmt = tx.prepare(
+    db: &rusqlite::Connection,
+) -> Result<std::collections::HashMap<String, FileTuple>, rusqlite::Error> {
+    let mut stmt = db.prepare(
         "SELECT file_path, file_size_bytes, file_mtime_ns, file_inode \
          FROM sessions WHERE source_kind = 'codex'",
     )?;
@@ -411,24 +396,11 @@ fn load_codex_cache_tuples(
 
 // ─── upsert ───────────────────────────────────────────────────
 
-enum IndexOutcome {
-    Indexed,
-    Skipped,
-}
-
-fn upsert_codex_session(
-    tx: &rusqlite::Transaction<'_>,
-    entry: &CodexDiscovery,
-    existing: Option<&(i64, i64, i64)>,
-) -> Result<IndexOutcome, String> {
-    if let Some((size, mtime, inode)) = existing {
-        if *size == entry.size && *mtime == entry.mtime_ns && *inode == entry.inode {
-            return Ok(IndexOutcome::Skipped);
-        }
-    }
-
-    // Parse outside the SQL portion. Errors propagate as strings
-    // so the indexer's `failed` list can carry them.
+/// Parse one Codex rollout with no lock held, returning the conversation
+/// and the file's tuple as of AFTER the parse.
+fn parse_codex_file(entry: &CodexDiscovery) -> Result<(CodexDiscovery, CodexConversation), String> {
+    // Errors propagate as strings so the indexer's `failed` list can
+    // carry them.
     let conv = parse_codex_rollout_jsonl(Path::new(&entry.file_path))
         .map_err(|e| format!("parse: {e}"))?;
 
@@ -464,9 +436,38 @@ fn upsert_codex_session(
             conv.diagnostics.malformed_lines, conv.diagnostics.oversize_lines
         ));
     }
+    Ok((post_parse_entry, conv))
+}
 
-    write_codex_conversation(tx, &post_parse_entry, &conv).map_err(|e| format!("write: {e}"))?;
-    Ok(IndexOutcome::Indexed)
+/// Write one parsed file in its own `BEGIN IMMEDIATE` transaction, if its
+/// cached row still matches `snapshot`. `Ok(false)` means another writer
+/// changed it since this run's snapshot, and nothing was written — its
+/// parse may be newer than ours.
+fn write_codex_file(
+    idx: &SessionIndex,
+    entry: &CodexDiscovery,
+    snapshot: Option<FileTuple>,
+    conv: &CodexConversation,
+) -> Result<bool, String> {
+    let mut db = idx.db();
+    let tx = db
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| format!("begin: {e}"))?;
+    let current: Option<FileTuple> = tx
+        .query_row(
+            "SELECT file_size_bytes, file_mtime_ns, file_inode FROM sessions \
+             WHERE file_path = ?1 AND source_kind = 'codex'",
+            [&entry.file_path],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()
+        .map_err(|e| format!("read cache row: {e}"))?;
+    if current != snapshot {
+        return Ok(false);
+    }
+    write_codex_conversation(&tx, entry, conv).map_err(|e| format!("write: {e}"))?;
+    tx.commit().map_err(|e| format!("commit: {e}"))?;
+    Ok(true)
 }
 
 fn restat_after_parse(entry: &CodexDiscovery) -> Result<CodexDiscovery, std::io::Error> {
@@ -590,66 +591,42 @@ fn write_codex_conversation(
         ],
     )?;
 
-    // Wipe + reinsert the per-file exchanges. FK cascade plus FTS
-    // AFTER DELETE trigger keep `exchange_fts` and `tool_calls`
-    // in sync without explicit work here.
-    tx.execute(
-        "DELETE FROM exchanges WHERE file_path = ?1",
-        [&entry.file_path],
-    )?;
-
-    for ex in &conv.exchanges {
-        let ts_ms = ex.timestamp.map(|t| t.timestamp_millis());
-        let snippet = build_snippet(&ex.user_text, &ex.assistant_text);
-        tx.execute(
-            "INSERT INTO exchanges (
-                id, file_path, source_kind, turn_index, role_pair,
-                timestamp_ms, user_text, assistant_text,
-                line_start, line_end, is_sidechain, parent_id, snippet_text
-            ) VALUES (
-                ?1, ?2, 'codex', ?3, 'user_assistant',
-                ?4, ?5, ?6,
-                ?7, ?8, 0, NULL, ?9
-            )",
-            params![
-                ex.id,
-                entry.file_path,
-                ex.turn_index,
-                ts_ms,
-                ex.user_text,
-                ex.assistant_text,
-                ex.line_start,
-                ex.line_end,
-                snippet,
-            ],
-        )?;
-
-        for tc in &ex.tool_calls {
-            let tc_ts = tc.timestamp.map(|t| t.timestamp_millis());
-            // Tool call id stable across reparse. L3 — use ASCII
-            // unit-separator (U+001F) instead of `:` so the
-            // composite key is unambiguous even if Codex emits a
-            // call_id containing `:`. Unit-separator is in the
-            // legacy ASCII control range and won't appear in any
-            // Codex-generated identifier (which is hex / printable).
-            let tc_id = format!("{}\u{001f}{}", ex.id, tc.call_id);
-            tx.execute(
-                "INSERT INTO tool_calls (
-                    id, exchange_id, tool_name, tool_input_json,
-                    tool_result_text, is_error, timestamp_ms
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![
-                    tc_id,
-                    ex.id,
-                    tc.name,
-                    tc.arguments,
-                    tc.output,
-                    tc.is_error as i64,
-                    tc_ts,
-                ],
-            )?;
-        }
-    }
+    // Make the file's exchanges equal to this parse, writing only what
+    // differs — see `exchange_rows`. The FK cascade and the FTS triggers
+    // still maintain `tool_calls` / `exchange_fts` for whatever it deletes.
+    let rows: Vec<ExchangeRow> = conv
+        .exchanges
+        .iter()
+        .map(|ex| ExchangeRow {
+            id: ex.id.clone(),
+            turn_index: i64::from(ex.turn_index),
+            timestamp_ms: ex.timestamp.map(|t| t.timestamp_millis()),
+            user_text: ex.user_text.clone(),
+            assistant_text: ex.assistant_text.clone(),
+            line_start: ex.line_start.map(i64::from),
+            line_end: ex.line_end.map(i64::from),
+            snippet_text: build_snippet(&ex.user_text, &ex.assistant_text),
+            tool_calls: ex
+                .tool_calls
+                .iter()
+                .map(|tc| ToolCallRow {
+                    // Tool call id stable across reparse. L3 — use ASCII
+                    // unit-separator (U+001F) instead of `:` so the
+                    // composite key is unambiguous even if Codex emits a
+                    // call_id containing `:`. Unit-separator is in the
+                    // legacy ASCII control range and won't appear in any
+                    // Codex-generated identifier (which is hex / printable).
+                    id: format!("{}\u{001f}{}", ex.id, tc.call_id),
+                    tool_name: tc.name.clone(),
+                    tool_input_json: Some(tc.arguments.clone()),
+                    tool_result_text: tc.output.clone(),
+                    is_error: tc.is_error,
+                    timestamp_ms: tc.timestamp.map(|t| t.timestamp_millis()),
+                })
+                .collect(),
+        })
+        .collect();
+    exchange_rows::reconcile(tx, &entry.file_path, "codex", &rows)?;
 
     Ok(())
 }

@@ -134,11 +134,13 @@ pub fn redact_cmd(ctx: &AppContext, args: RedactArgs) -> Result<()> {
     let report = execute_redact(&data_dir, &path, &opts, &sink).context("execute redact")?;
 
     // The index caches (size, mtime, inode) per file and re-parses when
-    // the triple moves — and a re-parse DELETEs the file's exchanges
-    // before re-inserting, so the FTS rows cannot outlive the text they
-    // were built from. Refresh now rather than leaving the old content
-    // searchable until whenever the app next happens to tick.
-    let reindexed = reindex_after_redact();
+    // the triple moves; a re-parse makes the file's exchange rows equal
+    // to the new bytes — every row whose text changed is rewritten, every
+    // row that no longer exists is deleted — so the FTS rows cannot
+    // outlive the text they were built from. Re-index now, and confirm
+    // it, rather than leaving the old content searchable until whenever
+    // the app next happens to tick.
+    let reindexed = reindex_after_redact(&path);
 
     if ctx.json {
         // Report the reindex outcome in the machine-readable output too,
@@ -215,16 +217,14 @@ fn is_live_session(path: &std::path::Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Re-parse the rewritten transcript into `sessions.db`.
+/// Re-parse the rewritten transcript into `sessions.db`, and confirm it.
 ///
-/// Uses the same two-step the app itself runs (`refresh` →
-/// `backfill_claude_exchanges`) rather than reaching for a private
-/// path. Both are keyed on the `(size, mtime, inode)` staleness triple,
-/// so only the file we just rewrote is re-parsed; the other ~130
-/// transcripts are skipped. The backfill DELETEs a changed file's
-/// exchanges before re-inserting, which is what actually evicts the old
-/// text from the FTS index.
-fn reindex_after_redact() -> Result<()> {
+/// `reindex_file_verified` runs the same refresh → backfill the app runs,
+/// then checks the file is indexed at its rewritten bytes. The check is
+/// the point: a backfill pass may leave a file for its next pass, and "the
+/// backfill ran" used to be reported as "the removed content is no longer
+/// searchable" whether or not this file's rows had actually been rebuilt.
+fn reindex_after_redact(path: &std::path::Path) -> Result<()> {
     let db = paths::claudepot_data_dir().join("sessions.db");
     if !db.exists() {
         return Ok(()); // nothing indexed yet; nothing to evict
@@ -232,8 +232,7 @@ fn reindex_after_redact() -> Result<()> {
     let cfg = paths::claude_config_dir();
     let idx = claudepot_core::session_index::SessionIndex::open(&db)
         .context("open session index for refresh")?;
-    idx.refresh(&cfg).context("refresh session index")?;
-    claudepot_core::shared_memory::claude_exchanges::backfill_claude_exchanges(&idx, &cfg)
+    claudepot_core::shared_memory::claude_exchanges::reindex_file_verified(&idx, &cfg, path)
         .context("re-index the redacted transcript")?;
     Ok(())
 }

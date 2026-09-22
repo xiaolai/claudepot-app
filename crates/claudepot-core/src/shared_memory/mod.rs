@@ -37,6 +37,7 @@ pub mod claude_exchanges;
 pub mod compile;
 pub mod distill;
 pub mod durable;
+pub mod exchange_rows;
 pub mod git;
 pub mod guard;
 pub mod harvest_ledger;

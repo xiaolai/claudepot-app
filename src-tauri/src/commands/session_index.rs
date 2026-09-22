@@ -126,16 +126,14 @@ pub async fn session_read_path(
 ///
 /// Wrapped in `spawn_blocking` — full rebuild scans every JSONL.
 #[tauri::command]
-pub async fn session_index_rebuild() -> Result<(), ErrorDto> {
-    tokio::task::spawn_blocking(|| {
-        let data_dir = paths::claudepot_data_dir();
-        let db_path = data_dir.join("sessions.db");
+pub async fn session_index_rebuild(index: State<'_, SharedMemoryIndex>) -> Result<(), ErrorDto> {
+    let shared = index.0.clone();
+    tokio::task::spawn_blocking(move || {
         // `open session index: ` / `rebuild session index: ` are gone.
         // Both failures are `SessionIndexError`, which already
         // distinguishes sql / io / json / migration-validation — the
         // prefix only said which half of this function we were in.
-        let idx =
-            claudepot_core::session_index::SessionIndex::open(&db_path).map_err(ErrorDto::from)?;
+        let idx = crate::commands::shared_memory::shared_or_open(shared).map_err(ErrorDto::from)?;
         idx.rebuild().map_err(ErrorDto::from)
     })
     .await
@@ -424,10 +422,15 @@ pub async fn session_search(
 ///
 /// Wrapped in `spawn_blocking` for the same reason as `session_list_all`.
 #[tauri::command]
-pub async fn session_worktree_groups() -> Result<Vec<crate::dto::RepositoryGroupDto>, ErrorDto> {
-    tokio::task::spawn_blocking(|| {
+pub async fn session_worktree_groups(
+    index: State<'_, SharedMemoryIndex>,
+) -> Result<Vec<crate::dto::RepositoryGroupDto>, ErrorDto> {
+    let shared = index.0.clone();
+    tokio::task::spawn_blocking(move || {
         let cfg = paths::claude_config_dir();
-        let rows = claudepot_core::session::list_all_sessions(&cfg).map_err(ErrorDto::from)?;
+        let rows = crate::commands::shared_memory::shared_or_open(shared)
+            .and_then(|idx| idx.list_all(&cfg))
+            .map_err(ErrorDto::from)?;
         let groups = claudepot_core::session_worktree::group_by_repo(rows);
         Ok::<_, ErrorDto>(
             groups
