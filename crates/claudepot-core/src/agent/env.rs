@@ -118,6 +118,16 @@ fn validate_value(value: &str) -> Result<(), AgentError> {
 /// managers (bun, npm-global, Volta) come last among user paths so
 /// a system install wins over a stale toolchain copy.
 pub fn default_path_segments(claudepot_bin_dir: &str) -> Vec<String> {
+    default_path_segments_for(std::env::var("HOME").ok().as_deref(), claudepot_bin_dir)
+}
+
+/// [`default_path_segments`] for an explicit `$HOME` (`None` = unset).
+///
+/// Separate so tests can vary `HOME` without setting the process-wide
+/// variable, which every test running in parallel in the same process
+/// would otherwise see.
+fn default_path_segments_for(home: Option<&str>, claudepot_bin_dir: &str) -> Vec<String> {
+    let home = home.filter(|h| !h.is_empty());
     let mut v: Vec<String> = if cfg!(target_os = "windows") {
         // Windows: scheduler may strip the inherited PATH, so we
         // re-list the system locations plus the user shim layouts
@@ -139,10 +149,8 @@ pub fn default_path_segments(claudepot_bin_dir: &str) -> Vec<String> {
         // emit if $HOME is set; otherwise the format!() would yield
         // "/.local/bin", which is meaningless and a misleading PATH
         // entry.
-        if let Ok(home) = std::env::var("HOME") {
-            if !home.is_empty() {
-                segs.push(format!("{home}/.local/bin"));
-            }
+        if let Some(home) = home {
+            segs.push(format!("{home}/.local/bin"));
         }
         // Homebrew (Apple Silicon, then Intel/manual) and system.
         segs.extend([
@@ -152,12 +160,10 @@ pub fn default_path_segments(claudepot_bin_dir: &str) -> Vec<String> {
             "/bin".to_string(),
         ]);
         // Per-user toolchains, only when $HOME is known.
-        if let Ok(home) = std::env::var("HOME") {
-            if !home.is_empty() {
-                segs.push(format!("{home}/.bun/bin"));
-                segs.push(format!("{home}/.npm-global/bin"));
-                segs.push(format!("{home}/.volta/bin"));
-            }
+        if let Some(home) = home {
+            segs.push(format!("{home}/.bun/bin"));
+            segs.push(format!("{home}/.npm-global/bin"));
+            segs.push(format!("{home}/.volta/bin"));
         }
         segs
     };
@@ -170,15 +176,6 @@ pub fn default_path_segments(claudepot_bin_dir: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(unix)]
-    use parking_lot::Mutex;
-
-    /// Serializes tests that mutate `HOME`. Cargo runs tests in
-    /// parallel within one binary; without this lock the two
-    /// `default_path_segments_unix_*` cases would race over the
-    /// process-global env. Both are Unix-only, and so is the lock.
-    #[cfg(unix)]
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn map(entries: &[(&str, &str)]) -> BTreeMap<String, String> {
         entries
@@ -256,15 +253,7 @@ mod tests {
         // The shim's PATH must reach every place a `claude` binary
         // realistically lives, since FirstParty agents now
         // resolve by name at run time inside the shim.
-        let _guard = ENV_LOCK.lock();
-        let prior = std::env::var_os("HOME");
-        std::env::set_var("HOME", "/Users/test");
-        let segs = default_path_segments("");
-        // Restore HOME promptly so a panic below doesn't leak it.
-        match prior {
-            Some(p) => std::env::set_var("HOME", p),
-            None => std::env::remove_var("HOME"),
-        }
+        let segs = default_path_segments_for(Some("/Users/test"), "");
         // System.
         assert!(segs.iter().any(|s| s == "/usr/bin"), "missing /usr/bin");
         assert!(segs.iter().any(|s| s == "/bin"), "missing /bin");
@@ -314,14 +303,12 @@ mod tests {
         // When $HOME is unset, we must not emit "/.local/bin"-shape
         // entries — they're meaningless and would mislead a reader
         // grepping a bug-report shim file.
-        let _guard = ENV_LOCK.lock();
-        let prior = std::env::var_os("HOME");
-        std::env::remove_var("HOME");
-        let segs = default_path_segments("");
-        match prior {
-            Some(p) => std::env::set_var("HOME", p),
-            None => std::env::remove_var("HOME"),
-        }
+        let segs = default_path_segments_for(None, "");
+        assert_eq!(
+            segs,
+            default_path_segments_for(Some(""), ""),
+            "empty HOME = unset"
+        );
         assert!(
             !segs.iter().any(|s| s.starts_with("/.")),
             "no segment may start with `/.` when HOME is unset; got {segs:?}"

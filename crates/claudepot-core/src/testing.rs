@@ -134,3 +134,49 @@ pub fn make_account(email: &str) -> crate::account::Account {
         verify_status: "never".to_string(),
     }
 }
+
+/// Names the test a process spawned by [`run_in_child`] is for. A
+/// child-only test body gates on [`in_child`] and returns immediately in
+/// the ordinary parallel run.
+const CHILD_MARKER: &str = "CLAUDEPOT_TEST_CHILD";
+
+/// Run the test at `test` (its full path, e.g.
+/// `agent::install::tests::x`) in a fresh copy of this test binary with
+/// `set` added to and `remove` taken out of its environment, and assert
+/// that exactly that test ran and passed.
+///
+/// For a test that needs a different process-wide environment — `PATH`,
+/// `HOME`. Tests run as parallel threads of one process, so setting such
+/// a variable in-process sets it for every test running at that moment,
+/// and a lock only serializes the tests that take it. Clearing `PATH` that
+/// way made `shared_memory::git`'s HEAD test fail whenever it spawned
+/// `git` inside the window.
+pub fn run_in_child(test: &str, set: &[(&str, &std::ffi::OsStr)], remove: &[&str]) {
+    let mut cmd = std::process::Command::new(std::env::current_exe().unwrap());
+    cmd.args(["--exact", test, "--nocapture", "--test-threads=1"])
+        .env(CHILD_MARKER, test);
+    for (k, v) in set {
+        cmd.env(k, v);
+    }
+    for k in remove {
+        cmd.env_remove(k);
+    }
+    let out = cmd.output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success(),
+        "child run of {test} failed:\n{stdout}\n{stderr}"
+    );
+    // Guard against a vacuous pass: a filter that matched nothing
+    // "succeeds" too.
+    assert!(
+        stdout.contains("1 passed"),
+        "child run matched no test named {test}:\n{stdout}"
+    );
+}
+
+/// Is this process the child [`run_in_child`] spawned for `test`?
+pub fn in_child(test: &str) -> bool {
+    std::env::var(CHILD_MARKER).as_deref() == Ok(test)
+}

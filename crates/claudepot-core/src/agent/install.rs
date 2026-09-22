@@ -309,18 +309,33 @@ mod tests {
 
     #[test]
     fn resolve_binary_first_party_independent_of_caller_path() {
-        // Even with PATH cleared (the macOS-Dock-GUI shape),
-        // FirstParty still resolves — because we don't consult PATH.
-        let _guard = ENV_LOCK.lock();
-        let prior = std::env::var_os("PATH");
-        std::env::remove_var("PATH");
+        // Even with PATH absent (the macOS-Dock-GUI shape), FirstParty
+        // still resolves — because we don't consult PATH. Proven in a
+        // child process: removing PATH here removed it for every test
+        // running in parallel, and `shared_memory::git`'s HEAD test
+        // failed whenever it spawned `git` inside that window.
+        crate::testing::run_in_child(
+            "agent::install::tests::first_party_resolution_in_a_pathless_process",
+            &[],
+            &["PATH"],
+        );
+    }
+
+    #[test]
+    fn first_party_resolution_in_a_pathless_process() {
+        if !crate::testing::in_child(
+            "agent::install::tests::first_party_resolution_in_a_pathless_process",
+        ) {
+            return; // only meaningful inside the child spawned above
+        }
+        assert!(
+            std::env::var_os("PATH").is_none(),
+            "the child must run without PATH"
+        );
         let a = auto();
         let lookup = |_id: &uuid::Uuid| None;
-        let res = resolve_binary(&a, &lookup);
-        if let Some(p) = prior {
-            std::env::set_var("PATH", p);
-        }
-        let resolved = res.expect("FirstParty must not depend on caller PATH");
+        let resolved =
+            resolve_binary(&a, &lookup).expect("FirstParty must not depend on caller PATH");
         assert!(resolved == "claude" || resolved == "claude.exe");
     }
 }

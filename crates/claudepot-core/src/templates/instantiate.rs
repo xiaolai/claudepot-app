@@ -854,8 +854,25 @@ mod tests {
         std::fs::create_dir_all(&outside).unwrap();
         std::os::unix::fs::symlink(&outside, home.join("escape")).unwrap();
 
-        let old_home = std::env::var_os("HOME");
-        std::env::set_var("HOME", &home);
+        // `resolve_placeholders` reads `$HOME` itself, so the check runs in
+        // a child process whose HOME is this fixture. Setting it here set it
+        // for every test running in parallel — `path_utils`' tilde tests
+        // read HOME twice and compare.
+        crate::testing::run_in_child(
+            "templates::instantiate::tests::symlinked_home_rejects_escape_in_child",
+            &[("HOME", home.as_os_str())],
+            &[],
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_home_rejects_escape_in_child() {
+        if !crate::testing::in_child(
+            "templates::instantiate::tests::symlinked_home_rejects_escape_in_child",
+        ) {
+            return; // only meaningful inside the child spawned above
+        }
 
         let blueprint = Blueprint::from_toml(
             r#"
@@ -913,12 +930,6 @@ allowed_tools   = ["Bash"]
             },
         );
         let err = resolve_placeholders(&blueprint, &values).unwrap_err();
-
-        match old_home {
-            Some(old) => std::env::set_var("HOME", old),
-            None => std::env::remove_var("HOME"),
-        }
-
         assert!(err.to_string().contains("must be within $HOME"));
     }
 }

@@ -55,3 +55,9 @@ globs: "**/*.rs"
   form (e.g. `test_account_add_from_current_success`) remains in
   legacy suites and is acceptable there; don't mass-rename, and
   don't use it for new tests.
+- Never set `PATH` or `HOME` process-wide in a test. Tests are threads
+  of one process: the change reaches every test running at that moment,
+  and a lock only serializes the tests that take it. Clearing `PATH`
+  for one test made `shared_memory::git`'s HEAD test fail whenever it
+  spawned `git` inside the window. Pass the value in, or run the
+  assertion in a child process with `testing::run_in_child`.
