@@ -15,7 +15,6 @@
 
 use claudepot_core::pricing::{self, PriceTier};
 use claudepot_core::session::list_all_sessions;
-use claudepot_core::session_index::SessionIndex;
 use claudepot_core::usage_local::{
     aggregate_from_rows, top_costly_turns, CostlyTurn, LocalUsageReport, ProjectUsageRow,
     ReportWindow, TimeWindow, UsageTotals,
@@ -441,6 +440,7 @@ pub async fn top_costly_prompts(
     final_n: usize,
     refresh_index: Option<bool>,
     prefs: State<'_, PreferencesState>,
+    index: State<'_, crate::commands::shared_memory::SharedMemoryIndex>,
 ) -> Result<TopCostlyPromptsDto, ErrorDto> {
     let now_ms = chrono::Utc::now().timestamp_millis();
     let window = spec.into_time_window(now_ms)?;
@@ -451,12 +451,14 @@ pub async fn top_costly_prompts(
     };
     let refresh_index = refresh_index.unwrap_or(true);
     let pricing_tier = tier.as_str().to_string();
+    let shared = index.0.clone();
 
     tauri::async_runtime::spawn_blocking(move || {
         let book = pricing::PriceBook::load().with_tier(tier);
         let config_dir = claudepot_core::paths::claude_config_dir();
-        let db_path = claudepot_core::paths::claudepot_data_dir().join("sessions.db");
-        let index = SessionIndex::open(&db_path)?;
+        // The shared handle, like `local_usage_aggregate` above — a
+        // private open here took the write lock on every dashboard tick.
+        let index = crate::commands::shared_memory::shared_or_open(shared)?;
         if refresh_index {
             index.refresh(&config_dir)?;
         }

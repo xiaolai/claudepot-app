@@ -3,7 +3,7 @@
 //! Read-only surface backed by `claudepot_core::artifact_usage` over
 //! `sessions.db`. Every handler:
 //!
-//! - opens the session index,
+//! - borrows the app's shared session index (`shared_or_open`),
 //! - calls `refresh()` so the data is current (the session-index
 //!   refresh is idempotent and cheap when nothing changed),
 //! - then queries via the public `SessionIndex::usage_*` API.
@@ -19,6 +19,7 @@
 //! `SessionIndexError` names what failed and the UI names what it was
 //! attempting. See `crate::dto_error`.
 
+use crate::commands::shared_memory::{shared_or_open, SharedMemoryIndex};
 use crate::dto_artifact_usage::{
     parse_kind, ArtifactEverFiredDto, ArtifactUsageBatchEntryDto, ArtifactUsageRowDto,
     ArtifactUsageStatsDto, UnusedReportDto,
@@ -30,6 +31,7 @@ use claudepot_core::session_index::SessionIndex;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
+use tauri::State;
 
 /// `ArtifactKind::parse` rejected a wire kind. `parse_kind` returns a
 /// pre-composed English string ("unknown artifact kind: skil"), carried
@@ -38,13 +40,16 @@ fn unknown_kind(m: String) -> ErrorDto {
     ErrorDto::detail(codes::ARTIFACT_USAGE_UNKNOWN_KIND, m)
 }
 
-/// Open the index at `<data>/sessions.db` and run a refresh against
+/// Borrow the shared index and run a refresh against
 /// `<config>/projects/`. Centralized here so every usage command
 /// applies the same freshness contract.
-fn open_and_refresh() -> Result<SessionIndex, ErrorDto> {
-    let data_dir = paths::claudepot_data_dir();
-    let db_path = data_dir.join("sessions.db");
-    let idx = SessionIndex::open(&db_path)?;
+///
+/// Through `shared_or_open`, never `SessionIndex::open`: these five
+/// commands used to open a private connection per call, which took the
+/// write lock on open and, on a changed transcript, re-parsed and
+/// rewrote it alongside the app's own refresh.
+fn open_and_refresh(shared: Option<Arc<SessionIndex>>) -> Result<Arc<SessionIndex>, ErrorDto> {
+    let idx = shared_or_open(shared)?;
     let cfg = paths::claude_config_dir();
     idx.refresh(&cfg)?;
     Ok(idx)
@@ -57,10 +62,12 @@ fn open_and_refresh() -> Result<SessionIndex, ErrorDto> {
 pub async fn artifact_usage_for(
     kind: String,
     artifact_key: String,
+    index: State<'_, SharedMemoryIndex>,
 ) -> Result<ArtifactUsageStatsDto, ErrorDto> {
+    let shared = index.0.clone();
     tokio::task::spawn_blocking(move || {
         let kind = parse_kind(&kind).map_err(unknown_kind)?;
-        let idx = open_and_refresh()?;
+        let idx = open_and_refresh(shared)?;
         let now_ms = Utc::now().timestamp_millis();
         let stats = idx.usage_for_artifact(kind, &artifact_key, now_ms)?;
         Ok::<_, ErrorDto>(stats.into())
@@ -79,7 +86,9 @@ pub async fn artifact_usage_for(
 #[tauri::command]
 pub async fn artifact_usage_batch(
     keys: Vec<(String, String)>,
+    index: State<'_, SharedMemoryIndex>,
 ) -> Result<Vec<ArtifactUsageBatchEntryDto>, ErrorDto> {
+    let shared = index.0.clone();
     tokio::task::spawn_blocking(move || {
         // Resolve kinds up-front so the core batch sees only valid pairs.
         let parsed: Vec<(claudepot_core::artifact_usage::ArtifactKind, String)> = keys
@@ -89,7 +98,7 @@ pub async fn artifact_usage_batch(
         if parsed.is_empty() {
             return Ok::<_, ErrorDto>(Vec::new());
         }
-        let idx = open_and_refresh()?;
+        let idx = open_and_refresh(shared)?;
         let now_ms = Utc::now().timestamp_millis();
         let rows = idx.usage_batch(&parsed, now_ms)?;
         Ok::<_, ErrorDto>(
@@ -155,13 +164,15 @@ fn needs_mcp_attribution(rows: &[claudepot_core::artifact_usage::UsageListRow]) 
 pub async fn artifact_usage_top(
     kind: Option<String>,
     limit: u32,
+    index: State<'_, SharedMemoryIndex>,
 ) -> Result<Vec<ArtifactUsageRowDto>, ErrorDto> {
+    let shared = index.0.clone();
     tokio::task::spawn_blocking(move || {
         let kind = match kind.as_deref() {
             Some(s) => Some(parse_kind(s).map_err(unknown_kind)?),
             None => None,
         };
-        let idx = open_and_refresh()?;
+        let idx = open_and_refresh(shared)?;
         let now_ms = Utc::now().timestamp_millis();
         let mut rows = idx.usage_top(kind, limit as usize, now_ms)?;
         // MCP events carry no plugin_id (the extractor is pure JSONL and
@@ -197,9 +208,12 @@ pub async fn artifact_usage_top(
 /// decremented when a transcript is pruned, so an artifact the user
 /// runs weekly would read as never-fired after a session cleanup.
 #[tauri::command]
-pub async fn artifact_usage_ever_fired() -> Result<Vec<ArtifactEverFiredDto>, ErrorDto> {
+pub async fn artifact_usage_ever_fired(
+    index: State<'_, SharedMemoryIndex>,
+) -> Result<Vec<ArtifactEverFiredDto>, ErrorDto> {
+    let shared = index.0.clone();
     tokio::task::spawn_blocking(move || {
-        let idx = open_and_refresh()?;
+        let idx = open_and_refresh(shared)?;
         let rows = idx
             .usage_ever_fired()?
             .into_iter()
@@ -258,12 +272,15 @@ fn collect_files(
 /// writes `userSettings:x`, and every user-scope artifact would be
 /// reported unused.
 #[tauri::command]
-pub async fn artifact_usage_unused() -> Result<UnusedReportDto, ErrorDto> {
+pub async fn artifact_usage_unused(
+    index: State<'_, SharedMemoryIndex>,
+) -> Result<UnusedReportDto, ErrorDto> {
+    let shared = index.0.clone();
     tokio::task::spawn_blocking(move || {
         use claudepot_core::artifact_usage::unused;
         use std::collections::HashSet;
 
-        let idx = open_and_refresh()?;
+        let idx = open_and_refresh(shared)?;
         let ever_fired: HashSet<(String, String)> = idx
             .usage_ever_fired()?
             .into_iter()

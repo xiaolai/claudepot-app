@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use claudepot_core::session_index::SessionIndex;
 use claudepot_core::shared_memory::invalidate::{anchored_claims, apply, evaluate};
@@ -51,7 +51,14 @@ fn run(app: &AppHandle) -> u32 {
     if !db.exists() {
         return 0;
     }
-    let idx = match SessionIndex::open(&db) {
+    // The app's shared handle. This used to open its own connection every
+    // tick, and opening takes the write lock (`apply_schema` begins
+    // IMMEDIATE) — which is why the tick logged "database is locked"
+    // whenever the index loop was writing.
+    let shared = app
+        .try_state::<crate::commands::shared_memory::SharedMemoryIndex>()
+        .and_then(|s| s.0.clone());
+    let idx = match crate::commands::shared_memory::shared_or_open(shared) {
         Ok(i) => i,
         Err(e) => {
             tracing::warn!(error = %e, "invalidation_orchestrator: open sessions.db failed");
