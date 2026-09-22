@@ -69,21 +69,30 @@ fn make_fake_claude(stdout: &str) -> PathBuf {
     bin
 }
 
+/// The workspace-built `claudepot` CLI, which the shim calls back into
+/// for `_record-run` — the step that writes `result.json`.
+///
+/// Required, not optional. This used to fall back to a path that did not
+/// exist, on the theory that the run's `stdout.log` could stand in; but
+/// the test asserts `result.json`, which only `_record-run` writes. The
+/// result was a 30-second wait and "no result.json materialized", hidden
+/// on CI for as long as the runner's systemd-user was unusable and the
+/// test skipped before reaching it. Build it first:
+/// `cargo build -p claudepot-cli`.
 fn current_claudepot_cli() -> PathBuf {
-    // Use the test binary itself as the "cli" — it never gets called
-    // since the fake claude returns success without error subtype,
-    // but the shim still references it. The shim invokes with
-    // --agent-id ... which will fail unless this is actually
-    // the claudepot binary. So we point at the built binary if
-    // present, else accept that _record-run will fail (the run
-    // still produces stdout.log and we read result from there
-    // separately).
-    let target = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-        .unwrap_or_else(|| PathBuf::from("/usr/local/bin"))
-        .join("../../debug/claudepot");
-    target.canonicalize().unwrap_or(target)
+    let exe = std::env::current_exe().expect("current_exe");
+    // target/<profile>/deps/agent_e2e-<hash> → target/<profile>/claudepot
+    let cli = exe
+        .parent()
+        .and_then(|deps| deps.parent())
+        .expect("test binary lives in target/<profile>/deps")
+        .join(format!("claudepot{}", std::env::consts::EXE_SUFFIX));
+    assert!(
+        cli.is_file(),
+        "{} is not built; run `cargo build -p claudepot-cli` before this test",
+        cli.display()
+    );
+    cli
 }
 
 /// Detect whether the active scheduler can actually run a unit on
@@ -247,7 +256,14 @@ fn end_to_end_register_kickstart_unregister() {
             for entry in std::fs::read_dir(&runs_dir).unwrap().flatten() {
                 let path = entry.path();
                 if path.is_dir() {
-                    for log in ["stdout.log", "stderr.log"] {
+                    // `record-run.log` / `record-run-error.txt` are where
+                    // a failed `_record-run` explains itself.
+                    for log in [
+                        "stdout.log",
+                        "stderr.log",
+                        "record-run.log",
+                        "record-run-error.txt",
+                    ] {
                         let p = path.join(log);
                         if p.exists() {
                             eprintln!(
