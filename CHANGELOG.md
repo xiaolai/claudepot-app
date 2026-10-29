@@ -6,6 +6,14 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.6.10 — beta (unreleased)
+
+### Changed
+
+- Updated build-tool and website dependencies (vite 7.3.7 for the app and
+  the remote panel; the website's MCP SDK, Next.js and two smaller
+  packages). No change to how Claudepot behaves.
+
 ## 0.6.9 — beta (released 2026-10-12)
 
 One theme: switching accounts and staying signed in. Measured against
