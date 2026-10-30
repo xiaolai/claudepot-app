@@ -252,8 +252,10 @@
     {
       "code": "desktop_identity.no_config",
       "owner": "core",
-      "params": [],
-      "message": "config.json is not present — Desktop has not been launched"
+      "params": [
+        "dir"
+      ],
+      "message": "config.json is not present in /Users/x/Library/Application Support/Claude — Desktop has not been launched, or keeps its data elsewhere"
     },
     {
       "code": "desktop_identity.config_parse",

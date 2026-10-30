@@ -751,7 +751,7 @@ mod tests {
             let samples = vec![
                 E::DataDirUnreadable("permission denied".to_string()),
                 E::NoDataDir,
-                E::NoConfig,
+                E::NoConfig("/Users/x/Library/Application Support/Claude".to_string()),
                 E::ConfigParse("expected value at line 1 column 2".to_string()),
                 E::NotSignedIn,
                 E::Key(crate::desktop_backend::DesktopKeyError::Unsupported),
@@ -767,7 +767,7 @@ mod tests {
                 match s {
                     E::DataDirUnreadable(_)
                     | E::NoDataDir
-                    | E::NoConfig
+                    | E::NoConfig(_)
                     | E::ConfigParse(_)
                     | E::NotSignedIn
                     | E::Key(_)

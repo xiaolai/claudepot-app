@@ -128,18 +128,12 @@ fn parse_package_family_output(raw: &str) -> Option<String> {
     None
 }
 
-/// Claude Desktop's MSIX-virtualized data dir, derived from the
-/// discovered package family so cross-machine / cross-version
-/// installs don't break on rename.
-fn package_data_dir() -> Option<PathBuf> {
+/// Claude Desktop's data dir for the discovered package family: the
+/// folder Desktop moved its data to, or the MSIX package copy when it
+/// has not moved. See `windows_data_dir` (github#108).
+pub(crate) fn package_data_dir() -> Option<PathBuf> {
     let family = package_family();
-    dirs::data_local_dir().map(|d| {
-        d.join("Packages")
-            .join(&family)
-            .join("LocalCache")
-            .join("Roaming")
-            .join("Claude")
-    })
+    dirs::data_local_dir().map(|d| super::windows_data_dir::resolve(&d, &family))
 }
 
 /// Path to Electron's `Local State` file — Chromium OSCrypt's keyring
@@ -235,10 +229,10 @@ fn read_os_crypt_key() -> Result<Vec<u8>, super::DesktopKeyError> {
 #[async_trait::async_trait]
 impl super::DesktopPlatform for WindowsDesktop {
     fn data_dir(&self) -> Option<PathBuf> {
-        // MSIX-virtualized path. Package family is discovered at
-        // runtime via `Get-AppxPackage Claude_*` and cached; the
-        // compile-time `Claude_pzs8sxrjxfjjc` is only used as a
-        // fallback. Codex follow-up D3-5 "Windows AUMID discovery".
+        // Package family is discovered at runtime via
+        // `Get-AppxPackage Claude_*` and cached; the compile-time
+        // `Claude_pzs8sxrjxfjjc` is only used as a fallback. Codex
+        // follow-up D3-5 "Windows AUMID discovery".
         package_data_dir()
     }
 

@@ -3,6 +3,8 @@ pub mod macos;
 
 #[cfg(target_os = "windows")]
 pub mod windows;
+#[cfg(any(target_os = "windows", test))]
+pub(crate) mod windows_data_dir;
 
 pub mod crypto;
 pub mod error;

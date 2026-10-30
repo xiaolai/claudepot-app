@@ -6,6 +6,17 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.7.1 — beta (unreleased)
+
+### Fixed
+
+- **Claude Desktop on Windows reads as "hasn't been launched" while it
+  is open** (#108). Recent Desktop versions move their data out of the
+  Windows app package into `%LOCALAPPDATA%\Claude-Data`, and Claudepot
+  only looked in the old place. It now follows Desktop to the new
+  folder. When `config.json` really is missing, the message names the
+  folder it checked.
+
 ## 0.7.0 — beta (released 2026-10-30)
 
 One theme: using a Claude subscription from another machine.

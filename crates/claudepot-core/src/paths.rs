@@ -118,13 +118,7 @@ pub fn claude_desktop_data_dir() -> Option<PathBuf> {
     }
     #[cfg(target_os = "windows")]
     {
-        dirs::data_local_dir().map(|d| {
-            d.join("Packages")
-                .join("Claude_pzs8sxrjxfjjc")
-                .join("LocalCache")
-                .join("Roaming")
-                .join("Claude")
-        })
+        crate::desktop_backend::windows::package_data_dir()
     }
     #[cfg(target_os = "linux")]
     {
