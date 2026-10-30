@@ -78,8 +78,11 @@ pub enum DesktopIdentityError {
     DataDirUnreadable(String),
     #[error("Desktop data_dir not set for this platform")]
     NoDataDir,
-    #[error("config.json is not present — Desktop has not been launched")]
-    NoConfig,
+    /// Carries the folder that was checked, so a Desktop that keeps its
+    /// data somewhere else reads as that, not as "never launched"
+    /// (github#108).
+    #[error("config.json is not present in {0} — Desktop has not been launched, or keeps its data elsewhere")]
+    NoConfig(String),
     #[error("config.json is not valid JSON: {0}")]
     ConfigParse(String),
     #[error("no OAuth token cache present — Desktop is signed out")]
@@ -118,7 +121,7 @@ impl crate::error_code::ErrorCode for DesktopIdentityError {
         match self {
             DesktopIdentityError::DataDirUnreadable(_) => "desktop_identity.data_dir_unreadable",
             DesktopIdentityError::NoDataDir => "desktop_identity.no_data_dir",
-            DesktopIdentityError::NoConfig => "desktop_identity.no_config",
+            DesktopIdentityError::NoConfig(_) => "desktop_identity.no_config",
             DesktopIdentityError::ConfigParse(_) => "desktop_identity.config_parse",
             DesktopIdentityError::NotSignedIn => "desktop_identity.not_signed_in",
             DesktopIdentityError::Key(_) => "desktop_identity.key",
@@ -136,7 +139,7 @@ impl crate::error_code::ErrorCode for DesktopIdentityError {
                 serde_json::json!({ "detail": detail })
             }
             DesktopIdentityError::NoDataDir => serde_json::json!({}),
-            DesktopIdentityError::NoConfig => serde_json::json!({}),
+            DesktopIdentityError::NoConfig(dir) => serde_json::json!({ "dir": dir }),
             DesktopIdentityError::ConfigParse(detail) => serde_json::json!({ "detail": detail }),
             DesktopIdentityError::NotSignedIn => serde_json::json!({}),
             // The two wrapped enums carry their own codes; a GUI that
@@ -378,7 +381,9 @@ fn load_config(platform: &dyn DesktopPlatform) -> Result<ConfigPieces, DesktopId
     let data_dir = platform.data_dir().ok_or(DesktopIdentityError::NoDataDir)?;
     let cfg_path = data_dir.join("config.json");
     if !cfg_path.exists() {
-        return Err(DesktopIdentityError::NoConfig);
+        return Err(DesktopIdentityError::NoConfig(
+            data_dir.display().to_string(),
+        ));
     }
     let cfg = parse_config_json(&cfg_path)?;
     let org_uuids = extract_org_uuids(&cfg);
@@ -694,7 +699,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap(); // no config.json
         let err = probe(&fake(Some(tmp.path().to_path_buf())), &store, false)
             .expect_err("missing config.json must error");
-        assert!(matches!(err, DesktopIdentityError::NoConfig));
+        assert!(matches!(err, DesktopIdentityError::NoConfig(_)));
     }
 
     #[test]

@@ -292,7 +292,7 @@
     "data_dir_unreadable": "Couldn't read Claude Desktop's data folder: {{detail}}",
     "decrypt": "Couldn't decrypt Claude Desktop's session: {{detail}}",
     "key": "Couldn't get Claude Desktop's key: {{detail}}",
-    "no_config": "Claude Desktop hasn't been launched yet.",
+    "no_config": "Claude Desktop's config.json isn't in {{dir}}. Either Desktop hasn't been launched yet, or it keeps its data somewhere Claudepot doesn't look.",
     "no_data_dir": "Claudepot doesn't know where Claude Desktop stores data on this platform.",
     "not_signed_in": "Claude Desktop is signed out.",
     "profile_fetch": "Couldn't confirm the Desktop account with Anthropic: {{detail}}. The saved session may be stale, or something between this machine and Anthropic refused the request.",
