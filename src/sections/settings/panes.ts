@@ -68,6 +68,13 @@ export const SETTINGS_PANES = [
                // Folded in when Quick prompts stopped being its own pane:
                // the editor moved into this one, and ⌘K still has to find it.
                "quick prompts", "chips", "shortcuts", "phrases", "composer"] },
+  // Core, beside Remote, for the same reason: it is where you revoke a
+  // lost machine's token.
+  { id: "relay",
+    get label() { return i18n.t("panes.relay", { ns: "settings" }); },
+    glyph: NF.server, group: "core",
+    keywords: ["relay", "subscription", "share", "tailnet", "tailscale", "gateway",
+               "pair", "device", "revoke", "publish", "upstream"] },
   { id: "retention",
     get label() { return i18n.t("panes.retention", { ns: "settings" }); },
     glyph: NF.archive, group: "core",

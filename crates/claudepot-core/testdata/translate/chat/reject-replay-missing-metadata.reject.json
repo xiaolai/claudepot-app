@@ -1,0 +1,180 @@
+{
+  "assertions": [
+    {
+      "source": "tests/bridge-api.sh:143",
+      "step": "http_error",
+      "subject": "json",
+      "text": ".error.message|contains(\"metadata\")"
+    },
+    {
+      "source": "tests/bridge-api.sh:162",
+      "step": "metadata",
+      "subject": "rejected",
+      "text": "[ \"$(wc -l <\"$CLAI_TEST_STATE/backend-calls\")\" = \"$calls\" ]"
+    }
+  ],
+  "case": "reject-replay-missing-metadata",
+  "covers": "The same replay under another model finds no metadata (scoped by model and call id) and is refused before any upstream call",
+  "family": "chat",
+  "kind": "reject",
+  "notes": [
+    "input.json is roundtrip-gemini client_replay; cache.jsonl is the private cache state roundtrip-gemini left behind (one entry per line, write order).",
+    "clcd returns HTTP 400 with http_error body when prepare_chat fails (clcd:502-503); no upstream request is made (bridge-api.sh:162).",
+    "names is {} here because the tool name read_file is already a valid wire name (clcd-names.jq would map it to itself)."
+  ],
+  "origin": "suite",
+  "source": {
+    "commit": "8da773c2c74d491795245155ab14f1d791532612",
+    "lines": [
+      "tests/bridge-api.sh:141-143",
+      "tests/bridge-api.sh:160-162",
+      "clcd:331-339",
+      "clcd:502-503"
+    ],
+    "repo": "xiaolai/claude-driven-ai-providers"
+  },
+  "steps": [
+    {
+      "filter": "clcd-request.jq",
+      "input": {
+        "file": "reject-replay-missing-metadata.input.json"
+      },
+      "kind": "json",
+      "label": "request",
+      "output": {
+        "input": [
+          {
+            "content": [
+              {
+                "text": "read",
+                "type": "input_text"
+              }
+            ],
+            "role": "user",
+            "type": "message"
+          },
+          {
+            "arguments": "{\"path\":\"a\"}",
+            "call_id": "gemini_call",
+            "name": "read_file",
+            "type": "function_call"
+          },
+          {
+            "arguments": "{\"path\":\"b\"}",
+            "call_id": "parallel_call",
+            "name": "read_file",
+            "type": "function_call"
+          },
+          {
+            "call_id": "gemini_call",
+            "output": "file data",
+            "type": "function_call_output"
+          },
+          {
+            "call_id": "parallel_call",
+            "output": "file data",
+            "type": "function_call_output"
+          }
+        ],
+        "instructions": "",
+        "max_output_tokens": 512,
+        "model": "different-gemini",
+        "parallel_tool_calls": true,
+        "reasoning": {
+          "effort": "medium"
+        },
+        "store": false,
+        "stream": true,
+        "tools": []
+      },
+      "params": {
+        "arg": {
+          "effort": "medium",
+          "effort_override": "false",
+          "model": "different-gemini",
+          "transport": "gemini"
+        },
+        "argjson": {
+          "mapping": {}
+        },
+        "slurpfile": {
+          "names": [
+            {}
+          ]
+        }
+      }
+    },
+    {
+      "error": "no cached replay metadata for model different-gemini and call gemini_call",
+      "exit_code": 5,
+      "filter": "emulated-metadata-lookup.jq",
+      "input": {
+        "step": "request"
+      },
+      "kind": "reject",
+      "label": "metadata",
+      "params": {
+        "slurpfile": {
+          "cache": [
+            {
+              "extra_content": {
+                "google": {
+                  "thought_signature": "fixture-private-signature"
+                }
+              },
+              "id": "gemini_call",
+              "model": "fixture-gemini"
+            },
+            {
+              "extra_content": {},
+              "id": "parallel_call",
+              "model": "fixture-gemini"
+            }
+          ]
+        }
+      },
+      "partial_output_lines": [],
+      "partial_output_raw": ""
+    },
+    {
+      "error": "Gemini tool replay metadata is missing; retain the private cache or start a new conversation",
+      "exit_code": 5,
+      "filter": "chat-request.jq",
+      "input": {
+        "step": "request"
+      },
+      "kind": "reject",
+      "label": "chat_adapter",
+      "params": {
+        "arg": {
+          "provider": "gemini"
+        },
+        "slurpfile": {
+          "metadata": [
+            {}
+          ]
+        }
+      },
+      "partial_output_lines": [],
+      "partial_output_raw": ""
+    },
+    {
+      "filter": "clcd-http-error.jq",
+      "input": null,
+      "kind": "json",
+      "label": "http_error",
+      "output": {
+        "error": {
+          "message": "Chat request is unsupported or Gemini replay metadata is missing/corrupt; start a new conversation or retain its private cache",
+          "type": "invalid_request_error"
+        },
+        "type": "error"
+      },
+      "params": {
+        "arg": {
+          "message": "Chat request is unsupported or Gemini replay metadata is missing/corrupt; start a new conversation or retain its private cache"
+        }
+      }
+    }
+  ]
+}

@@ -46,6 +46,7 @@ import { NF } from "../../icons";
 import { renderError } from "../../lib/i18n-error";
 import { QuickPromptsPane } from "./QuickPromptsPane";
 import { useGlobalShortcuts } from "../../hooks/useGlobalShortcuts";
+import { SettingsField } from "./SettingsField";
 
 type Props = {
   pushToast?: (kind: "info" | "error", text: string) => void;
@@ -318,15 +319,15 @@ export function RemotePane({ pushToast }: Props) {
       <section style={SECTION}>
         <SectionLabel>{t("remote.addressHeading")}</SectionLabel>
         <div className="remote-fields">
-          <Field label={t("remote.bind")}>
+          <SettingsField label={t("remote.bind")}>
             <Input
               value={bind}
               onChange={(e) => setBind(e.target.value)}
               spellCheck={false}
               aria-label={t("remote.bind")}
             />
-          </Field>
-          <Field label={t("remote.port")}>
+          </SettingsField>
+          <SettingsField label={t("remote.port")}>
             <Input
               value={port}
               onChange={(e) => setPort(e.target.value)}
@@ -334,7 +335,7 @@ export function RemotePane({ pushToast }: Props) {
               aria-label={t("remote.port")}
               style={{ width: "var(--sp-96)" }}
             />
-          </Field>
+          </SettingsField>
         </div>
 
         {status.bindError && (
@@ -442,7 +443,7 @@ export function RemotePane({ pushToast }: Props) {
         </div>
         <div style={FAINT}>{t("remote.passwordWhy")}</div>
         <div className="remote-fields">
-          <Field label={t("remote.newPassword")}>
+          <SettingsField label={t("remote.newPassword")}>
             <Input
               type="password"
               value={password}
@@ -450,7 +451,7 @@ export function RemotePane({ pushToast }: Props) {
               autoComplete="new-password"
               aria-label={t("remote.newPassword")}
             />
-          </Field>
+          </SettingsField>
         </div>
         <div className="remote-actions">
           <Button
@@ -583,20 +584,6 @@ export function RemotePane({ pushToast }: Props) {
         />
       )}
     </div>
-  );
-}
-
-/** A labelled field. `Input` draws its own chrome, so this is only the
- *  caption above it — and a real `<label>`, so the caption is a click
- *  target and the field has an accessible name twice over. */
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="remote-field">
-      <span className="mono-cap" style={{ color: "var(--fg-faint)" }}>
-        {label}
-      </span>
-      {children}
-    </label>
   );
 }
 

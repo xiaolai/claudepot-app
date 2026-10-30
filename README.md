@@ -133,7 +133,7 @@ localStorage compatibility.
 
 ![Global tab](assets/screenshots/global.png)
 
-**Settings** — Fifteen sub-panes: General, Appearance (light / dark / system, paper-mono density), Notifications, Network (status-bar dot + status-page polling), **Remote** (the LAN appliance — start and stop the server the phone talks to, set the admin password, revoke a lost device, and edit the quick-prompt chips above the panel's composer), **Rotation** (rule-driven auto-swap of the active CLI account when a usage window crosses a threshold — confirm or auto, with a 500-entry audit log), **Retention** (Claude Code deletes saved conversations older than 30 days on every launch and reports nothing — this pane is the only place that says so, and shows how many of *yours* are scheduled to go), Health (Claude Code's own self-diagnostic, scraped from `claude doctor`), MCP (memory-server health + agent-instruction snippet installer), Cleanup (**Prune** orphaned sessions · **Slim** strips bulky tool-output payloads · **Trash** 7-day undo), Protected paths, GitHub PAT, Locks (SQLite-lock recovery), Diagnostics (Claudepot's own self-check), and About.
+**Settings** — Sixteen sub-panes: General, Appearance (light / dark / system, paper-mono density), Notifications, Network (status-bar dot + status-page polling), **Remote** (the LAN appliance — start and stop the server the phone talks to, set the admin password, revoke a lost device, and edit the quick-prompt chips above the panel's composer), **Rotation** (rule-driven auto-swap of the active CLI account when a usage window crosses a threshold — confirm or auto, with a 500-entry audit log), **Relay** (let Claude Code on your other tailnet machines use an account published here — pair a machine, see its spend, revoke it), **Retention** (Claude Code deletes saved conversations older than 30 days on every launch and reports nothing — this pane is the only place that says so, and shows how many of *yours* are scheduled to go), Health (Claude Code's own self-diagnostic, scraped from `claude doctor`), MCP (memory-server health + agent-instruction snippet installer), Cleanup (**Prune** orphaned sessions · **Slim** strips bulky tool-output payloads · **Trash** 7-day undo), Protected paths, GitHub PAT, Locks (SQLite-lock recovery), Diagnostics (Claudepot's own self-check), and About.
 
 ![Settings tab](assets/screenshots/settings.png)
 
@@ -168,6 +168,11 @@ claudepot remote    status | set-password | enable  # LAN appliance: reach
                     serve                           # `approvals off` keeps the
                                                     # panel, drops the one
                                                     # capability that GRANTS
+claudepot relay     pair | servers | accept | run   # use another machine's
+                                                    # Claude subscription
+                    serve | status | bind | publish # serve this one's to
+                    publish-route | unpublish       # paired machines
+                    devices | revoke | rotate-ca
 claudepot agent     draft | list | show            (alias: automation)
 claudepot lesson    harvest | list | accept | reject | compile | status
                                                     # the knowledge compiler

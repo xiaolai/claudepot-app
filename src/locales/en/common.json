@@ -191,7 +191,22 @@
     "noActiveCli": "No active CLI account to re-login.",
     "imported": "Imported {{email}}",
     "importFailed": "Import failed",
-    "noMatchingAccount": "No registered account matches {{email}}."
+    "noMatchingAccount": "No registered account matches {{email}}.",
+    "relay": {
+      "action": "Open Relay settings",
+      "owner_conflict": {
+        "label": "The relay stopped serving an account",
+        "detail": "Another process now holds this account's token refresh, so serving it would race Claude Code. Unpublish it, or stop the other relay."
+      },
+      "identity_changed": {
+        "label": "A relayed account signs in as someone else now",
+        "detail": "The account behind a published upstream changed identity. Publish it again to accept the new one."
+      },
+      "caKeyUnavailable": {
+        "label": "The relay's CA key is unreadable",
+        "detail": "The relay's certificate authority key could not be read. Paired machines trust that CA, so until it is readable the relay will not start, and a running relay cannot renew its certificate before it expires."
+      }
+    }
   },
   "menu": {
     "synced": "Synced {{email}} from CC.",
@@ -261,5 +276,9 @@
     "resetsInHours": "{{base}} · resets in {{hours}}h",
     "resetsInHoursMinutes": "{{base}} · resets in {{hours}}h {{minutes}}m",
     "resetsInDays": "{{base}} · resets in {{days}}d"
+  },
+  "relayLog": {
+    "title": "Relay upstream error",
+    "body": "An upstream reported {{code}}. The relay keeps serving; Settings → Relay shows each upstream."
   }
 }

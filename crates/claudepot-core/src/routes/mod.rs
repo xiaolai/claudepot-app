@@ -40,8 +40,9 @@ pub use desktop::{
 pub use error::RouteError;
 pub use helper::{delete_helpers, helper_path, helpers_dir, write_helper};
 pub use keychain::{
-    delete_all_for_route as delete_keychain_for_route, delete_secret as delete_keychain_secret,
-    read_secret as read_keychain_secret, store_secret as store_keychain_secret, SecretField,
+    account as keychain_account, delete_all_for_route as delete_keychain_for_route,
+    delete_secret as delete_keychain_secret, read_secret as read_keychain_secret,
+    store_secret as store_keychain_secret, SecretField, SERVICE as KEYCHAIN_SERVICE,
 };
 pub use lifecycle::{
     add_route, commit_secrets, edit_route, zeroize_provider_secrets, OsRouteEffects, RouteEffects,

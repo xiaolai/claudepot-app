@@ -1,0 +1,116 @@
+{
+  "assertions": [
+    {
+      "source": "tests/clcd-protocol.sh:19",
+      "step": "request",
+      "subject": "json",
+      "text": ".model==\"gpt-6.1-sol\" and .instructions==\"test instructions\" and .input[0].role==\"developer\" and .input[2].content[0].image_url==\"data:image/png;base64,AA==\" and .input[3].type==\"function_call\" and .input[3].name==\"clcd_tool_0\" and .input[4].output==\"[Tool error]\\nmissing\" and .tools[0].name==\"clcd_tool_0\" and .tool_choice.name==\"clcd_tool_0\" and .parallel_tool_calls==false and .stream==true and .store==false"
+    }
+  ],
+  "case": "request-history-tools-image-thinking",
+  "covers": "Anthropic request -> Responses: system to instructions, mid-turn system to developer, user image to input_image data URL, thinking block dropped, tool_use to function_call with wire name, error tool_result to \"[Tool error]\" output, tool_choice tool + disable_parallel_tool_use",
+  "family": "responses",
+  "kind": "expect",
+  "notes": [
+    "The assistant thinking block is absent from .input: clcd drops it (clcd:249). Reviewed exception, see README."
+  ],
+  "origin": "suite",
+  "source": {
+    "commit": "8da773c2c74d491795245155ab14f1d791532612",
+    "lines": [
+      "tests/clcd-protocol.sh:11-19"
+    ],
+    "repo": "xiaolai/claude-driven-ai-providers"
+  },
+  "steps": [
+    {
+      "filter": "clcd-request.jq",
+      "input": {
+        "file": "request-history-tools-image-thinking.input.json"
+      },
+      "kind": "json",
+      "label": "request",
+      "output": {
+        "input": [
+          {
+            "content": [
+              {
+                "text": "midturn instructions",
+                "type": "input_text"
+              }
+            ],
+            "role": "developer",
+            "type": "message"
+          },
+          {
+            "content": [
+              {
+                "text": "Hi",
+                "type": "input_text"
+              }
+            ],
+            "role": "user",
+            "type": "message"
+          },
+          {
+            "content": [
+              {
+                "image_url": "data:image/png;base64,AA==",
+                "type": "input_image"
+              }
+            ],
+            "role": "user",
+            "type": "message"
+          },
+          {
+            "arguments": "{\"path\":\"a\"}",
+            "call_id": "call_test",
+            "name": "clcd_tool_0",
+            "type": "function_call"
+          },
+          {
+            "call_id": "call_test",
+            "output": "[Tool error]\nmissing",
+            "type": "function_call_output"
+          }
+        ],
+        "instructions": "test instructions",
+        "model": "gpt-6.1-sol",
+        "parallel_tool_calls": false,
+        "reasoning": {
+          "effort": "medium"
+        },
+        "store": false,
+        "stream": true,
+        "tool_choice": {
+          "name": "clcd_tool_0",
+          "type": "function"
+        },
+        "tools": [
+          {
+            "description": "read",
+            "name": "clcd_tool_0",
+            "parameters": {
+              "type": "object"
+            },
+            "strict": false,
+            "type": "function"
+          }
+        ]
+      },
+      "params": {
+        "arg": {
+          "effort": "medium",
+          "model": "fallback"
+        },
+        "slurpfile": {
+          "names": [
+            {
+              "mcp__long": "clcd_tool_0"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

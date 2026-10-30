@@ -1,0 +1,12 @@
+{
+  "messages": [
+    {
+      "content": [
+        {
+          "type": "unknown"
+        }
+      ],
+      "role": "user"
+    }
+  ]
+}

@@ -77,10 +77,54 @@ pub fn copy_file_retried(src: &Path, dst: &Path) -> std::io::Result<()> {
 /// chmodded to `0o600` (owner read/write only) because every caller we
 /// have writes credential-adjacent data.
 ///
+/// `Ok` means every reader now sees the new bytes; `Err` means nothing
+/// was replaced. The rename is the commit point, so a directory sync that
+/// fails after it is logged and still returns `Ok` — callers such as the
+/// relay's device registry update their in-memory copy only on `Ok`, and
+/// must never be told "not written" about a file that was.
+///
 /// Centralizes the temp+rename+chmod pattern that was previously
 /// duplicated in `cli_backend/storage.rs` and `cli_backend/credfile.rs`.
 pub fn atomic_write(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    atomic_write_with(path, contents, false)
+}
+
+/// [`atomic_write`] for private key material: on Windows the temp file's
+/// DACL is narrowed to the current user before any byte is written, and a
+/// failure to narrow it fails the write. (On Unix the temp file is
+/// already born `0o600`.)
+pub fn atomic_write_secret(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    atomic_write_with(path, contents, true)
+}
+
+fn atomic_write_with(path: &Path, contents: &[u8], secret: bool) -> std::io::Result<()> {
+    atomic_write_inner(path, contents, secret, sync_dir)
+}
+
+/// Make a directory's entries durable. Windows has no directory handle
+/// to sync; its rename is already journaled by NTFS.
+#[cfg(unix)]
+fn sync_dir(dir: &Path) -> std::io::Result<()> {
+    std::fs::File::open(dir)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_dir(_dir: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
+/// [`atomic_write_with`] with the directory sync injectable, so a test can
+/// fail it without a filesystem that does.
+fn atomic_write_inner(
+    path: &Path,
+    contents: &[u8],
+    secret: bool,
+    sync_parent: fn(&Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
     use std::io::Write;
+    // Unix temp files are born 0o600, so the flag only matters elsewhere.
+    #[cfg(unix)]
+    let _ = secret;
     let parent = path.parent().ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -123,6 +167,9 @@ pub fn atomic_write(path: &Path, contents: &[u8]) -> std::io::Result<()> {
             .write(true)
             .create_new(true)
             .open(&tmp)?;
+        if secret {
+            crate::secure_perms::harden_user_only(&tmp)?;
+        }
         f.write_all(contents)?;
         f.sync_all()?;
         Ok(())
@@ -139,10 +186,19 @@ pub fn atomic_write(path: &Path, contents: &[u8]) -> std::io::Result<()> {
         return Err(e);
     }
     // A durable file fsync does not make the directory entry durable. Sync
-    // the parent after rename so a crash cannot acknowledge a successful
-    // write while losing the replacement name from the directory journal.
-    #[cfg(unix)]
-    std::fs::File::open(parent)?.sync_all()?;
+    // the parent after rename so a crash cannot lose the replacement name
+    // from the directory journal. The rename has already happened, so a
+    // failure here is a durability warning, not a failed write: returning
+    // `Err` would tell the caller nothing was replaced while every reader
+    // already sees the new bytes.
+    if let Err(e) = sync_parent(parent) {
+        tracing::warn!(
+            path = %path.display(),
+            error = %e,
+            "atomic_write: replaced the file but could not sync its directory; \
+             the replacement may not survive a crash"
+        );
+    }
 
     Ok(())
 }
@@ -463,6 +519,55 @@ mod tests {
         }
     }
 
+    /// The rename is the commit point: once it has happened every reader
+    /// sees the new bytes, so a failure after it must not be reported as
+    /// "nothing was written" — a caller would keep state the file no
+    /// longer holds.
+    #[test]
+    fn a_failed_directory_sync_after_the_rename_still_reports_success() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("file.json");
+        fs::write(&target, b"old").unwrap();
+        let refuse = |_: &Path| Err(std::io::Error::other("sync refused"));
+        atomic_write_inner(&target, b"new", false, refuse).unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"new");
+        let leftovers: Vec<_> = fs::read_dir(tmp.path())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().contains(".tmp."))
+            .collect();
+        assert!(leftovers.is_empty(), "temp files leaked: {leftovers:?}");
+    }
+
+    /// The real case behind the seam above: a directory the owner may
+    /// write but not read (0300) takes the rename and refuses the open
+    /// the directory sync needs.
+    #[cfg(unix)]
+    #[test]
+    fn a_directory_that_cannot_be_opened_does_not_fail_a_landed_write() {
+        use std::os::unix::fs::PermissionsExt;
+        // SAFETY: geteuid has no preconditions and cannot fail.
+        if unsafe { libc::geteuid() } == 0 {
+            return; // root opens any directory, so the precondition cannot hold
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("write-only");
+        fs::create_dir(&dir).unwrap();
+        let target = dir.join("file.json");
+        fs::write(&target, b"old").unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o300)).unwrap();
+        let written = atomic_write(&target, b"new");
+        let opened = fs::File::open(&dir).map(|_| ());
+        // Restore before asserting, so a failure still lets the tempdir go.
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(
+            opened.is_err(),
+            "precondition: a 0300 directory cannot be opened"
+        );
+        written.unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"new");
+    }
+
     #[cfg(unix)]
     #[test]
     fn test_atomic_write_sets_0600_permissions() {
@@ -472,5 +577,31 @@ mod tests {
         atomic_write(&target, b"shh").unwrap();
         let mode = fs::metadata(&target).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
+    }
+
+    #[test]
+    fn a_secret_write_lands_its_bytes_user_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("key.pem");
+        atomic_write_secret(&target, b"key").unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"key");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+        #[cfg(windows)]
+        {
+            // A protected DACL carries no inherited ACEs; icacls marks
+            // each inherited one "(I)".
+            let out = std::process::Command::new("icacls")
+                .arg(&target)
+                .output()
+                .unwrap();
+            let acl = String::from_utf8_lossy(&out.stdout);
+            assert!(out.status.success(), "{acl}");
+            assert!(!acl.contains("(I)"), "inherited ACEs remain: {acl}");
+        }
     }
 }

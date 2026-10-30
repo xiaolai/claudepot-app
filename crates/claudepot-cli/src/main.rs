@@ -109,6 +109,11 @@ enum Commands {
         #[command(subcommand)]
         action: RemoteAction,
     },
+    /// Use another machine's Claude subscription through a relay server
+    Relay {
+        #[command(subcommand)]
+        action: RelayAction,
+    },
     /// Verbs Claude Code invokes, not you. Hidden: these are wired
     /// into CC's settings by the surface that owns them, and a user
     /// running one by hand gets nothing useful.
@@ -1172,6 +1177,118 @@ enum CliAction {
 }
 
 #[derive(Subcommand)]
+enum RelayAction {
+    /// Pair this machine with a relay server, using the code its
+    /// pairing screen shows.
+    Pair {
+        /// `host`, `host:port`, or `https://host:port` (default port 8787)
+        address: String,
+        /// The one-time pairing code
+        #[arg(long)]
+        code: String,
+        /// The server's CA fingerprint, as its pairing screen shows it.
+        /// Prompted for when omitted; required when stdin is not a terminal.
+        #[arg(long)]
+        fingerprint: Option<String>,
+        /// What to call the server here (default: its host name)
+        #[arg(long)]
+        name: Option<String>,
+        /// What the server calls this device (default: this host name)
+        #[arg(long)]
+        device_name: Option<String>,
+    },
+    /// List paired relay servers, their latency, and which upstreams a
+    /// run could use now
+    Servers,
+    /// Accept the target an upstream now serves, after it changed
+    Accept {
+        /// Server name or id
+        server: String,
+        /// Upstream id (default: the server's default upstream)
+        #[arg(long)]
+        upstream: Option<String>,
+    },
+    /// Run Claude Code through the fastest eligible relay server
+    ///
+    /// The device token is in Claude Code's environment, so any tool
+    /// subprocess it starts can read it. It reaches only that relay's
+    /// device endpoints (inference, health, accepting a changed target),
+    /// and `relay revoke` on the server ends it.
+    Run {
+        /// Use this server (name or id) instead of scoring; it must
+        /// still be eligible
+        #[arg(long)]
+        server: Option<String>,
+        /// Upstream id (default: the first paired server's default)
+        #[arg(long)]
+        upstream: Option<String>,
+        /// Arguments passed to `claude`, after `--`
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<std::ffi::OsString>,
+    },
+    /// Serve this machine's relay in the foreground (Ctrl-C to stop)
+    Serve {
+        /// Open a pairing window and print its one-time code
+        #[arg(long)]
+        pair: bool,
+        /// The device paired now is also granted upstreams published later
+        #[arg(long, requires = "pair")]
+        include_future: bool,
+    },
+    /// Show what this machine's relay serves, where, and to how many devices
+    Status,
+    /// Set the address the relay listens on (loopback, private or tailnet)
+    Bind {
+        /// An IP address: 127.0.0.1, a private or tailnet address, or 0.0.0.0
+        address: String,
+        /// Port (default 8787)
+        #[arg(long)]
+        port: Option<u16>,
+    },
+    /// Publish a registered account's subscription to paired devices.
+    /// Never Claude Code's active login on this machine.
+    Publish {
+        /// Account email (prefix match)
+        email: String,
+        /// Upstream id to publish it as (default: sub)
+        #[arg(long = "as")]
+        id: Option<String>,
+    },
+    /// Publish a gateway route (Providers tab) to paired devices; they
+    /// use its key, which never leaves this machine.
+    PublishRoute {
+        /// Route id, name or wrapper name (exact)
+        route: String,
+        /// Upstream id to publish it as (default: the wrapper name
+        /// without its `claude-` prefix)
+        #[arg(long = "as")]
+        id: Option<String>,
+        /// Translate to a non-Anthropic protocol: codex, openai, grok,
+        /// gemini or chat (default: pass through as Anthropic Messages)
+        #[arg(long)]
+        translate: Option<String>,
+    },
+    /// Stop publishing an upstream
+    Unpublish {
+        /// Upstream id
+        id: String,
+    },
+    /// List devices paired with this machine's relay
+    Devices,
+    /// Revoke a paired device's token
+    ///
+    /// Works while the relay serves: the serving relay revokes it, refuses
+    /// the device's next request and ends its open streams. On Windows,
+    /// stop the relay first.
+    Revoke {
+        /// Device id, as `relay devices` lists it
+        device_id: String,
+    },
+    /// Replace the relay CA; revokes every device (needs --yes)
+    RotateCa,
+}
+
+#[derive(Subcommand)]
 enum DesktopAction {
     /// Show the active Desktop account and running state
     Status,
@@ -1699,6 +1816,64 @@ async fn main() -> Result<()> {
             }
             RemoteAction::RevokeAll => commands::remote::revoke_all_cmd(&ctx)?,
             RemoteAction::Serve => commands::remote::serve_cmd(&ctx).await?,
+        },
+        Commands::Relay { action } => match action {
+            RelayAction::Pair {
+                address,
+                code,
+                fingerprint,
+                name,
+                device_name,
+            } => {
+                commands::relay::pair_cmd(
+                    &ctx,
+                    &address,
+                    &code,
+                    fingerprint.as_deref(),
+                    name.as_deref(),
+                    device_name.as_deref(),
+                )
+                .await?
+            }
+            RelayAction::Servers => commands::relay::servers_cmd(&ctx).await?,
+            RelayAction::Accept { server, upstream } => {
+                commands::relay::accept_cmd(&ctx, &server, upstream.as_deref()).await?
+            }
+            RelayAction::Run {
+                server,
+                upstream,
+                args,
+            } => {
+                commands::relay::run_cmd(&ctx, server.as_deref(), upstream.as_deref(), args).await?
+            }
+            RelayAction::Serve {
+                pair,
+                include_future,
+            } => commands::relay::serve_cmd(&ctx, pair, include_future).await?,
+            RelayAction::Status => commands::relay::status_cmd(&ctx)?,
+            RelayAction::Bind { address, port } => commands::relay::bind_cmd(&ctx, &address, port)?,
+            RelayAction::Publish { email, id } => {
+                commands::relay::publish_cmd(&ctx, &email, id.as_deref()).await?
+            }
+            RelayAction::PublishRoute {
+                route,
+                id,
+                translate,
+            } => {
+                commands::relay::publish_route_cmd(
+                    &ctx,
+                    &route,
+                    id.as_deref(),
+                    translate.as_deref(),
+                )
+                .await?
+            }
+            RelayAction::Unpublish { id } => commands::relay::unpublish_cmd(&ctx, &id)?,
+            RelayAction::Devices => commands::relay::devices_cmd(&ctx)?,
+            RelayAction::Revoke { device_id } => {
+                commands::relay::revoke_cmd(&ctx, &device_id).await?
+            }
+            RelayAction::RotateCa => commands::relay::rotate_ca_cmd(&ctx)?,
         },
         Commands::Session { action } => match action {
             SessionAction::ListOrphans => commands::session::list_orphans(&ctx)?,

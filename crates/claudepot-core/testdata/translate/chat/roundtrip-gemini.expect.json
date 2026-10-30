@@ -1,0 +1,1087 @@
+{
+  "assertions": [
+    {
+      "source": "tests/bridge-api.sh:135",
+      "step": "message",
+      "subject": "json",
+      "text": ".content[0].type==\"tool_use\" and .content[0].id==\"gemini_call\""
+    },
+    {
+      "source": "tests/bridge-api.sh:94",
+      "step": "anthropic_stream",
+      "subject": "data",
+      "text": ".[-1].type==\"message_stop\" and (any(.[];.type==\"error\")|not)"
+    },
+    {
+      "args": {
+        "equivalent_inputs": {
+          "(raw output, jq -Rs)": true,
+          "cache": "cache"
+        }
+      },
+      "equivalent": "[.|split(\"\\n\")[]|select(startswith(\"data: \"))|.[6:]|fromjson|select(.type==\"content_block_start\" and .content_block.type==\"tool_use\")|.content_block.id] as $ids | ($ids|length)>0 and all($ids[]; . as $id | any($cache[]; .id==$id and .model==\"fixture-gemini\"))",
+      "source": "tests/bridge-api.sh:88",
+      "step": "anthropic_stream",
+      "subject": "equiv",
+      "text": "test -f \"$XDG_CACHE_HOME/claude-driven-ai-providers/gemini/$digest.json\""
+    },
+    {
+      "source": "tests/bridge-api.sh:135",
+      "step": "client_collected",
+      "subject": "json",
+      "text": ".content[0].type==\"tool_use\" and .content[0].id==\"gemini_call\""
+    },
+    {
+      "args": {
+        "equivalent_inputs": {
+          "m": "message"
+        }
+      },
+      "equivalent": ".content==$m[0].content",
+      "source": "tests/bridge-api.sh:133",
+      "step": "client_collected",
+      "subject": "equiv",
+      "text": "collect_chat >\"$CLAI_TEST_STATE/first\""
+    },
+    {
+      "source": "tests/bridge-api.sh:67",
+      "step": "replay_upstream_request",
+      "subject": "json",
+      "text": "any(.messages[];.tool_calls[0].extra_content.google.thought_signature==\"fixture-private-signature\" and (.tool_calls|length)==2 and .tool_calls[1].extra_content=={})"
+    },
+    {
+      "source": "tests/bridge-api.sh:145",
+      "step": "reply_message",
+      "subject": "json",
+      "text": ".content[0].text==\"CHAT_OK\""
+    }
+  ],
+  "case": "roundtrip-gemini",
+  "covers": "R2-7 chain on the Gemini route: Anthropic request -> Responses -> chat request; chat stream (parallel calls, fragmented argument, thought signature) -> cache + Anthropic message (collected and streamed); tool_result replay -> next chat request with call ids, arguments and extra_content restored; final text reply",
+  "family": "chat",
+  "kind": "expect",
+  "notes": [
+    "metadata and replay_metadata come from emulated-metadata-lookup.jq, a reproduction of the bash cache lookup in prepare_chat; everything else is clai jq.",
+    "Cross-checked: request, upstream_request and replay_upstream_request equal (jq -S) the bodies clai sent upstream in an instrumented bridge-api.sh run, and the cache entries equal its private cache files."
+  ],
+  "origin": "suite",
+  "source": {
+    "commit": "8da773c2c74d491795245155ab14f1d791532612",
+    "lines": [
+      "tests/bridge-api.sh:57-64",
+      "tests/bridge-api.sh:67-68",
+      "tests/bridge-api.sh:73",
+      "tests/bridge-api.sh:80-99",
+      "tests/bridge-api.sh:131-145",
+      "tests/bridge-api.sh:158-159",
+      "tests/bridge-api.sh:173-174"
+    ],
+    "repo": "xiaolai/claude-driven-ai-providers"
+  },
+  "steps": [
+    {
+      "filter": "clcd-names.jq",
+      "input": {
+        "file": "roundtrip-gemini.input.json"
+      },
+      "kind": "json",
+      "label": "names",
+      "output": {
+        "read_file": "read_file"
+      },
+      "params": {}
+    },
+    {
+      "filter": "clcd-reverse.jq",
+      "input": {
+        "step": "names"
+      },
+      "kind": "json",
+      "label": "reverse",
+      "output": {
+        "read_file": "read_file"
+      },
+      "params": {}
+    },
+    {
+      "filter": "clcd-request.jq",
+      "input": {
+        "file": "roundtrip-gemini.input.json"
+      },
+      "kind": "json",
+      "label": "request",
+      "output": {
+        "input": [
+          {
+            "content": [
+              {
+                "text": "read",
+                "type": "input_text"
+              }
+            ],
+            "role": "user",
+            "type": "message"
+          }
+        ],
+        "instructions": "",
+        "max_output_tokens": 512,
+        "model": "fixture-gemini",
+        "parallel_tool_calls": true,
+        "reasoning": {
+          "effort": "medium"
+        },
+        "store": false,
+        "stream": true,
+        "tools": [
+          {
+            "description": "",
+            "name": "read_file",
+            "parameters": {
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "strict": false,
+            "type": "function"
+          }
+        ]
+      },
+      "params": {
+        "arg": {
+          "effort": "medium",
+          "effort_override": "false",
+          "model": "fixture-gemini",
+          "transport": "gemini"
+        },
+        "argjson": {
+          "mapping": {}
+        },
+        "slurpfile": {
+          "names": [
+            {
+              "read_file": "read_file"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "filter": "emulated-metadata-lookup.jq",
+      "input": {
+        "step": "request"
+      },
+      "kind": "json",
+      "label": "metadata",
+      "output": {},
+      "params": {
+        "slurpfile": {
+          "cache": [
+            {}
+          ]
+        }
+      }
+    },
+    {
+      "filter": "chat-request.jq",
+      "input": {
+        "step": "request"
+      },
+      "kind": "json",
+      "label": "upstream_request",
+      "output": {
+        "max_tokens": 512,
+        "messages": [
+          {
+            "content": "",
+            "role": "system"
+          },
+          {
+            "content": [
+              {
+                "text": "read",
+                "type": "text"
+              }
+            ],
+            "role": "user"
+          }
+        ],
+        "model": "fixture-gemini",
+        "reasoning_effort": "medium",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true
+        },
+        "tools": [
+          {
+            "function": {
+              "description": "",
+              "name": "read_file",
+              "parameters": {
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "type": "function"
+          }
+        ]
+      },
+      "params": {
+        "arg": {
+          "provider": "gemini"
+        },
+        "slurpfile": {
+          "metadata": [
+            {}
+          ]
+        }
+      }
+    },
+    {
+      "filter": "chat-stream.jq",
+      "input": {
+        "file": "roundtrip-gemini.events.sse"
+      },
+      "kind": "sse",
+      "label": "normalized",
+      "output_lines": [
+        {
+          "data": {
+            "response": {
+              "id": "chat_first"
+            },
+            "type": "response.created"
+          }
+        },
+        {
+          "cache": {
+            "extra_content": {
+              "google": {
+                "thought_signature": "fixture-private-signature"
+              }
+            },
+            "id": "gemini_call",
+            "model": "fixture-gemini"
+          }
+        },
+        {
+          "data": {
+            "item": {
+              "call_id": "gemini_call",
+              "id": "gemini_call",
+              "name": "read_file",
+              "type": "function_call"
+            },
+            "type": "response.output_item.added"
+          }
+        },
+        {
+          "data": {
+            "item": {
+              "arguments": "{\"path\":\"a\"}",
+              "call_id": "gemini_call",
+              "id": "gemini_call",
+              "name": "read_file",
+              "type": "function_call"
+            },
+            "type": "response.output_item.done"
+          }
+        },
+        {
+          "cache": {
+            "extra_content": {},
+            "id": "parallel_call",
+            "model": "fixture-gemini"
+          }
+        },
+        {
+          "data": {
+            "item": {
+              "call_id": "parallel_call",
+              "id": "parallel_call",
+              "name": "read_file",
+              "type": "function_call"
+            },
+            "type": "response.output_item.added"
+          }
+        },
+        {
+          "data": {
+            "item": {
+              "arguments": "{\"path\":\"b\"}",
+              "call_id": "parallel_call",
+              "id": "parallel_call",
+              "name": "read_file",
+              "type": "function_call"
+            },
+            "type": "response.output_item.done"
+          }
+        },
+        {
+          "data": {
+            "response": {
+              "id": "chat_first",
+              "output": [
+                {
+                  "arguments": "{\"path\":\"a\"}",
+                  "call_id": "gemini_call",
+                  "name": "read_file",
+                  "type": "function_call"
+                },
+                {
+                  "arguments": "{\"path\":\"b\"}",
+                  "call_id": "parallel_call",
+                  "name": "read_file",
+                  "type": "function_call"
+                }
+              ],
+              "status": "completed",
+              "usage": {
+                "input_tokens": 0,
+                "input_tokens_details": {
+                  "cached_tokens": 0
+                },
+                "output_tokens": 0
+              }
+            },
+            "type": "response.completed"
+          }
+        }
+      ],
+      "output_raw": "data: {\"type\":\"response.created\",\"response\":{\"id\":\"chat_first\"}}\n\ncache: {\"id\":\"gemini_call\",\"model\":\"fixture-gemini\",\"extra_content\":{\"google\":{\"thought_signature\":\"fixture-private-signature\"}}}\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"gemini_call\",\"type\":\"function_call\",\"call_id\":\"gemini_call\",\"name\":\"read_file\"}}\n\ndata: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"gemini_call\",\"type\":\"function_call\",\"call_id\":\"gemini_call\",\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"a\\\"}\"}}\n\ncache: {\"id\":\"parallel_call\",\"model\":\"fixture-gemini\",\"extra_content\":{}}\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"parallel_call\",\"type\":\"function_call\",\"call_id\":\"parallel_call\",\"name\":\"read_file\"}}\n\ndata: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"parallel_call\",\"type\":\"function_call\",\"call_id\":\"parallel_call\",\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"b\\\"}\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"chat_first\",\"status\":\"completed\",\"output\":[{\"type\":\"function_call\",\"call_id\":\"gemini_call\",\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"a\\\"}\"},{\"type\":\"function_call\",\"call_id\":\"parallel_call\",\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"b\\\"}\"}],\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"input_tokens_details\":{\"cached_tokens\":0}}}}\n\n",
+      "params": {
+        "arg": {
+          "model": "fixture-gemini"
+        },
+        "flags": [
+          "-Rnj"
+        ]
+      }
+    },
+    {
+      "glue": "normalize_chat: cache lines go to the private cache (clcd:350-355)",
+      "input": {
+        "step": "normalized"
+      },
+      "kind": "glue",
+      "label": "cache",
+      "output_raw": "{\"id\":\"gemini_call\",\"model\":\"fixture-gemini\",\"extra_content\":{\"google\":{\"thought_signature\":\"fixture-private-signature\"}}}\n{\"id\":\"parallel_call\",\"model\":\"fixture-gemini\",\"extra_content\":{}}\n"
+    },
+    {
+      "glue": "normalize_chat: every other line is forwarded (clcd:356)",
+      "input": {
+        "step": "normalized"
+      },
+      "kind": "glue",
+      "label": "responses_stream",
+      "output_raw": "data: {\"type\":\"response.created\",\"response\":{\"id\":\"chat_first\"}}\n\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"gemini_call\",\"type\":\"function_call\",\"call_id\":\"gemini_call\",\"name\":\"read_file\"}}\n\ndata: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"gemini_call\",\"type\":\"function_call\",\"call_id\":\"gemini_call\",\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"a\\\"}\"}}\n\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"parallel_call\",\"type\":\"function_call\",\"call_id\":\"parallel_call\",\"name\":\"read_file\"}}\n\ndata: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"parallel_call\",\"type\":\"function_call\",\"call_id\":\"parallel_call\",\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"b\\\"}\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"chat_first\",\"status\":\"completed\",\"output\":[{\"type\":\"function_call\",\"call_id\":\"gemini_call\",\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"a\\\"}\"},{\"type\":\"function_call\",\"call_id\":\"parallel_call\",\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"b\\\"}\"}],\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"input_tokens_details\":{\"cached_tokens\":0}}}}\n\n"
+    },
+    {
+      "filter": "clcd-collect.jq",
+      "input": {
+        "step": "responses_stream"
+      },
+      "kind": "json",
+      "label": "message",
+      "output": {
+        "content": [
+          {
+            "id": "gemini_call",
+            "input": {
+              "path": "a"
+            },
+            "name": "read_file",
+            "type": "tool_use"
+          },
+          {
+            "id": "parallel_call",
+            "input": {
+              "path": "b"
+            },
+            "name": "read_file",
+            "type": "tool_use"
+          }
+        ],
+        "id": "chat_first",
+        "model": "fixture-gemini",
+        "role": "assistant",
+        "stop_reason": "tool_use",
+        "stop_sequence": null,
+        "type": "message",
+        "usage": {
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        }
+      },
+      "params": {
+        "arg": {
+          "model": "fixture-gemini"
+        },
+        "flags": [
+          "-Rsc"
+        ],
+        "slurpfile": {
+          "names": [
+            {
+              "read_file": "read_file"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "filter": "clcd-stream.jq",
+      "input": {
+        "step": "responses_stream"
+      },
+      "kind": "sse",
+      "label": "anthropic_stream",
+      "output_lines": [
+        {
+          "event": "message_start"
+        },
+        {
+          "data": {
+            "message": {
+              "content": [],
+              "id": "chat_first",
+              "model": "fixture-gemini",
+              "role": "assistant",
+              "stop_reason": null,
+              "stop_sequence": null,
+              "type": "message",
+              "usage": {
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "input_tokens": 0,
+                "output_tokens": 0
+              }
+            },
+            "type": "message_start"
+          }
+        },
+        {
+          "event": "content_block_start"
+        },
+        {
+          "data": {
+            "content_block": {
+              "id": "gemini_call",
+              "input": {},
+              "name": "read_file",
+              "type": "tool_use"
+            },
+            "index": 0,
+            "type": "content_block_start"
+          }
+        },
+        {
+          "event": "content_block_delta"
+        },
+        {
+          "data": {
+            "delta": {
+              "partial_json": "{\"path\":\"a\"}",
+              "type": "input_json_delta"
+            },
+            "index": 0,
+            "type": "content_block_delta"
+          }
+        },
+        {
+          "event": "content_block_stop"
+        },
+        {
+          "data": {
+            "index": 0,
+            "type": "content_block_stop"
+          }
+        },
+        {
+          "event": "content_block_start"
+        },
+        {
+          "data": {
+            "content_block": {
+              "id": "parallel_call",
+              "input": {},
+              "name": "read_file",
+              "type": "tool_use"
+            },
+            "index": 1,
+            "type": "content_block_start"
+          }
+        },
+        {
+          "event": "content_block_delta"
+        },
+        {
+          "data": {
+            "delta": {
+              "partial_json": "{\"path\":\"b\"}",
+              "type": "input_json_delta"
+            },
+            "index": 1,
+            "type": "content_block_delta"
+          }
+        },
+        {
+          "event": "content_block_stop"
+        },
+        {
+          "data": {
+            "index": 1,
+            "type": "content_block_stop"
+          }
+        },
+        {
+          "event": "message_delta"
+        },
+        {
+          "data": {
+            "delta": {
+              "stop_reason": "tool_use",
+              "stop_sequence": null
+            },
+            "type": "message_delta",
+            "usage": {
+              "cache_read_input_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 0
+            }
+          }
+        },
+        {
+          "event": "message_stop"
+        },
+        {
+          "data": {
+            "type": "message_stop"
+          }
+        }
+      ],
+      "output_raw": "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"chat_first\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"fixture-gemini\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"gemini_call\",\"name\":\"read_file\",\"input\":{}}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"a\\\"}\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"parallel_call\",\"name\":\"read_file\",\"input\":{}}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"b\\\"}\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\",\"stop_sequence\":null},\"usage\":{\"input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+      "params": {
+        "arg": {
+          "model": "fixture-gemini"
+        },
+        "flags": [
+          "-Rnj"
+        ],
+        "slurpfile": {
+          "names": [
+            {
+              "read_file": "read_file"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "glue": "sed -n 's/^data: //p' (bridge-api.sh:95)",
+      "input": {
+        "step": "anthropic_stream"
+      },
+      "kind": "glue",
+      "label": "anthropic_payloads",
+      "output_raw": "{\"type\":\"message_start\",\"message\":{\"id\":\"chat_first\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"fixture-gemini\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}\n{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"gemini_call\",\"name\":\"read_file\",\"input\":{}}}\n{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"a\\\"}\"}}\n{\"type\":\"content_block_stop\",\"index\":0}\n{\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"parallel_call\",\"name\":\"read_file\",\"input\":{}}}\n{\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"b\\\"}\"}}\n{\"type\":\"content_block_stop\",\"index\":1}\n{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\",\"stop_sequence\":null},\"usage\":{\"input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0}}\n{\"type\":\"message_stop\"}\n"
+    },
+    {
+      "filter": "bridge-api-client-collect.jq",
+      "input": {
+        "step": "anthropic_payloads"
+      },
+      "kind": "json",
+      "label": "client_collected",
+      "output": {
+        "content": [
+          {
+            "id": "gemini_call",
+            "input": {
+              "path": "a"
+            },
+            "name": "read_file",
+            "type": "tool_use"
+          },
+          {
+            "id": "parallel_call",
+            "input": {
+              "path": "b"
+            },
+            "name": "read_file",
+            "type": "tool_use"
+          }
+        ]
+      },
+      "params": {
+        "flags": [
+          "-s"
+        ]
+      }
+    },
+    {
+      "filter": "bridge-api-replay.jq",
+      "input": null,
+      "kind": "json",
+      "label": "client_replay",
+      "output": {
+        "max_tokens": 512,
+        "messages": [
+          {
+            "content": "read",
+            "role": "user"
+          },
+          {
+            "content": [
+              {
+                "id": "gemini_call",
+                "input": {
+                  "path": "a"
+                },
+                "name": "read_file",
+                "type": "tool_use"
+              },
+              {
+                "id": "parallel_call",
+                "input": {
+                  "path": "b"
+                },
+                "name": "read_file",
+                "type": "tool_use"
+              }
+            ],
+            "role": "assistant"
+          },
+          {
+            "content": [
+              {
+                "content": "file data",
+                "tool_use_id": "gemini_call",
+                "type": "tool_result"
+              },
+              {
+                "content": "file data",
+                "tool_use_id": "parallel_call",
+                "type": "tool_result"
+              }
+            ],
+            "role": "user"
+          }
+        ],
+        "stream": false
+      },
+      "params": {
+        "argjson": {
+          "stream": false
+        },
+        "slurpfile": {
+          "prior": [
+            {
+              "content": [
+                {
+                  "id": "gemini_call",
+                  "input": {
+                    "path": "a"
+                  },
+                  "name": "read_file",
+                  "type": "tool_use"
+                },
+                {
+                  "id": "parallel_call",
+                  "input": {
+                    "path": "b"
+                  },
+                  "name": "read_file",
+                  "type": "tool_use"
+                }
+              ],
+              "id": "chat_first",
+              "model": "fixture-gemini",
+              "role": "assistant",
+              "stop_reason": "tool_use",
+              "stop_sequence": null,
+              "type": "message",
+              "usage": {
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "input_tokens": 0,
+                "output_tokens": 0
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "filter": "clcd-names.jq",
+      "input": {
+        "step": "client_replay"
+      },
+      "kind": "json",
+      "label": "replay_names",
+      "output": {},
+      "params": {}
+    },
+    {
+      "filter": "clcd-reverse.jq",
+      "input": {
+        "step": "replay_names"
+      },
+      "kind": "json",
+      "label": "replay_reverse",
+      "output": {},
+      "params": {}
+    },
+    {
+      "filter": "clcd-request.jq",
+      "input": {
+        "step": "client_replay"
+      },
+      "kind": "json",
+      "label": "replay_request",
+      "output": {
+        "input": [
+          {
+            "content": [
+              {
+                "text": "read",
+                "type": "input_text"
+              }
+            ],
+            "role": "user",
+            "type": "message"
+          },
+          {
+            "arguments": "{\"path\":\"a\"}",
+            "call_id": "gemini_call",
+            "name": "read_file",
+            "type": "function_call"
+          },
+          {
+            "arguments": "{\"path\":\"b\"}",
+            "call_id": "parallel_call",
+            "name": "read_file",
+            "type": "function_call"
+          },
+          {
+            "call_id": "gemini_call",
+            "output": "file data",
+            "type": "function_call_output"
+          },
+          {
+            "call_id": "parallel_call",
+            "output": "file data",
+            "type": "function_call_output"
+          }
+        ],
+        "instructions": "",
+        "max_output_tokens": 512,
+        "model": "fixture-gemini",
+        "parallel_tool_calls": true,
+        "reasoning": {
+          "effort": "medium"
+        },
+        "store": false,
+        "stream": true,
+        "tools": []
+      },
+      "params": {
+        "arg": {
+          "effort": "medium",
+          "effort_override": "false",
+          "model": "fixture-gemini",
+          "transport": "gemini"
+        },
+        "argjson": {
+          "mapping": {}
+        },
+        "slurpfile": {
+          "names": [
+            {}
+          ]
+        }
+      }
+    },
+    {
+      "filter": "emulated-metadata-lookup.jq",
+      "input": {
+        "step": "replay_request"
+      },
+      "kind": "json",
+      "label": "replay_metadata",
+      "output": {
+        "gemini_call": {
+          "extra_content": {
+            "google": {
+              "thought_signature": "fixture-private-signature"
+            }
+          },
+          "id": "gemini_call",
+          "model": "fixture-gemini"
+        },
+        "parallel_call": {
+          "extra_content": {},
+          "id": "parallel_call",
+          "model": "fixture-gemini"
+        }
+      },
+      "params": {
+        "slurpfile": {
+          "cache": [
+            {
+              "extra_content": {
+                "google": {
+                  "thought_signature": "fixture-private-signature"
+                }
+              },
+              "id": "gemini_call",
+              "model": "fixture-gemini"
+            },
+            {
+              "extra_content": {},
+              "id": "parallel_call",
+              "model": "fixture-gemini"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "filter": "chat-request.jq",
+      "input": {
+        "step": "replay_request"
+      },
+      "kind": "json",
+      "label": "replay_upstream_request",
+      "output": {
+        "max_tokens": 512,
+        "messages": [
+          {
+            "content": "",
+            "role": "system"
+          },
+          {
+            "content": [
+              {
+                "text": "read",
+                "type": "text"
+              }
+            ],
+            "role": "user"
+          },
+          {
+            "content": "",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "extra_content": {
+                  "google": {
+                    "thought_signature": "fixture-private-signature"
+                  }
+                },
+                "function": {
+                  "arguments": "{\"path\":\"a\"}",
+                  "name": "read_file"
+                },
+                "id": "gemini_call",
+                "type": "function"
+              },
+              {
+                "extra_content": {},
+                "function": {
+                  "arguments": "{\"path\":\"b\"}",
+                  "name": "read_file"
+                },
+                "id": "parallel_call",
+                "type": "function"
+              }
+            ]
+          },
+          {
+            "content": "file data",
+            "role": "tool",
+            "tool_call_id": "gemini_call"
+          },
+          {
+            "content": "file data",
+            "role": "tool",
+            "tool_call_id": "parallel_call"
+          }
+        ],
+        "model": "fixture-gemini",
+        "reasoning_effort": "medium",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true
+        },
+        "tools": []
+      },
+      "params": {
+        "arg": {
+          "provider": "gemini"
+        },
+        "slurpfile": {
+          "metadata": [
+            {
+              "gemini_call": {
+                "extra_content": {
+                  "google": {
+                    "thought_signature": "fixture-private-signature"
+                  }
+                },
+                "id": "gemini_call",
+                "model": "fixture-gemini"
+              },
+              "parallel_call": {
+                "extra_content": {},
+                "id": "parallel_call",
+                "model": "fixture-gemini"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "filter": "chat-stream.jq",
+      "input": {
+        "file": "roundtrip-gemini.reply.events.sse"
+      },
+      "kind": "sse",
+      "label": "reply_normalized",
+      "output_lines": [
+        {
+          "data": {
+            "response": {
+              "id": "chat_reply"
+            },
+            "type": "response.created"
+          }
+        },
+        {
+          "data": {
+            "content_index": 0,
+            "item_id": "chat_text",
+            "part": {
+              "text": "",
+              "type": "output_text"
+            },
+            "type": "response.content_part.added"
+          }
+        },
+        {
+          "data": {
+            "content_index": 0,
+            "delta": "CHAT_OK",
+            "item_id": "chat_text",
+            "type": "response.output_text.delta"
+          }
+        },
+        {
+          "data": {
+            "content_index": 0,
+            "item_id": "chat_text",
+            "part": {
+              "type": "output_text"
+            },
+            "type": "response.content_part.done"
+          }
+        },
+        {
+          "data": {
+            "response": {
+              "id": "chat_reply",
+              "output": [
+                {
+                  "content": [
+                    {
+                      "text": "CHAT_OK",
+                      "type": "output_text"
+                    }
+                  ],
+                  "type": "message"
+                }
+              ],
+              "status": "completed",
+              "usage": {
+                "input_tokens": 2,
+                "input_tokens_details": {
+                  "cached_tokens": 0
+                },
+                "output_tokens": 2
+              }
+            },
+            "type": "response.completed"
+          }
+        }
+      ],
+      "output_raw": "data: {\"type\":\"response.created\",\"response\":{\"id\":\"chat_reply\"}}\n\ndata: {\"type\":\"response.content_part.added\",\"item_id\":\"chat_text\",\"content_index\":0,\"part\":{\"type\":\"output_text\",\"text\":\"\"}}\n\ndata: {\"type\":\"response.output_text.delta\",\"item_id\":\"chat_text\",\"content_index\":0,\"delta\":\"CHAT_OK\"}\n\ndata: {\"type\":\"response.content_part.done\",\"item_id\":\"chat_text\",\"content_index\":0,\"part\":{\"type\":\"output_text\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"chat_reply\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"CHAT_OK\"}]}],\"usage\":{\"input_tokens\":2,\"output_tokens\":2,\"input_tokens_details\":{\"cached_tokens\":0}}}}\n\n",
+      "params": {
+        "arg": {
+          "model": "fixture-gemini"
+        },
+        "flags": [
+          "-Rnj"
+        ]
+      }
+    },
+    {
+      "glue": "normalize_chat (clcd:344-359)",
+      "input": {
+        "step": "reply_normalized"
+      },
+      "kind": "glue",
+      "label": "reply_stream",
+      "output_raw": "data: {\"type\":\"response.created\",\"response\":{\"id\":\"chat_reply\"}}\n\ndata: {\"type\":\"response.content_part.added\",\"item_id\":\"chat_text\",\"content_index\":0,\"part\":{\"type\":\"output_text\",\"text\":\"\"}}\n\ndata: {\"type\":\"response.output_text.delta\",\"item_id\":\"chat_text\",\"content_index\":0,\"delta\":\"CHAT_OK\"}\n\ndata: {\"type\":\"response.content_part.done\",\"item_id\":\"chat_text\",\"content_index\":0,\"part\":{\"type\":\"output_text\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"chat_reply\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"CHAT_OK\"}]}],\"usage\":{\"input_tokens\":2,\"output_tokens\":2,\"input_tokens_details\":{\"cached_tokens\":0}}}}\n\n"
+    },
+    {
+      "filter": "clcd-collect.jq",
+      "input": {
+        "step": "reply_stream"
+      },
+      "kind": "json",
+      "label": "reply_message",
+      "output": {
+        "content": [
+          {
+            "text": "CHAT_OK",
+            "type": "text"
+          }
+        ],
+        "id": "chat_reply",
+        "model": "fixture-gemini",
+        "role": "assistant",
+        "stop_reason": "end_turn",
+        "stop_sequence": null,
+        "type": "message",
+        "usage": {
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "input_tokens": 2,
+          "output_tokens": 2
+        }
+      },
+      "params": {
+        "arg": {
+          "model": "fixture-gemini"
+        },
+        "flags": [
+          "-Rsc"
+        ],
+        "slurpfile": {
+          "names": [
+            {}
+          ]
+        }
+      }
+    }
+  ]
+}

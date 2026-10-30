@@ -26,6 +26,17 @@ function state(over: Partial<ThinkingState> = {}): ThinkingState {
   };
 }
 
+// The switch renders before its state loads — unchecked, disabled, hint
+// "Loading…" — so `findByRole` alone can return the placeholder, and a slow
+// run asserts against it (and a "locked" test passes on it vacuously).
+async function findLoadedSwitch() {
+  const sw = await screen.findByRole("switch", {
+    name: /extended thinking by default/i,
+  });
+  await waitFor(() => expect(screen.queryByText("Loading…")).toBeNull());
+  return sw;
+}
+
 describe("ExtendedThinkingToggle", () => {
   beforeEach(() => {
     thinkingStateMock.mockReset();
@@ -38,9 +49,7 @@ describe("ExtendedThinkingToggle", () => {
   it("renders ON by default (thinking enabled)", async () => {
     thinkingStateMock.mockResolvedValue(state());
     render(<ExtendedThinkingToggle pushToast={toast()} />);
-    const sw = await screen.findByRole("switch", {
-      name: /extended thinking by default/i,
-    });
+    const sw = await findLoadedSwitch();
     expect(sw).toHaveAttribute("aria-checked", "true");
     expect(sw).not.toBeDisabled();
   });
@@ -52,9 +61,7 @@ describe("ExtendedThinkingToggle", () => {
     );
     const push = vi.fn();
     render(<ExtendedThinkingToggle pushToast={push} />);
-    const sw = await screen.findByRole("switch", {
-      name: /extended thinking by default/i,
-    });
+    const sw = await findLoadedSwitch();
     await userEvent.setup().click(sw);
     await waitFor(() => expect(thinkingSetMock).toHaveBeenCalledWith(false));
     await waitFor(() => expect(sw).toHaveAttribute("aria-checked", "false"));
@@ -66,9 +73,7 @@ describe("ExtendedThinkingToggle", () => {
       state({ decided_by: "env_max_thinking_tokens", user_writable: false, env_max_thinking_tokens_set: true }),
     );
     render(<ExtendedThinkingToggle pushToast={toast()} />);
-    const sw = await screen.findByRole("switch", {
-      name: /extended thinking by default/i,
-    });
+    const sw = await findLoadedSwitch();
     expect(sw).toBeDisabled();
     expect(screen.getByText(/MAX_THINKING_TOKENS/)).toBeInTheDocument();
     await userEvent.setup().click(sw);
@@ -80,9 +85,7 @@ describe("ExtendedThinkingToggle", () => {
     thinkingSetMock.mockRejectedValue(new Error("boom"));
     const push = vi.fn();
     render(<ExtendedThinkingToggle pushToast={push} />);
-    const sw = await screen.findByRole("switch", {
-      name: /extended thinking by default/i,
-    });
+    const sw = await findLoadedSwitch();
     await userEvent.setup().click(sw);
     await waitFor(() =>
       expect(push).toHaveBeenCalledWith("error", expect.stringContaining("boom")),

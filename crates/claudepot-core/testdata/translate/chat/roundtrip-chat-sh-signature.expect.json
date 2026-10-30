@@ -1,0 +1,417 @@
+{
+  "assertions": [
+    {
+      "source": "tests/chat.sh:14",
+      "step": "normalized",
+      "subject": "data",
+      "text": "any(.[];.type==\"response.completed\" and .response.usage.input_tokens==123 and (.response.output|length)==2) and ([.[]|select(.type==\"response.output_item.done\")]|length)==2"
+    },
+    {
+      "source": "tests/chat.sh:19",
+      "step": "upstream_request",
+      "subject": "json",
+      "text": "(.messages[2].tool_calls|length)==2 and .messages[2].tool_calls[0].extra_content.google.thought_signature==\"fixture-signature-A\" and .messages[2].tool_calls[1].extra_content=={} and .messages[3].tool_call_id==\"call_one\" and .reasoning_effort==\"high\" and .max_tokens==512"
+    },
+    {
+      "other_step": "normalized",
+      "source": "tests/chat.sh:25",
+      "step": "normalized_crlf",
+      "subject": "same",
+      "text": "cmp \"$tmp/normalized\" \"$tmp/crlf\""
+    }
+  ],
+  "case": "roundtrip-chat-sh-signature",
+  "covers": "Gemini chat stream with two parallel calls, a fragmented argument and a thought signature on one call -> normalized Responses events + cache entries -> replay request restoring extra_content and grouping both calls in one assistant message; CRLF framing gives identical output",
+  "family": "chat",
+  "kind": "expect",
+  "notes": [
+    "input.json is the suite hand-written normalized (Responses-shaped) request, not an Anthropic request: chat-request.jq runs after clcd-request.jq in the bridge."
+  ],
+  "origin": "suite",
+  "source": {
+    "commit": "8da773c2c74d491795245155ab14f1d791532612",
+    "lines": [
+      "tests/chat.sh:6-19",
+      "tests/chat.sh:24-25"
+    ],
+    "repo": "xiaolai/claude-driven-ai-providers"
+  },
+  "steps": [
+    {
+      "filter": "chat-stream.jq",
+      "input": {
+        "file": "roundtrip-chat-sh-signature.events.sse"
+      },
+      "kind": "sse",
+      "label": "normalized",
+      "output_lines": [
+        {
+          "data": {
+            "response": {
+              "id": "chat_fixture"
+            },
+            "type": "response.created"
+          }
+        },
+        {
+          "cache": {
+            "extra_content": {
+              "google": {
+                "thought_signature": "fixture-signature-A"
+              }
+            },
+            "id": "call_one",
+            "model": "fixture-model"
+          }
+        },
+        {
+          "data": {
+            "item": {
+              "call_id": "call_one",
+              "id": "call_one",
+              "name": "read_file",
+              "type": "function_call"
+            },
+            "type": "response.output_item.added"
+          }
+        },
+        {
+          "data": {
+            "item": {
+              "arguments": "{\"path\":\"a\"}",
+              "call_id": "call_one",
+              "id": "call_one",
+              "name": "read_file",
+              "type": "function_call"
+            },
+            "type": "response.output_item.done"
+          }
+        },
+        {
+          "cache": {
+            "extra_content": {},
+            "id": "call_two",
+            "model": "fixture-model"
+          }
+        },
+        {
+          "data": {
+            "item": {
+              "call_id": "call_two",
+              "id": "call_two",
+              "name": "read_file",
+              "type": "function_call"
+            },
+            "type": "response.output_item.added"
+          }
+        },
+        {
+          "data": {
+            "item": {
+              "arguments": "{\"path\":\"b\"}",
+              "call_id": "call_two",
+              "id": "call_two",
+              "name": "read_file",
+              "type": "function_call"
+            },
+            "type": "response.output_item.done"
+          }
+        },
+        {
+          "data": {
+            "response": {
+              "id": "chat_fixture",
+              "output": [
+                {
+                  "arguments": "{\"path\":\"a\"}",
+                  "call_id": "call_one",
+                  "name": "read_file",
+                  "type": "function_call"
+                },
+                {
+                  "arguments": "{\"path\":\"b\"}",
+                  "call_id": "call_two",
+                  "name": "read_file",
+                  "type": "function_call"
+                }
+              ],
+              "status": "completed",
+              "usage": {
+                "input_tokens": 123,
+                "input_tokens_details": {
+                  "cached_tokens": 0
+                },
+                "output_tokens": 24
+              }
+            },
+            "type": "response.completed"
+          }
+        }
+      ],
+      "output_raw": "data: {\"type\":\"response.created\",\"response\":{\"id\":\"chat_fixture\"}}\n\ncache: {\"id\":\"call_one\",\"model\":\"fixture-model\",\"extra_content\":{\"google\":{\"thought_signature\":\"fixture-signature-A\"}}}\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"call_one\",\"type\":\"function_call\",\"call_id\":\"call_one\",\"name\":\"read_file\"}}\n\ndata: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"call_one\",\"type\":\"function_call\",\"call_id\":\"call_one\",\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"a\\\"}\"}}\n\ncache: {\"id\":\"call_two\",\"model\":\"fixture-model\",\"extra_content\":{}}\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"call_two\",\"type\":\"function_call\",\"call_id\":\"call_two\",\"name\":\"read_file\"}}\n\ndata: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"call_two\",\"type\":\"function_call\",\"call_id\":\"call_two\",\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"b\\\"}\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"chat_fixture\",\"status\":\"completed\",\"output\":[{\"type\":\"function_call\",\"call_id\":\"call_one\",\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"a\\\"}\"},{\"type\":\"function_call\",\"call_id\":\"call_two\",\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"b\\\"}\"}],\"usage\":{\"input_tokens\":123,\"output_tokens\":24,\"input_tokens_details\":{\"cached_tokens\":0}}}}\n\n",
+      "params": {
+        "arg": {
+          "model": "fixture-model"
+        },
+        "flags": [
+          "-Rnj"
+        ]
+      }
+    },
+    {
+      "glue": "sed -n 's/^cache: //p' (chat.sh:13)",
+      "input": {
+        "step": "normalized"
+      },
+      "kind": "glue",
+      "label": "cache",
+      "output_raw": "{\"id\":\"call_one\",\"model\":\"fixture-model\",\"extra_content\":{\"google\":{\"thought_signature\":\"fixture-signature-A\"}}}\n{\"id\":\"call_two\",\"model\":\"fixture-model\",\"extra_content\":{}}\n"
+    },
+    {
+      "filter": "chat-sh-metadata.jq",
+      "input": {
+        "step": "cache"
+      },
+      "kind": "json",
+      "label": "metadata",
+      "output": {
+        "call_one": {
+          "extra_content": {
+            "google": {
+              "thought_signature": "fixture-signature-A"
+            }
+          },
+          "id": "call_one",
+          "model": "fixture-model"
+        },
+        "call_two": {
+          "extra_content": {},
+          "id": "call_two",
+          "model": "fixture-model"
+        }
+      },
+      "params": {
+        "flags": [
+          "-s"
+        ]
+      }
+    },
+    {
+      "filter": "chat-request.jq",
+      "input": {
+        "file": "roundtrip-chat-sh-signature.input.json"
+      },
+      "kind": "json",
+      "label": "upstream_request",
+      "output": {
+        "max_tokens": 512,
+        "messages": [
+          {
+            "content": "test",
+            "role": "system"
+          },
+          {
+            "content": [
+              {
+                "text": "read",
+                "type": "text"
+              }
+            ],
+            "role": "user"
+          },
+          {
+            "content": "",
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "extra_content": {
+                  "google": {
+                    "thought_signature": "fixture-signature-A"
+                  }
+                },
+                "function": {
+                  "arguments": "{\"path\":\"a\"}",
+                  "name": "read_file"
+                },
+                "id": "call_one",
+                "type": "function"
+              },
+              {
+                "extra_content": {},
+                "function": {
+                  "arguments": "{\"path\":\"b\"}",
+                  "name": "read_file"
+                },
+                "id": "call_two",
+                "type": "function"
+              }
+            ]
+          },
+          {
+            "content": "first",
+            "role": "tool",
+            "tool_call_id": "call_one"
+          },
+          {
+            "content": "second",
+            "role": "tool",
+            "tool_call_id": "call_two"
+          }
+        ],
+        "model": "fixture-model",
+        "reasoning_effort": "high",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true
+        },
+        "tools": []
+      },
+      "params": {
+        "arg": {
+          "provider": "gemini"
+        },
+        "slurpfile": {
+          "metadata": [
+            {
+              "call_one": {
+                "extra_content": {
+                  "google": {
+                    "thought_signature": "fixture-signature-A"
+                  }
+                },
+                "id": "call_one",
+                "model": "fixture-model"
+              },
+              "call_two": {
+                "extra_content": {},
+                "id": "call_two",
+                "model": "fixture-model"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "filter": "chat-stream.jq",
+      "input": {
+        "file": "roundtrip-chat-sh-signature.crlf.events.sse"
+      },
+      "kind": "sse",
+      "label": "normalized_crlf",
+      "output_lines": [
+        {
+          "data": {
+            "response": {
+              "id": "chat_fixture"
+            },
+            "type": "response.created"
+          }
+        },
+        {
+          "cache": {
+            "extra_content": {
+              "google": {
+                "thought_signature": "fixture-signature-A"
+              }
+            },
+            "id": "call_one",
+            "model": "fixture-model"
+          }
+        },
+        {
+          "data": {
+            "item": {
+              "call_id": "call_one",
+              "id": "call_one",
+              "name": "read_file",
+              "type": "function_call"
+            },
+            "type": "response.output_item.added"
+          }
+        },
+        {
+          "data": {
+            "item": {
+              "arguments": "{\"path\":\"a\"}",
+              "call_id": "call_one",
+              "id": "call_one",
+              "name": "read_file",
+              "type": "function_call"
+            },
+            "type": "response.output_item.done"
+          }
+        },
+        {
+          "cache": {
+            "extra_content": {},
+            "id": "call_two",
+            "model": "fixture-model"
+          }
+        },
+        {
+          "data": {
+            "item": {
+              "call_id": "call_two",
+              "id": "call_two",
+              "name": "read_file",
+              "type": "function_call"
+            },
+            "type": "response.output_item.added"
+          }
+        },
+        {
+          "data": {
+            "item": {
+              "arguments": "{\"path\":\"b\"}",
+              "call_id": "call_two",
+              "id": "call_two",
+              "name": "read_file",
+              "type": "function_call"
+            },
+            "type": "response.output_item.done"
+          }
+        },
+        {
+          "data": {
+            "response": {
+              "id": "chat_fixture",
+              "output": [
+                {
+                  "arguments": "{\"path\":\"a\"}",
+                  "call_id": "call_one",
+                  "name": "read_file",
+                  "type": "function_call"
+                },
+                {
+                  "arguments": "{\"path\":\"b\"}",
+                  "call_id": "call_two",
+                  "name": "read_file",
+                  "type": "function_call"
+                }
+              ],
+              "status": "completed",
+              "usage": {
+                "input_tokens": 123,
+                "input_tokens_details": {
+                  "cached_tokens": 0
+                },
+                "output_tokens": 24
+              }
+            },
+            "type": "response.completed"
+          }
+        }
+      ],
+      "output_raw": "data: {\"type\":\"response.created\",\"response\":{\"id\":\"chat_fixture\"}}\n\ncache: {\"id\":\"call_one\",\"model\":\"fixture-model\",\"extra_content\":{\"google\":{\"thought_signature\":\"fixture-signature-A\"}}}\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"call_one\",\"type\":\"function_call\",\"call_id\":\"call_one\",\"name\":\"read_file\"}}\n\ndata: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"call_one\",\"type\":\"function_call\",\"call_id\":\"call_one\",\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"a\\\"}\"}}\n\ncache: {\"id\":\"call_two\",\"model\":\"fixture-model\",\"extra_content\":{}}\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"call_two\",\"type\":\"function_call\",\"call_id\":\"call_two\",\"name\":\"read_file\"}}\n\ndata: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"call_two\",\"type\":\"function_call\",\"call_id\":\"call_two\",\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"b\\\"}\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"chat_fixture\",\"status\":\"completed\",\"output\":[{\"type\":\"function_call\",\"call_id\":\"call_one\",\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"a\\\"}\"},{\"type\":\"function_call\",\"call_id\":\"call_two\",\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"b\\\"}\"}],\"usage\":{\"input_tokens\":123,\"output_tokens\":24,\"input_tokens_details\":{\"cached_tokens\":0}}}}\n\n",
+      "params": {
+        "arg": {
+          "model": "fixture-model"
+        },
+        "flags": [
+          "-Rnj"
+        ]
+      }
+    }
+  ]
+}

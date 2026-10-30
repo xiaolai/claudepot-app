@@ -523,8 +523,14 @@ pub async fn routes_add(mut route: RouteCreateDto) -> Result<RouteSummaryDto, Er
 
     // The commit → persist ordering and the keychain/helper rollback
     // on either failure live in core (`routes::lifecycle::add_route`).
-    let mut store = open_store()?;
-    let saved = add_route(&mut store, new_route, &OsRouteEffects).map_err(ErrorDto::from)?;
+    // The keychain writes are blocking `security` subprocesses; keep them
+    // off the async runtime's workers.
+    let saved = tokio::task::spawn_blocking(move || {
+        let mut store = open_store()?;
+        add_route(&mut store, new_route, &OsRouteEffects).map_err(ErrorDto::from)
+    })
+    .await
+    .map_err(ErrorDto::task_join)??;
     Ok(project_summary(&saved))
 }
 
@@ -588,8 +594,13 @@ pub async fn routes_edit(mut route: RouteUpdateDto) -> Result<RouteSummaryDto, E
     // scrubbing, and the "never delete helpers on a failed update"
     // invariant (audit fix for commands_routes.rs:613). This command
     // only stringifies the outcomes.
-    let mut store = open_store()?;
-    let saved = match edit_route(&mut store, candidate, &OsRouteEffects) {
+    let edited = tokio::task::spawn_blocking(move || {
+        let mut store = open_store()?;
+        Ok::<_, ErrorDto>(edit_route(&mut store, candidate, &OsRouteEffects))
+    })
+    .await
+    .map_err(ErrorDto::task_join)??;
+    let saved = match edited {
         Ok(s) => s,
         Err(SaveRouteError::Store(e)) => {
             // The persisted route is unchanged; the keychain may
@@ -630,6 +641,13 @@ pub async fn routes_edit(mut route: RouteUpdateDto) -> Result<RouteSummaryDto, E
 #[tauri::command]
 pub async fn routes_remove(id: String) -> Result<(), ErrorDto> {
     let id = parse_route_id(&id)?;
+    // Keychain deletion is a blocking `security` subprocess.
+    tokio::task::spawn_blocking(move || remove_route_blocking(id))
+        .await
+        .map_err(ErrorDto::task_join)?
+}
+
+fn remove_route_blocking(id: Uuid) -> Result<(), ErrorDto> {
     let mut store = open_store()?;
     let removed = store.remove(id).map_err(ErrorDto::from)?;
     // Side effects: tear down wrapper + clear Desktop activation +

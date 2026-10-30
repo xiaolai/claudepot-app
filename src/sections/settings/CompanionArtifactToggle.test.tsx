@@ -27,6 +27,17 @@ function state(over: Partial<ArtifactState> = {}): ArtifactState {
   };
 }
 
+// The switch renders before its state loads — unchecked, disabled, hint
+// "Loading…" — so `findByRole` alone can return the placeholder, and a slow
+// run asserts against it (and a "locked" test passes on it vacuously).
+async function findLoadedSwitch() {
+  const sw = await screen.findByRole("switch", {
+    name: /keep companion output local/i,
+  });
+  await waitFor(() => expect(screen.queryByText("Loading…")).toBeNull());
+  return sw;
+}
+
 describe("CompanionArtifactToggle", () => {
   beforeEach(() => {
     artifactToolStateMock.mockReset();
@@ -39,9 +50,7 @@ describe("CompanionArtifactToggle", () => {
   it("renders OFF by default (artifacts enabled → output not local)", async () => {
     artifactToolStateMock.mockResolvedValue(state());
     render(<CompanionArtifactToggle pushToast={toast()} />);
-    const sw = await screen.findByRole("switch", {
-      name: /keep companion output local/i,
-    });
+    const sw = await findLoadedSwitch();
     expect(sw).toHaveAttribute("aria-checked", "false");
     expect(sw).not.toBeDisabled();
   });
@@ -53,9 +62,7 @@ describe("CompanionArtifactToggle", () => {
     );
     const push = vi.fn();
     render(<CompanionArtifactToggle pushToast={push} />);
-    const sw = await screen.findByRole("switch", {
-      name: /keep companion output local/i,
-    });
+    const sw = await findLoadedSwitch();
     await userEvent.setup().click(sw);
     // "keep local" ON must request the Artifact tool OFF.
     await waitFor(() => expect(artifactToolSetMock).toHaveBeenCalledWith(false));
@@ -71,9 +78,7 @@ describe("CompanionArtifactToggle", () => {
     artifactToolSetMock.mockResolvedValue(state());
     const push = vi.fn();
     render(<CompanionArtifactToggle pushToast={push} />);
-    const sw = await screen.findByRole("switch", {
-      name: /keep companion output local/i,
-    });
+    const sw = await findLoadedSwitch();
     expect(sw).toHaveAttribute("aria-checked", "true");
     await userEvent.setup().click(sw);
     // Turning "keep local" OFF must request the Artifact tool ON.
@@ -86,9 +91,7 @@ describe("CompanionArtifactToggle", () => {
     artifactToolSetMock.mockRejectedValue(new Error("boom"));
     const push = vi.fn();
     render(<CompanionArtifactToggle pushToast={push} />);
-    const sw = await screen.findByRole("switch", {
-      name: /keep companion output local/i,
-    });
+    const sw = await findLoadedSwitch();
     expect(sw).toHaveAttribute("aria-checked", "false");
     await userEvent.setup().click(sw);
     await waitFor(() =>
@@ -103,9 +106,7 @@ describe("CompanionArtifactToggle", () => {
       state({ enabled: false, decided_by: "env_disable", user_writable: false, env_disable_set: true }),
     );
     render(<CompanionArtifactToggle pushToast={toast()} />);
-    const sw = await screen.findByRole("switch", {
-      name: /keep companion output local/i,
-    });
+    const sw = await findLoadedSwitch();
     expect(sw).toBeDisabled();
     // Inline reason names the overriding env var (design.md).
     expect(

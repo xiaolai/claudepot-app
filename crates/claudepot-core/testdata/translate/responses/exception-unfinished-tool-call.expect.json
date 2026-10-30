@@ -1,0 +1,128 @@
+{
+  "assertions": [
+    {
+      "source": "tests/clcd-protocol.sh:34",
+      "step": "stream",
+      "subject": "data",
+      "text": ".[0].type==\"message_start\" and .[-1].type==\"message_stop\""
+    }
+  ],
+  "case": "exception-unfinished-tool-call",
+  "covers": "REVIEWED EXCEPTION, NOT A GOLDEN: a function_call that never receives output_item.done is still emitted as a complete tool_use with input {} and stop_reason tool_use",
+  "family": "responses",
+  "kind": "expect",
+  "notes": [
+    "Derived input: lines 23, 28 and 31 of clcd-protocol.sh, i.e. the suite stream with the argument delta and output_item.done removed. Not a suite case.",
+    "clai accepts this (clcd-stream.jq closes every open block on response.completed, clcd:313-316). Claudepot should refuse it; assert the opposite of this output."
+  ],
+  "origin": "derived",
+  "source": {
+    "commit": "8da773c2c74d491795245155ab14f1d791532612",
+    "lines": [
+      "tests/clcd-protocol.sh:23",
+      "tests/clcd-protocol.sh:28",
+      "tests/clcd-protocol.sh:31"
+    ],
+    "repo": "xiaolai/claude-driven-ai-providers"
+  },
+  "steps": [
+    {
+      "filter": "clcd-stream.jq",
+      "input": {
+        "file": "exception-unfinished-tool-call.events.sse"
+      },
+      "kind": "sse",
+      "label": "stream",
+      "output_lines": [
+        {
+          "event": "message_start"
+        },
+        {
+          "data": {
+            "message": {
+              "content": [],
+              "id": "resp_test",
+              "model": "test",
+              "role": "assistant",
+              "stop_reason": null,
+              "stop_sequence": null,
+              "type": "message",
+              "usage": {
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "input_tokens": 0,
+                "output_tokens": 0
+              }
+            },
+            "type": "message_start"
+          }
+        },
+        {
+          "event": "content_block_start"
+        },
+        {
+          "data": {
+            "content_block": {
+              "id": "call1",
+              "input": {},
+              "name": "mcp__long",
+              "type": "tool_use"
+            },
+            "index": 0,
+            "type": "content_block_start"
+          }
+        },
+        {
+          "event": "content_block_stop"
+        },
+        {
+          "data": {
+            "index": 0,
+            "type": "content_block_stop"
+          }
+        },
+        {
+          "event": "message_delta"
+        },
+        {
+          "data": {
+            "delta": {
+              "stop_reason": "tool_use",
+              "stop_sequence": null
+            },
+            "type": "message_delta",
+            "usage": {
+              "cache_read_input_tokens": 30,
+              "input_tokens": 70,
+              "output_tokens": 7
+            }
+          }
+        },
+        {
+          "event": "message_stop"
+        },
+        {
+          "data": {
+            "type": "message_stop"
+          }
+        }
+      ],
+      "output_raw": "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"resp_test\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"test\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call1\",\"name\":\"mcp__long\",\"input\":{}}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\",\"stop_sequence\":null},\"usage\":{\"input_tokens\":70,\"cache_read_input_tokens\":30,\"output_tokens\":7}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+      "params": {
+        "arg": {
+          "model": "test"
+        },
+        "flags": [
+          "-Rnj"
+        ],
+        "slurpfile": {
+          "names": [
+            {
+              "clcd_tool_0": "mcp__long"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

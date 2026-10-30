@@ -122,7 +122,7 @@ pub fn delete_wrapper(name: &str) -> Result<(), RouteError> {
 // `cargo build --release` clean on Windows without forcing the
 // tests to be cfg-gated.
 #[cfg_attr(not(unix), allow(dead_code))]
-fn render_script(route: &Route) -> String {
+pub(super) fn render_script(route: &Route) -> String {
     match &route.provider {
         RouteProvider::Gateway(cfg) => render_gateway(route, cfg),
         RouteProvider::Bedrock(cfg) => render_bedrock(route, cfg),

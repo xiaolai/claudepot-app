@@ -1,0 +1,52 @@
+{
+  "assertions": [
+    {
+      "source": "tests/clcd-protocol.sh:44",
+      "step": "request",
+      "subject": "rejected",
+      "text": "if jq --arg model test --arg effort medium --slurpfile names filters/names.json -f filters/request.jq filters/unsupported.json"
+    }
+  ],
+  "case": "reject-control-temperature",
+  "covers": "Request control temperature is refused, not silently ignored",
+  "family": "responses",
+  "kind": "reject",
+  "notes": [
+    "Input is request-history-tools-image-thinking.input.json transformed by tests/clcd-protocol.sh:43: jq --arg control temperature '.+{($control):1}'"
+  ],
+  "origin": "suite",
+  "source": {
+    "commit": "8da773c2c74d491795245155ab14f1d791532612",
+    "lines": [
+      "tests/clcd-protocol.sh:42-45"
+    ],
+    "repo": "xiaolai/claude-driven-ai-providers"
+  },
+  "steps": [
+    {
+      "error": "Sampling parameters and stop_sequences are unsupported by this Codex bridge",
+      "exit_code": 5,
+      "filter": "clcd-request.jq",
+      "input": {
+        "file": "reject-control-temperature.input.json"
+      },
+      "kind": "reject",
+      "label": "request",
+      "params": {
+        "arg": {
+          "effort": "medium",
+          "model": "test"
+        },
+        "slurpfile": {
+          "names": [
+            {
+              "mcp__long": "clcd_tool_0"
+            }
+          ]
+        }
+      },
+      "partial_output_lines": [],
+      "partial_output_raw": ""
+    }
+  ]
+}

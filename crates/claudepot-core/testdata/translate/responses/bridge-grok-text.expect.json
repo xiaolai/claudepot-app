@@ -1,0 +1,213 @@
+{
+  "assertions": [
+    {
+      "source": "tests/bridge-api.sh:41",
+      "step": "request",
+      "subject": "json",
+      "text": ".store==false and .stream==true and .max_output_tokens>0"
+    },
+    {
+      "source": "tests/bridge-api.sh:42",
+      "step": "request",
+      "subject": "json",
+      "text": "has(\"reasoning\")|not"
+    },
+    {
+      "source": "tests/bridge-api.sh:130",
+      "step": "stream",
+      "subject": "data",
+      "text": "any(.[];.delta.text==\"API_OK\") and .[-1].type==\"message_stop\""
+    }
+  ],
+  "case": "bridge-grok-text",
+  "covers": "Grok Responses route: same as OpenAI but the reasoning field is removed",
+  "family": "responses",
+  "kind": "expect",
+  "notes": [
+    "Input and events are bridge-openai-text.*. grok-4.6 is the providers.json default model the bridge selected."
+  ],
+  "origin": "suite",
+  "source": {
+    "commit": "8da773c2c74d491795245155ab14f1d791532612",
+    "lines": [
+      "tests/bridge-api.sh:42-43",
+      "tests/bridge-api.sh:129-130",
+      "tests/bridge-api.sh:152"
+    ],
+    "repo": "xiaolai/claude-driven-ai-providers"
+  },
+  "steps": [
+    {
+      "filter": "clcd-names.jq",
+      "input": {
+        "file": "bridge-openai-text.input.json"
+      },
+      "kind": "json",
+      "label": "names",
+      "output": {},
+      "params": {}
+    },
+    {
+      "filter": "clcd-reverse.jq",
+      "input": {
+        "step": "names"
+      },
+      "kind": "json",
+      "label": "reverse",
+      "output": {},
+      "params": {}
+    },
+    {
+      "filter": "clcd-request.jq",
+      "input": {
+        "file": "bridge-openai-text.input.json"
+      },
+      "kind": "json",
+      "label": "request",
+      "output": {
+        "input": [
+          {
+            "content": [
+              {
+                "text": "test",
+                "type": "input_text"
+              }
+            ],
+            "role": "user",
+            "type": "message"
+          }
+        ],
+        "instructions": "",
+        "max_output_tokens": 512,
+        "model": "grok-4.6",
+        "parallel_tool_calls": true,
+        "store": false,
+        "stream": true,
+        "tools": []
+      },
+      "params": {
+        "arg": {
+          "effort": "medium",
+          "effort_override": "false",
+          "model": "grok-4.6",
+          "transport": "grok"
+        },
+        "argjson": {
+          "mapping": {}
+        },
+        "slurpfile": {
+          "names": [
+            {}
+          ]
+        }
+      }
+    },
+    {
+      "filter": "clcd-stream.jq",
+      "input": {
+        "file": "bridge-openai-text.events.sse"
+      },
+      "kind": "sse",
+      "label": "stream",
+      "output_lines": [
+        {
+          "event": "message_start"
+        },
+        {
+          "data": {
+            "message": {
+              "content": [],
+              "id": "resp_test",
+              "model": "grok-4.6",
+              "role": "assistant",
+              "stop_reason": null,
+              "stop_sequence": null,
+              "type": "message",
+              "usage": {
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "input_tokens": 0,
+                "output_tokens": 0
+              }
+            },
+            "type": "message_start"
+          }
+        },
+        {
+          "event": "content_block_start"
+        },
+        {
+          "data": {
+            "content_block": {
+              "text": "",
+              "type": "text"
+            },
+            "index": 0,
+            "type": "content_block_start"
+          }
+        },
+        {
+          "event": "content_block_delta"
+        },
+        {
+          "data": {
+            "delta": {
+              "text": "API_OK",
+              "type": "text_delta"
+            },
+            "index": 0,
+            "type": "content_block_delta"
+          }
+        },
+        {
+          "event": "content_block_stop"
+        },
+        {
+          "data": {
+            "index": 0,
+            "type": "content_block_stop"
+          }
+        },
+        {
+          "event": "message_delta"
+        },
+        {
+          "data": {
+            "delta": {
+              "stop_reason": "end_turn",
+              "stop_sequence": null
+            },
+            "type": "message_delta",
+            "usage": {
+              "cache_read_input_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 0
+            }
+          }
+        },
+        {
+          "event": "message_stop"
+        },
+        {
+          "data": {
+            "type": "message_stop"
+          }
+        }
+      ],
+      "output_raw": "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"resp_test\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"grok-4.6\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"API_OK\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+      "params": {
+        "arg": {
+          "model": "grok-4.6"
+        },
+        "flags": [
+          "-Rnj"
+        ],
+        "slurpfile": {
+          "names": [
+            {}
+          ]
+        }
+      }
+    }
+  ]
+}

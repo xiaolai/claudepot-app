@@ -25,6 +25,7 @@ from being re-litigated or quietly undone.
 | `gui-shell.md` | what was measured in the Tauri renderer, three optimisations written, measured and reverted, the index loop's 34 GB, plus the section registry, event channels and the ⌘K palette |
 | `cc-integration.md` | the surfaces that reach into Claude Code's own settings, hooks and sockets: retention, permission grants, peer messaging, env variables, the global-config resolver and the settings-file mutation boundary |
 | `remote-control.md` | the LAN appliance model, TLS and the private CA, password / TOTP / passkey reasoning, and every design decision inside the phone panel |
+| `relay.md` | the subscription relay: separation from Remote Control, gateway mode as measured, the CC-active-account rule, the lease, pairing, per-request binding, streaming and cost |
 | `core-modules.md` | pricing, the env secret vault, auto-rotation, proactive token refresh, and the corpus detectors |
 | `i18n.md` | the three catalogs, and each rule that was learned by shipping the bug |
 | `test-gates.md` | every gate in `## Test`, and the failure that had already shipped green when it was written |

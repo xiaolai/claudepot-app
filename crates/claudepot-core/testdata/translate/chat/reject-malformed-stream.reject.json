@@ -1,0 +1,73 @@
+{
+  "assertions": [
+    {
+      "source": "tests/bridge-api.sh:113",
+      "step": "normalized",
+      "subject": "rejected",
+      "text": "[ \"$status\" = 502 ]"
+    },
+    {
+      "source": "tests/bridge-api.sh:113",
+      "step": "http_error",
+      "subject": "json",
+      "text": ".error.message|contains(\"Chat\")"
+    }
+  ],
+  "case": "reject-malformed-stream",
+  "covers": "Unparseable chat SSE data is an error, reported as a Chat stream problem",
+  "family": "chat",
+  "kind": "reject",
+  "notes": [
+    "stream_problem (clcd:459-465) picks the message by grepping the jq error; a parse error matches none of its three patterns, so it is the generic one. Streaming clients get it as an error event instead (bridge-api.sh:110)."
+  ],
+  "origin": "suite",
+  "source": {
+    "commit": "8da773c2c74d491795245155ab14f1d791532612",
+    "lines": [
+      "tests/bridge-api.sh:45",
+      "tests/bridge-api.sh:107-114",
+      "clcd:459-465"
+    ],
+    "repo": "xiaolai/claude-driven-ai-providers"
+  },
+  "steps": [
+    {
+      "error": "Invalid numeric literal at line 1, column 13 (while parsing '{broken-json}')",
+      "exit_code": 5,
+      "filter": "chat-stream.jq",
+      "input": {
+        "file": "reject-malformed-stream.events.sse"
+      },
+      "kind": "reject",
+      "label": "normalized",
+      "params": {
+        "arg": {
+          "model": "gemini-3.8-flash"
+        },
+        "flags": [
+          "-Rnj"
+        ]
+      },
+      "partial_output_lines": [],
+      "partial_output_raw": ""
+    },
+    {
+      "filter": "clcd-http-error.jq",
+      "input": null,
+      "kind": "json",
+      "label": "http_error",
+      "output": {
+        "error": {
+          "message": "Chat response stream was malformed or interrupted.",
+          "type": "invalid_request_error"
+        },
+        "type": "error"
+      },
+      "params": {
+        "arg": {
+          "message": "Chat response stream was malformed or interrupted."
+        }
+      }
+    }
+  ]
+}

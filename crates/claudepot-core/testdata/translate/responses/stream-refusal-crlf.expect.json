@@ -1,0 +1,133 @@
+{
+  "assertions": [
+    {
+      "source": "tests/clcd-protocol.sh:52",
+      "step": "stream",
+      "subject": "data",
+      "text": "any(.[];.delta.text==\"Cannot comply\") and .[-1].type==\"message_stop\""
+    }
+  ],
+  "case": "stream-refusal-crlf",
+  "covers": "CRLF-framed stream with a refusal part becomes text, and [DONE] is tolerated",
+  "family": "responses",
+  "kind": "expect",
+  "origin": "suite",
+  "source": {
+    "commit": "8da773c2c74d491795245155ab14f1d791532612",
+    "lines": [
+      "tests/clcd-protocol.sh:51-52"
+    ],
+    "repo": "xiaolai/claude-driven-ai-providers"
+  },
+  "steps": [
+    {
+      "filter": "clcd-stream.jq",
+      "input": {
+        "file": "stream-refusal-crlf.events.sse"
+      },
+      "kind": "sse",
+      "label": "stream",
+      "output_lines": [
+        {
+          "event": "message_start"
+        },
+        {
+          "data": {
+            "message": {
+              "content": [],
+              "id": "refusal",
+              "model": "test",
+              "role": "assistant",
+              "stop_reason": null,
+              "stop_sequence": null,
+              "type": "message",
+              "usage": {
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "input_tokens": 0,
+                "output_tokens": 0
+              }
+            },
+            "type": "message_start"
+          }
+        },
+        {
+          "event": "content_block_start"
+        },
+        {
+          "data": {
+            "content_block": {
+              "text": "",
+              "type": "text"
+            },
+            "index": 0,
+            "type": "content_block_start"
+          }
+        },
+        {
+          "event": "content_block_delta"
+        },
+        {
+          "data": {
+            "delta": {
+              "text": "Cannot comply",
+              "type": "text_delta"
+            },
+            "index": 0,
+            "type": "content_block_delta"
+          }
+        },
+        {
+          "event": "content_block_stop"
+        },
+        {
+          "data": {
+            "index": 0,
+            "type": "content_block_stop"
+          }
+        },
+        {
+          "event": "message_delta"
+        },
+        {
+          "data": {
+            "delta": {
+              "stop_reason": "end_turn",
+              "stop_sequence": null
+            },
+            "type": "message_delta",
+            "usage": {
+              "cache_read_input_tokens": 0,
+              "input_tokens": 0,
+              "output_tokens": 0
+            }
+          }
+        },
+        {
+          "event": "message_stop"
+        },
+        {
+          "data": {
+            "type": "message_stop"
+          }
+        }
+      ],
+      "output_raw": "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"refusal\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"test\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Cannot comply\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":0}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+      "params": {
+        "arg": {
+          "model": "test"
+        },
+        "flags": [
+          "-Rnj"
+        ],
+        "slurpfile": {
+          "names": [
+            {
+              "clcd_tool_0": "mcp__long"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

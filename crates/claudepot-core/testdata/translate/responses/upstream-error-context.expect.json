@@ -1,0 +1,58 @@
+{
+  "assertions": [
+    {
+      "equivalent": ".status_line|startswith(\"400 \")",
+      "source": "tests/clcd-regression.sh:73",
+      "step": "mapped",
+      "subject": "equiv",
+      "text": "[ \"$status\" = 400 ]"
+    },
+    {
+      "source": "tests/clcd-regression.sh:73",
+      "step": "mapped",
+      "subject": "json@.body",
+      "text": ".error.type==\"invalid_request_error\" and (.error.message|startswith(\"prompt is too long:\"))"
+    }
+  ],
+  "case": "upstream-error-context",
+  "covers": "A context-length 400 becomes invalid_request_error prefixed \"prompt is too long:\"",
+  "family": "responses",
+  "kind": "expect",
+  "origin": "suite",
+  "source": {
+    "commit": "8da773c2c74d491795245155ab14f1d791532612",
+    "lines": [
+      "tests/clcd-regression.sh:41",
+      "tests/clcd-regression.sh:73"
+    ],
+    "repo": "xiaolai/claude-driven-ai-providers"
+  },
+  "steps": [
+    {
+      "filter": "clcd-upstream-error.jq + clcd-retry-after.awk, bash glue as clcd:435-447",
+      "input": {
+        "file": "upstream-error-context.upstream-body.json",
+        "headers_file": "upstream-error-context.upstream-headers.txt"
+      },
+      "kind": "json",
+      "label": "mapped",
+      "output": {
+        "body": {
+          "error": {
+            "message": "prompt is too long: Maximum context length exceeded",
+            "type": "invalid_request_error"
+          },
+          "type": "error"
+        },
+        "retry_after": null,
+        "status_line": "400 Codex"
+      },
+      "params": {
+        "api_key_redacted_by_bash": "",
+        "arg": {
+          "status": "400"
+        }
+      }
+    }
+  ]
+}

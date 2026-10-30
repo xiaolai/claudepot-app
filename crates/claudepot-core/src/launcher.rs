@@ -161,7 +161,7 @@ async fn load_slot(account_id: Uuid) -> Result<CredentialBlob, LauncherError> {
 }
 
 #[derive(Debug)]
-enum CcCredentialState {
+pub(crate) enum CcCredentialState {
     /// CC is signed in as this account; carries CC's current blob.
     Same(CredentialBlob),
     DifferentOrEmpty,
@@ -178,7 +178,7 @@ enum CcCredentialState {
 ///
 /// No credentials, and CC's cleared-credentials sentinel, are clean
 /// "different" results. Read errors and parse failures are errors.
-async fn cc_state(
+pub(crate) async fn cc_state(
     platform: &dyn CliPlatform,
     slot: &CredentialBlob,
     expected_email: &str,

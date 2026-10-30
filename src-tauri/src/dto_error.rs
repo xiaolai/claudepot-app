@@ -102,6 +102,15 @@ pub mod codes {
     /// A renderer-supplied device id did not parse as a uuid.
     pub const REMOTE_BAD_DEVICE_ID: &str = "remote.bad_device_id";
 
+    // --- relay server (commands/relay.rs)
+    /// Any `relay::service` verb failed. One code for the same reason as
+    /// `REMOTE_FAILED`: the service error's `Display` names the cause.
+    pub const RELAY_FAILED: &str = "relay.failed";
+    /// A terminal relay took the revoke request and never answered, so
+    /// the device may or may not be revoked. Its own code because "failed"
+    /// would be false half the time, and revoking again is safe.
+    pub const RELAY_REVOKE_OUTCOME_UNKNOWN: &str = "relay.revoke_outcome_unknown";
+
     // --- accounts / auth / desktop (commands/{account,desktop,preferences}.rs)
     /// `LoginState`'s mutex was poisoned — a previous holder panicked.
     pub const ACCOUNTS_LOGIN_STATE_LOCK_POISONED: &str = "accounts.login_state_lock_poisoned";
@@ -893,6 +902,8 @@ pub mod codes {
         SESSION_SHARE_TOKEN_EMPTY,
         REMOTE_FAILED,
         REMOTE_BAD_DEVICE_ID,
+        RELAY_FAILED,
+        RELAY_REVOKE_OUTCOME_UNKNOWN,
         ACCOUNTS_LOGIN_STATE_LOCK_POISONED,
         ACCOUNTS_LOGIN_IN_PROGRESS,
         ACCOUNTS_VERIFY_ALL_IN_PROGRESS,

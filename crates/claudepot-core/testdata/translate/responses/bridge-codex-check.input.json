@@ -1,0 +1,10 @@
+{
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "content": "Reply with exactly CLCD_OK",
+      "role": "user"
+    }
+  ],
+  "model": "legacy-codex"
+}

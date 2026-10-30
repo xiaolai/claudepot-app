@@ -24,6 +24,8 @@ ciborium.workspace = true
 rustls.workspace = true
 rustls-pki-types.workspace = true
 tokio-rustls.workspace = true
+rcgen.workspace = true
+time.workspace = true
 hyper-util.workspace = true
 hmac.workspace = true
 sha1.workspace = true
@@ -40,6 +42,9 @@ portable-pty.workspace = true
 sysinfo.workspace = true
 libc.workspace = true
 async-trait.workspace = true
+# `Stream` / `StreamExt` for the relay's streamed response bodies.
+# Already compiled for the workspace (usage_snapshot's catch_unwind).
+futures-util.workspace = true
 whoami.workspace = true
 unicode-normalization.workspace = true
 unicode-segmentation.workspace = true
@@ -91,6 +96,9 @@ caregiver = ["dep:lettre"]
 
 [dev-dependencies]
 tower.workspace = true
+# The relay's canary test captures every event at TRACE level and
+# asserts no credential appears in it. Already compiled for the CLI.
+tracing-subscriber.workspace = true
 claudepot-core = { path = ".", features = ["caregiver"] }
 # `test-util` enables tokio's pausable clock (`#[tokio::test(start_paused
 # = true)]`). Used by the stagger tests, which assert how many 200 ms

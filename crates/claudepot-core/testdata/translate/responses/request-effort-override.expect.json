@@ -1,0 +1,117 @@
+{
+  "assertions": [
+    {
+      "source": "tests/clcd-protocol.sh:49",
+      "step": "request",
+      "subject": "json",
+      "text": ".reasoning.effort==\"low\""
+    }
+  ],
+  "case": "request-effort-override",
+  "covers": "An explicit bridge effort (CLCD_EFFORT) overrides the request effort",
+  "family": "responses",
+  "kind": "expect",
+  "notes": [
+    "Input is request-adaptive-effort.input.json."
+  ],
+  "origin": "suite",
+  "source": {
+    "commit": "8da773c2c74d491795245155ab14f1d791532612",
+    "lines": [
+      "tests/clcd-protocol.sh:49"
+    ],
+    "repo": "xiaolai/claude-driven-ai-providers"
+  },
+  "steps": [
+    {
+      "filter": "clcd-request.jq",
+      "input": {
+        "file": "request-adaptive-effort.input.json"
+      },
+      "kind": "json",
+      "label": "request",
+      "output": {
+        "input": [
+          {
+            "content": [
+              {
+                "text": "midturn instructions",
+                "type": "input_text"
+              }
+            ],
+            "role": "developer",
+            "type": "message"
+          },
+          {
+            "content": [
+              {
+                "text": "Hi",
+                "type": "input_text"
+              }
+            ],
+            "role": "user",
+            "type": "message"
+          },
+          {
+            "content": [
+              {
+                "image_url": "data:image/png;base64,AA==",
+                "type": "input_image"
+              }
+            ],
+            "role": "user",
+            "type": "message"
+          },
+          {
+            "arguments": "{\"path\":\"a\"}",
+            "call_id": "call_test",
+            "name": "clcd_tool_0",
+            "type": "function_call"
+          },
+          {
+            "call_id": "call_test",
+            "output": "[Tool error]\nmissing",
+            "type": "function_call_output"
+          }
+        ],
+        "instructions": "test instructions",
+        "model": "gpt-6.1-sol",
+        "parallel_tool_calls": false,
+        "reasoning": {
+          "effort": "low"
+        },
+        "store": false,
+        "stream": true,
+        "tool_choice": {
+          "name": "clcd_tool_0",
+          "type": "function"
+        },
+        "tools": [
+          {
+            "description": "read",
+            "name": "clcd_tool_0",
+            "parameters": {
+              "type": "object"
+            },
+            "strict": false,
+            "type": "function"
+          }
+        ]
+      },
+      "params": {
+        "arg": {
+          "effort": "low",
+          "effort_override": "true",
+          "model": "test"
+        },
+        "slurpfile": {
+          "names": [
+            {
+              "mcp__long": "clcd_tool_0"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

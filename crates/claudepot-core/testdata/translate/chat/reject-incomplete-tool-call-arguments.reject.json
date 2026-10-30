@@ -1,0 +1,58 @@
+{
+  "assertions": [
+    {
+      "source": "tests/chat.sh:22",
+      "step": "normalized",
+      "subject": "rejected",
+      "text": "if head -n 1 \"$tmp/events\"|jq -Rnj --arg model fixture-model -f \"$repo/adapters/chat-stream.jq\""
+    }
+  ],
+  "case": "reject-incomplete-tool-call-arguments",
+  "covers": "A tool call whose argument fragments never complete is refused at the finish reason",
+  "family": "chat",
+  "kind": "reject",
+  "notes": [
+    "Derived input: chat.sh lines 7, 9 and 10 (the second argument fragment removed). Not a suite case; the cited assertion is the nearest suite rejection.",
+    "The error is a jq parse error from fromjson (chat-stream.jq:40), not the \"Incomplete chat tool call\" message, so clcd reports the generic \"malformed or interrupted\" problem."
+  ],
+  "origin": "derived",
+  "source": {
+    "commit": "8da773c2c74d491795245155ab14f1d791532612",
+    "lines": [
+      "tests/chat.sh:7",
+      "tests/chat.sh:9-10"
+    ],
+    "repo": "xiaolai/claude-driven-ai-providers"
+  },
+  "steps": [
+    {
+      "error": "Unfinished JSON term at EOF at line 1, column 8 (while parsing '{\"path\":')",
+      "exit_code": 5,
+      "filter": "chat-stream.jq",
+      "input": {
+        "file": "reject-incomplete-tool-call-arguments.events.sse"
+      },
+      "kind": "reject",
+      "label": "normalized",
+      "params": {
+        "arg": {
+          "model": "fixture-model"
+        },
+        "flags": [
+          "-Rnj"
+        ]
+      },
+      "partial_output_lines": [
+        {
+          "data": {
+            "response": {
+              "id": "chat_fixture"
+            },
+            "type": "response.created"
+          }
+        }
+      ],
+      "partial_output_raw": "data: {\"type\":\"response.created\",\"response\":{\"id\":\"chat_fixture\"}}\n\n"
+    }
+  ]
+}

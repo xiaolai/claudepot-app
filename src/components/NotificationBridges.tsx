@@ -5,6 +5,7 @@ import { useUsageThresholdNotifications } from "../hooks/useUsageThresholdNotifi
 import { useRotationEvents } from "../hooks/useRotationEvents";
 import { useAgentEventToasts } from "../hooks/useAgentEventToasts";
 import { useBackgroundChangeEmits } from "../hooks/useBackgroundChangeEmits";
+import { useRelayErrorNotifications } from "../hooks/useRelayErrorNotifications";
 
 /**
  * Null-rendering leaf that hosts every ambient notification hook the
@@ -39,6 +40,8 @@ import { useBackgroundChangeEmits } from "../hooks/useBackgroundChangeEmits";
  *   `config-tree-patch` routed into the notification log so they
  *   reach the bell popover regardless of the active section.
  *   P3 ambient — log-only, no toast/banner spray.
+ * - Relay upstream errors — one `relayError` log row per new code from
+ *   `relay-status`. P3 ambient; blocking conditions are the banner's.
  */
 export function NotificationBridges() {
   useCardNotifications();
@@ -47,5 +50,6 @@ export function NotificationBridges() {
   useRotationEvents();
   useAgentEventToasts();
   useBackgroundChangeEmits();
+  useRelayErrorNotifications();
   return <ActivityNotificationsBridge />;
 }

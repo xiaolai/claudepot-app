@@ -69,7 +69,8 @@
     "memoryChanged": "CLAUDE.md 被外部修改",
     "configTreePatched": "配置文件被外部修改",
     "serviceStatusChanged": "anthropic.com 状态变化",
-    "updateAvailable": "有可用更新"
+    "updateAvailable": "有可用更新",
+    "relayError": "中继上游错误"
   },
   "statusbar": {
     "projects_other": "{{count}} 个项目",

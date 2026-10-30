@@ -1,0 +1,23 @@
+{
+  "max_tokens": 512,
+  "messages": [
+    {
+      "content": "read",
+      "role": "user"
+    }
+  ],
+  "stream": false,
+  "tools": [
+    {
+      "input_schema": {
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "read_file"
+    }
+  ]
+}

@@ -25,6 +25,7 @@ written after. Notes are read on demand; they are not optional.
 | [`gui-shell.md`](docs/notes/gui-shell.md) | the Tauri shell, the section registry, the ⌘K palette, event channels, the session index |
 | [`cc-integration.md`](docs/notes/cc-integration.md) | retention, permission grants, peer messaging, CC env variables, any write to a CC settings file |
 | [`remote-control.md`](docs/notes/remote-control.md) | `claudepot-core::remote`, `panel/`, approving from the phone |
+| [`relay.md`](docs/notes/relay.md) | `claudepot-core::relay`, `claudepot relay`, Settings → Relay |
 | [`core-modules.md`](docs/notes/core-modules.md) | pricing, the env vault, auto-rotation, token refresh, the corpus |
 | [`i18n.md`](docs/notes/i18n.md) | any user-facing string or catalog |
 | [`test-gates.md`](docs/notes/test-gates.md) | a `check:*` gate, and especially before relaxing one |
@@ -227,6 +228,31 @@ ssh <user>@<host> "security unlock-keychain -p <password>; bash /tmp/claude-logi
 - **Panel**: the transcript is masked, never scrubbed, and the UI says
   so; tool output never renders as markdown; there is no interrupt and no
   project move.
+
+## Subscription relay
+
+- **A behaviour over `account`, not a noun**, and not Remote Control:
+  its own listener, port, device store, `cprl_` token namespace and CA.
+  Share `remote::` code only as parameterised functions, never a service.
+- **Never serve the CC-active account** — an outside renewal empties
+  CC's login (measured). Checked at start and every renewal;
+  `owner_conflict` stops serving.
+- **Tokens come from `relay::lease`, never `launcher::get_access_token`.**
+  One refresh per rejected generation.
+- **User-actionable refusals are 403 with a fixed enum** — CC retries
+  401/503 for minutes. Upstream text never reaches a log, error or event.
+- **Binding is checked per request on the server**: a changed target
+  is `acceptance_required` before any upstream contact.
+- **The relay launch env sets `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1`**
+  and clears provider variables from `cc-env-spec.json`, not a list.
+- **Always TLS, own CA; a missing CA key fails closed** — never mint a
+  new CA silently. Offline config edits are refused while
+  `relay-serve.lock` is held; the GUI relay stops on quit.
+- **The revoke socket has one verb, and it only takes access away**
+  (`relay::revoke_socket`, Unix): never add one that grants access. The
+  peer uid is its boundary, checked on both ends; `relay-revoke/` is
+  refused, never repaired.
+- Non-Anthropic upstreams are **unpriced**, never priced by model name.
 
 ## Env secret vault
 

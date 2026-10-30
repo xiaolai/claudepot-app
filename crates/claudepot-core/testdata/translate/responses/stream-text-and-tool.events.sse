@@ -1,0 +1,9 @@
+data: {"type":"response.created","response":{"id":"resp_test"}}
+
+data: {"type":"response.content_part.added","item_id":"msg1","content_index":0,"part":{"type":"output_text","text":""}}
+data: {"type":"response.output_text.delta","item_id":"msg1","content_index":0,"delta":"Hello"}
+data: {"type":"response.content_part.done","item_id":"msg1","content_index":0,"part":{"type":"output_text"}}
+data: {"type":"response.output_item.added","item":{"id":"fc1","type":"function_call","call_id":"call1","name":"clcd_tool_0"}}
+data: {"type":"response.function_call_arguments.delta","item_id":"fc1","delta":"{\"path\":\"a\"}"}
+data: {"type":"response.output_item.done","item":{"id":"fc1","type":"function_call","call_id":"call1","name":"clcd_tool_0","arguments":"{\"path\":\"a\"}"}}
+data: {"type":"response.completed","response":{"usage":{"input_tokens":100,"input_tokens_details":{"cached_tokens":30},"output_tokens":7}}}

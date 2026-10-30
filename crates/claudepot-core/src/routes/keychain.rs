@@ -9,13 +9,26 @@
 //! This is **distinct** from the `Claude Code-credentials` keychain
 //! item that CC owns. We never read or write that one from here —
 //! per `.claude/rules/architecture.md`.
-
-use keyring::Entry;
+//!
+//! On macOS the cell is written through `/usr/bin/security`
+//! ([`crate::security_cli`], surface 2): the wrapper's helper script reads
+//! it with `security find-generic-password`, and the GUI and the CLI are
+//! differently signed, so an item `keyring` created would be ACL-locked to
+//! whichever binary wrote it. Linux and Windows use `keyring`.
+//!
+//! Until 2026-10 this module used `keyring` on every platform, and the
+//! workspace enables no `keyring` backend feature, so `keyring` fell back
+//! to its in-memory mock store: every write "succeeded" and was gone by
+//! the next process. A route saved with "store in keychain" before then
+//! has no secret anywhere and must be re-entered. The Linux/Windows arm is
+//! still on the mock until a backend feature is chosen.
 
 use super::error::RouteError;
 use super::types::RouteId;
 
-const SERVICE: &str = "claudepot-routes";
+/// The keychain service every route secret lives under. The wrapper's
+/// helper script and the relay's serving path read the same name.
+pub const SERVICE: &str = "claudepot-routes";
 
 /// Secret-field selectors within a route.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,20 +48,53 @@ impl SecretField {
     }
 }
 
-fn account(route_id: RouteId, field: SecretField) -> String {
+/// The account attribute for one (route, field) cell.
+pub fn account(route_id: RouteId, field: SecretField) -> String {
     format!("{}-{}", route_id, field.suffix())
 }
 
-fn entry(route_id: RouteId, field: SecretField) -> Result<Entry, RouteError> {
-    let acct = account(route_id, field);
-    Entry::new(SERVICE, &acct).map_err(keyring_to_route_error)
+#[cfg(target_os = "macos")]
+fn security_to_route_error(e: crate::security_cli::SecurityCliError) -> RouteError {
+    RouteError::Io(std::io::Error::other(format!("keychain: {e}")))
 }
 
+/// Write or replace the secret for one (route, field) cell. Verified: on
+/// macOS the value is read back before this returns `Ok`.
+#[cfg(target_os = "macos")]
+pub fn store_secret(route_id: RouteId, field: SecretField, secret: &str) -> Result<(), RouteError> {
+    let secret = crate::relay::secret::Secret::new(secret.to_owned());
+    crate::security_cli::write(SERVICE, &account(route_id, field), &secret)
+        .map_err(security_to_route_error)
+}
+
+/// Read the secret. `Ok(None)` when no entry exists; `Err` for I/O
+/// or platform-permission failures.
+#[cfg(target_os = "macos")]
+pub fn read_secret(route_id: RouteId, field: SecretField) -> Result<Option<String>, RouteError> {
+    crate::security_cli::read(SERVICE, &account(route_id, field))
+        .map(|v| v.map(|s| s.expose().to_owned()))
+        .map_err(security_to_route_error)
+}
+
+/// Delete the entry. Idempotent — missing-entry errors are swallowed.
+#[cfg(target_os = "macos")]
+pub fn delete_secret(route_id: RouteId, field: SecretField) -> Result<(), RouteError> {
+    crate::security_cli::delete(SERVICE, &account(route_id, field)).map_err(security_to_route_error)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn entry(route_id: RouteId, field: SecretField) -> Result<keyring::Entry, RouteError> {
+    let acct = account(route_id, field);
+    keyring::Entry::new(SERVICE, &acct).map_err(keyring_to_route_error)
+}
+
+#[cfg(not(target_os = "macos"))]
 fn keyring_to_route_error(e: keyring::Error) -> RouteError {
     RouteError::Io(std::io::Error::other(format!("keychain: {e}")))
 }
 
 /// Write or replace the secret for one (route, field) cell.
+#[cfg(not(target_os = "macos"))]
 pub fn store_secret(route_id: RouteId, field: SecretField, secret: &str) -> Result<(), RouteError> {
     let e = entry(route_id, field)?;
     e.set_password(secret).map_err(keyring_to_route_error)?;
@@ -57,6 +103,7 @@ pub fn store_secret(route_id: RouteId, field: SecretField, secret: &str) -> Resu
 
 /// Read the secret. `Ok(None)` when no entry exists; `Err` for I/O
 /// or platform-permission failures.
+#[cfg(not(target_os = "macos"))]
 pub fn read_secret(route_id: RouteId, field: SecretField) -> Result<Option<String>, RouteError> {
     let e = entry(route_id, field)?;
     match e.get_password() {
@@ -67,6 +114,7 @@ pub fn read_secret(route_id: RouteId, field: SecretField) -> Result<Option<Strin
 }
 
 /// Delete the entry. Idempotent — missing-entry errors are swallowed.
+#[cfg(not(target_os = "macos"))]
 pub fn delete_secret(route_id: RouteId, field: SecretField) -> Result<(), RouteError> {
     let e = entry(route_id, field)?;
     match e.delete_credential() {

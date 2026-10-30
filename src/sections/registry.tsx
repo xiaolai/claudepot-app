@@ -265,6 +265,7 @@ export const sections: readonly SectionDef[] = [
         "src/sections/SettingsSection.tsx",
         "src/sections/settings/HealthPane.tsx",
         "src/sections/settings/RemotePane.tsx",
+        "src/sections/settings/useRelayPaneController.ts",
         "src/sections/settings/RotationPane.tsx",
         "src/sections/settings/McpInstallerPane.tsx",
       ],

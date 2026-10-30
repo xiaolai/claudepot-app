@@ -59,6 +59,7 @@ import { NetworkPane } from "./settings/NetworkPane";
 import { ProtectedPathsPane } from "./settings/ProtectedPathsPane";
 import { RotationPane } from "./settings/RotationPane";
 import { RemotePane } from "./settings/RemotePane";
+import { RelayPane } from "./settings/RelayPane";
 import { RetentionPane } from "./settings/RetentionPane";
 import { CleanupPane } from "./sessions/CleanupPane";
 import { ArtifactLifecyclePane } from "./settings/ArtifactLifecyclePane";
@@ -169,6 +170,7 @@ export function SettingsSection() {
           {tab === "network" && <NetworkPane pushToast={pushToast} />}
           {tab === "rotation" && <RotationPane pushToast={pushToast} />}
           {tab === "remote" && <RemotePane pushToast={pushToast} />}
+          {tab === "relay" && <RelayPane pushToast={pushToast} />}
           {tab === "retention" && <RetentionPane pushToast={pushToast} />}
           {tab === "health" && <HealthPane pushToast={pushToast} />}
           {tab === "mcp" && <McpInstallerPane pushToast={pushToast} />}

@@ -798,5 +798,9 @@
   "remote": {
     "failed": "The remote surface could not be changed. {{detail}}",
     "bad_device_id": "That is not a device id. {{detail}}"
+  },
+  "relay": {
+    "failed": "The relay could not be changed. {{detail}}",
+    "revoke_outcome_unknown": "The relay serving from a terminal took the request but never confirmed it, so the device may or may not be revoked. The list below shows its state; revoking again is safe."
   }
 }

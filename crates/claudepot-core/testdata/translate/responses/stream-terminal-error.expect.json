@@ -1,0 +1,85 @@
+{
+  "assertions": [
+    {
+      "source": "tests/clcd-protocol.sh:55",
+      "step": "stream",
+      "subject": "grep",
+      "text": "event: error"
+    }
+  ],
+  "case": "stream-terminal-error",
+  "covers": "error becomes an Anthropic error event",
+  "family": "responses",
+  "kind": "expect",
+  "origin": "suite",
+  "source": {
+    "commit": "8da773c2c74d491795245155ab14f1d791532612",
+    "lines": [
+      "tests/clcd-protocol.sh:53-56"
+    ],
+    "repo": "xiaolai/claude-driven-ai-providers"
+  },
+  "steps": [
+    {
+      "filter": "clcd-stream.jq",
+      "input": {
+        "file": "stream-terminal-error.events.sse"
+      },
+      "kind": "sse",
+      "label": "stream",
+      "output_lines": [
+        {
+          "event": "message_start"
+        },
+        {
+          "data": {
+            "message": {
+              "content": [],
+              "id": "terminal",
+              "model": "test",
+              "role": "assistant",
+              "stop_reason": null,
+              "stop_sequence": null,
+              "type": "message",
+              "usage": {
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "input_tokens": 0,
+                "output_tokens": 0
+              }
+            },
+            "type": "message_start"
+          }
+        },
+        {
+          "event": "error"
+        },
+        {
+          "data": {
+            "error": {
+              "message": "Codex returned an error.",
+              "type": "api_error"
+            },
+            "type": "error"
+          }
+        }
+      ],
+      "output_raw": "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"terminal\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"test\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}\n\nevent: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"Codex returned an error.\"}}\n\n",
+      "params": {
+        "arg": {
+          "model": "test"
+        },
+        "flags": [
+          "-Rnj"
+        ],
+        "slurpfile": {
+          "names": [
+            {
+              "clcd_tool_0": "mcp__long"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

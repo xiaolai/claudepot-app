@@ -1,4 +1,12 @@
 mod app_menu;
+
+/// The one guard for tests in this binary that set `CLAUDEPOT_DATA_DIR`
+/// (or `CLAUDEPOT_CREDENTIAL_BACKEND`). The variable is process-global, so
+/// every such test must take this same lock: two modules each holding
+/// their own excluded nothing from each other, and one restoring "unset"
+/// pointed the other's `accounts_reconcile` at the real `~/.claudepot`.
+#[cfg(test)]
+pub(crate) static DATA_DIR_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 mod cc_doctor_watcher;
 // `pub` so integration tests in `tests/*.rs` can reach
 // `commands::agents::route_lookup_fn` and drive the EXACT closure
@@ -60,6 +68,7 @@ mod poller;
 mod pr_orchestrator;
 mod preferences;
 mod project_size_cache;
+mod relay_server;
 mod remote_server;
 mod retention_boot_check;
 mod rotation_orchestrator;
@@ -1006,6 +1015,7 @@ pub fn run() {
             state::LiveSessionState::new(svc)
         })
         .manage(remote_server::RemoteServerState::new())
+        .manage(relay_server::RelayServerState::new())
         .manage(ops::RunningOps::new())
         .manage(commands::cc_doctor::CcDoctorState::new())
         .manage(state::TrayHealthState::default())
@@ -1431,6 +1441,15 @@ pub fn run() {
             commands::remote::remote_stop,
             commands::remote::remote_revoke_all,
             commands::remote::remote_revoke_device,
+            commands::relay::relay_status,
+            commands::relay::relay_start,
+            commands::relay::relay_stop,
+            commands::relay::relay_set_bind,
+            commands::relay::relay_publish,
+            commands::relay::relay_unpublish,
+            commands::relay::relay_revoke_device,
+            commands::relay::relay_pair_code,
+            commands::relay::relay_client_servers,
             commands::permission::permission_list,
             commands::permission::permission_get,
             commands::permission::permission_grant,
@@ -1495,6 +1514,7 @@ pub fn run() {
             if matches!(event, tauri::RunEvent::Exit) {
                 use tauri::Manager;
                 remote_server::stop_on_exit(&app.state::<remote_server::RemoteServerState>());
+                relay_server::stop_on_exit(&app.state::<relay_server::RelayServerState>());
             }
 
             // Re-apply the Dock icon once the app is actually up.
