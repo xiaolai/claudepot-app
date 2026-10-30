@@ -291,8 +291,10 @@ describe("CostTab", () => {
       expect(localUsageAggregateMock).toHaveBeenCalled(),
     );
     // Tier label appears in the source pill alongside the source text.
+    // `findBy`, not `getBy`: the mock having been called does not mean
+    // its resolved report has rendered yet, and under load it has not.
     expect(
-      screen.getByText(/Anthropic API · bundled · verified 2026-01-15/i),
+      await screen.findByText(/Anthropic API · bundled · verified 2026-01-15/i),
     ).toBeInTheDocument();
     // Picker is hydrated to the report's tier.
     const select = screen.getByLabelText("Tier") as HTMLSelectElement;
