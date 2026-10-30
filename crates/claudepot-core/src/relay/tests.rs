@@ -881,7 +881,8 @@ async fn waiting_too_long_for_response_headers_is_a_504() {
 fn the_relay_client_sets_no_total_deadline() {
     // reqwest exposes no getter, so this pins the source instead: the
     // builder the relay client starts from must never grow `.timeout(`.
-    let src = include_str!("forward.rs");
+    // windows-latest checks out with CRLF, so normalise before slicing.
+    let src = include_str!("forward.rs").replace("\r\n", "\n");
     let start = src.find("pub(crate) fn base_builder").unwrap();
     let body = &src[start..start + src[start..].find("\n}\n").unwrap()];
     assert!(body.contains(".read_timeout("));
