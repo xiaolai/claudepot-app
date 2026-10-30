@@ -199,12 +199,18 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let local = tmp.path();
         let package = package_copy(local, FAMILY);
+        // Real data in the package copy, so only the marker can move it.
+        touch(&package.join("config.json"));
         touch(&package.join(".user-data-left.Claude_pzs8sxrjxfjjc"));
         fs::create_dir_all(local.join("Claude-Data").join("claude_pzs8sxrjxfjjc")).unwrap();
 
-        if cfg!(any(target_os = "windows", target_os = "macos")) {
-            // Case-insensitive file systems cannot tell the two names
-            // apart, and neither can Desktop on them.
+        // A case-insensitive file system cannot tell the two names
+        // apart, and neither can Desktop on it. Probe the volume rather
+        // than guess from the OS: macOS volumes can be either.
+        if package
+            .join(".user-data-left.claude_pzs8sxrjxfjjc")
+            .exists()
+        {
             return;
         }
         assert_eq!(resolve(local, FAMILY), package);
