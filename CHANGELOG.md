@@ -6,7 +6,7 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.7.0 — beta (unreleased)
+## 0.7.0 — beta (released 2026-10-30)
 
 One theme: using a Claude subscription from another machine.
 
