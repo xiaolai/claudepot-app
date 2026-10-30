@@ -6,7 +6,33 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
-## 0.6.10 — beta (unreleased)
+## 0.7.0 — beta (unreleased)
+
+One theme: using a Claude subscription from another machine.
+
+### Added
+
+- **Subscription relay.** Claude Code on another machine on your
+  tailnet can use an account registered here, without signing in
+  there. Pair the two machines once with a one-time code. After that,
+  the other machine gets a device token, never an Anthropic login, and
+  you can revoke it at any time. Run it from Settings → Relay or from
+  `claudepot relay`. The relay never serves the account Claude Code is
+  using on this machine.
+- **Relay routes to other providers.** A relay can also serve a gateway
+  route as-is, or translate Claude Code's requests to Codex (with a
+  relay-only Codex login), OpenAI Responses, Grok, Gemini or Chat
+  Completions. The Codex translation has been tested live with tool
+  calls. **OpenAI, Grok and Gemini translation is experimental**: it is
+  covered by recorded fixtures only and has not been tried against a
+  live key.
+- **Quick-start presets in the Add route form** for DeepSeek, Kimi, GLM
+  (z.ai), MiniMax, Ollama and LM Studio: providers whose endpoint
+  speaks Claude Code's API directly. Qwen and OpenRouter are no longer
+  offered, because their endpoints need translation or differ by
+  region.
+
+## 0.6.10 — beta (released 2026-10-29)
 
 ### Changed
 
