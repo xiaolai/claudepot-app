@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "source": "claude-driven-ai-providers providers.json, protocol = anthropic",
+  "presets": [
+    {
+      "id": "deepseek",
+      "label": "DeepSeek",
+      "base_url": "https://api.deepseek.com/anthropic",
+      "model": "deepseek-flash",
+      "docs": "https://api-docs.deepseek.com/guides/anthropic_api/",
+      "checked": "2026-10-27",
+      "reachable_from_blocked_regions": true
+    },
+    {
+      "id": "kimi",
+      "label": "Kimi (Moonshot)",
+      "base_url": "https://api.moonshot.ai/anthropic",
+      "model": "kimi-k3",
+      "docs": "https://platform.kimi.ai/docs/guide/claude-code-kimi",
+      "checked": "2026-10-27",
+      "reachable_from_blocked_regions": false
+    },
+    {
+      "id": "zai",
+      "label": "GLM (Z.ai)",
+      "base_url": "https://api.z.ai/api/anthropic",
+      "model": "glm-5.3",
+      "docs": "https://docs.z.ai/devpack/tool/claude",
+      "checked": "2026-10-27",
+      "reachable_from_blocked_regions": false
+    },
+    {
+      "id": "minimax",
+      "label": "MiniMax",
+      "base_url": "https://api.minimax.io/anthropic",
+      "model": "MiniMax-M3.1-Flash",
+      "docs": "https://platform.minimax.io/docs/api-reference/text-anthropic-api",
+      "checked": "2026-10-27",
+      "reachable_from_blocked_regions": false
+    },
+    {
+      "id": "ollama",
+      "label": null,
+      "base_url": "http://127.0.0.1:11434",
+      "model": "",
+      "docs": "https://docs.ollama.com/api/anthropic-compatibility",
+      "checked": "2026-10-27",
+      "reachable_from_blocked_regions": true
+    },
+    {
+      "id": "lmstudio",
+      "label": null,
+      "base_url": "http://127.0.0.1:1234",
+      "model": "",
+      "docs": "https://lmstudio.ai/docs/developer/anthropic-compat/messages",
+      "checked": "2026-10-27",
+      "reachable_from_blocked_regions": true
+    }
+  ]
+}

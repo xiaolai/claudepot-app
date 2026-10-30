@@ -23,6 +23,9 @@ mod helper;
 mod keychain;
 mod lifecycle;
 mod path_setup;
+// Test-only: the route form reads the JSON itself; Rust only vets it.
+#[cfg(test)]
+mod presets;
 mod slug;
 mod store;
 mod types;

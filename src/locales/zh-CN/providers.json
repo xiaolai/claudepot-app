@@ -98,12 +98,13 @@
     "quickStartReachable": "快速开始 — 你的网络可访问的服务商：",
     "quickStartKnown": "快速开始 — 从已知服务商预填：",
     "deepseekNote": "中国大陆可访问。",
-    "moonshotNote": "中国大陆可访问。",
-    "qwenNote": "阿里巴巴的 Qwen。中国大陆可访问。",
-    "glmNote": "智谱的 GLM。中国大陆可访问。",
-    "openrouterNote": "可路由至多家服务商。在受限地区的可达性视情况而定。",
+    "kimiNote": "Moonshot 的国际端点。",
+    "zaiNote": "智谱的 GLM，国际端点。",
+    "minimaxNote": "MiniMax 的国际端点。",
     "ollamaLabel": "Ollama（本地）",
-    "ollamaNote": "本地推理。始终可访问 — 需要 Ollama 正在运行。"
+    "ollamaNote": "本地推理。始终可访问 — 需要 Ollama 正在运行。",
+    "lmstudioLabel": "LM Studio（本地）",
+    "lmstudioNote": "本地推理。始终可访问 — 需要 LM Studio 的服务器正在运行。"
   },
   "form": {
     "displayName": "显示名称",

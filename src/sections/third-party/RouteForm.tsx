@@ -6,6 +6,7 @@ import { FieldBlock } from "../../components/primitives/modalParts";
 import { NF } from "../../icons";
 import { api } from "../../api";
 import { readFromNetworkPanelBreadcrumb } from "../../lib/networkPanelDeepLink";
+import gatewayPresetsFile from "../../../crates/claudepot-core/data/gateway-presets.json";
 import type {
   BedrockInputDto,
   FoundryInputDto,
@@ -581,91 +582,30 @@ function KeychainOption(props: {
 }
 
 /**
- * Curated gateway-provider presets. Each entry pre-fills base URL +
- * a sensible default model so users don't have to copy-paste from
- * vendor docs. The list deliberately leans toward providers reachable
- * from regions where Anthropic itself is blocked (mainland China),
- * since this is the catalog the network-detection panel routes users
- * to. See `dev-docs/network-detection-panel.md`.
- *
- * Endpoint paths are the OpenAI-compatible chat-completions roots —
- * the gateway wrapper handles the request-shape translation. If a
- * vendor changes their endpoint, update here; the form just plumbs
- * the string through.
+ * Curated gateway-provider presets — providers whose endpoint speaks
+ * Anthropic's Messages API, so the route works with no translation.
+ * The data is shared with core (`routes::presets`, whose tests check
+ * every row builds a working wrapper); edit
+ * `crates/claudepot-core/data/gateway-presets.json`, not this file.
+ * Each row is dated with when its endpoint was last checked.
  */
-type GatewayPresetId =
-  | "deepseek"
-  | "moonshot"
-  | "qwen"
-  | "glm"
-  | "openrouter"
-  | "ollama";
+type GatewayPresetId = (typeof gatewayPresetsFile.presets)[number]["id"];
 
 interface GatewayPreset {
   id: GatewayPresetId;
-  /**
-   * Vendor brand name — data, never translated. `null` when the
-   * visible label carries English copy alongside the brand ("Ollama
-   * (local)"); that one is resolved from the catalog at render time.
-   */
+  /** Vendor brand name — data, never translated. `null` when the
+   *  visible label is localized copy ("Ollama (local)"). */
   label: string | null;
-  baseUrl: string;
+  base_url: string;
+  /** Empty for local servers: the model is whatever the user pulled,
+   *  so the field is left as it is. */
   model: string;
-  /** True when reachable from networks that block Anthropic (China et
-   *  al). Drives the "reachable here" hint when the form is opened
-   *  from the network-detection panel. */
-  reachableFromBlockedRegions: boolean;
+  /** True when reachable from networks that block Anthropic. Drives
+   *  the "reachable here" hint from the network-detection panel. */
+  reachable_from_blocked_regions: boolean;
 }
 
-/**
- * Endpoints and model ids stay here — they are vendor data. The
- * per-preset `note` is prose and moved to `presets.*Note`, resolved
- * per render so a language switch reaches an already-open form.
- */
-const GATEWAY_PRESETS: GatewayPreset[] = [
-  {
-    id: "deepseek",
-    label: "DeepSeek",
-    baseUrl: "https://api.deepseek.com/v1",
-    model: "deepseek-chat",
-    reachableFromBlockedRegions: true,
-  },
-  {
-    id: "moonshot",
-    label: "Kimi (Moonshot)",
-    baseUrl: "https://api.moonshot.cn/v1",
-    model: "moonshot-v1-32k",
-    reachableFromBlockedRegions: true,
-  },
-  {
-    id: "qwen",
-    label: "Qwen (DashScope)",
-    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    model: "qwen-coder-plus",
-    reachableFromBlockedRegions: true,
-  },
-  {
-    id: "glm",
-    label: "GLM (Zhipu)",
-    baseUrl: "https://open.bigmodel.cn/api/paas/v4",
-    model: "glm-4-plus",
-    reachableFromBlockedRegions: true,
-  },
-  {
-    id: "openrouter",
-    label: "OpenRouter",
-    baseUrl: "https://openrouter.ai/api/v1",
-    model: "moonshotai/kimi-k2",
-    reachableFromBlockedRegions: false,
-  },
-  {
-    id: "ollama",
-    label: null,
-    baseUrl: "http://127.0.0.1:11434/v1",
-    model: "llama3.2:3b",
-    reachableFromBlockedRegions: true,
-  },
-];
+const GATEWAY_PRESETS: readonly GatewayPreset[] = gatewayPresetsFile.presets;
 
 function GatewayPresetsBar({
   setBaseUrl,
@@ -683,11 +623,15 @@ function GatewayPresetsBar({
   // repaints an already-open form.
   const notes: Record<GatewayPresetId, string> = {
     deepseek: t("presets.deepseekNote"),
-    moonshot: t("presets.moonshotNote"),
-    qwen: t("presets.qwenNote"),
-    glm: t("presets.glmNote"),
-    openrouter: t("presets.openrouterNote"),
+    kimi: t("presets.kimiNote"),
+    zai: t("presets.zaiNote"),
+    minimax: t("presets.minimaxNote"),
     ollama: t("presets.ollamaNote"),
+    lmstudio: t("presets.lmstudioNote"),
+  };
+  const localLabels: Partial<Record<GatewayPresetId, string>> = {
+    ollama: t("presets.ollamaLabel"),
+    lmstudio: t("presets.lmstudioLabel"),
   };
   return (
     <div
@@ -723,14 +667,14 @@ function GatewayPresetsBar({
         }}
       >
         {GATEWAY_PRESETS.filter(
-          (p) => !highlight || p.reachableFromBlockedRegions,
+          (p) => !highlight || p.reachable_from_blocked_regions,
         ).map((p) => (
           <button
             key={p.id}
             type="button"
             onClick={() => {
-              setBaseUrl(p.baseUrl);
-              setModel(p.model);
+              setBaseUrl(p.base_url);
+              if (p.model) setModel(p.model);
             }}
             title={notes[p.id]}
             style={{
@@ -743,7 +687,7 @@ function GatewayPresetsBar({
               borderRadius: "var(--r-1)",
             }}
           >
-            {p.label ?? t("presets.ollamaLabel")}
+            {p.label ?? localLabels[p.id] ?? p.id}
           </button>
         ))}
       </div>
