@@ -99,12 +99,13 @@
     "quickStartReachable": "Quick start — providers reachable from your network:",
     "quickStartKnown": "Quick start — pre-fill from a known provider:",
     "deepseekNote": "Reachable from mainland China.",
-    "moonshotNote": "Reachable from mainland China.",
-    "qwenNote": "Alibaba's Qwen. Reachable from mainland China.",
-    "glmNote": "Zhipu's GLM. Reachable from mainland China.",
-    "openrouterNote": "Routes to many providers. Reachability from blocked regions varies.",
+    "kimiNote": "Moonshot's international endpoint.",
+    "zaiNote": "Zhipu's GLM, international endpoint.",
+    "minimaxNote": "MiniMax's international endpoint.",
     "ollamaLabel": "Ollama (local)",
-    "ollamaNote": "Local inference. Always reachable — requires Ollama running."
+    "ollamaNote": "Local inference. Always reachable — requires Ollama running.",
+    "lmstudioLabel": "LM Studio (local)",
+    "lmstudioNote": "Local inference. Always reachable — requires LM Studio's server running."
   },
   "form": {
     "displayName": "Display name",

@@ -45,9 +45,10 @@ first-party state changes.
 
 The Add modal walks you through:
 
-1. **Provider preset** — Bedrock, Vertex, Foundry, OpenRouter,
-   Ollama, custom. Each preset pre-fills the base URL pattern and
-   the model list shape.
+1. **Provider preset** — Bedrock, Vertex, Foundry, or a gateway.
+   Gateway quick-starts (DeepSeek, Kimi, GLM, MiniMax, Ollama,
+   LM Studio) pre-fill an endpoint that speaks Anthropic's Messages
+   API, so the route works with no translation in between.
 2. **Auth material** — API key, OAuth bearer, AWS profile + region,
    or none (for local endpoints). Stored under the user-only-readable
    profile JSON (mode `0600`); ClauDepot doesn't put 3P credentials
