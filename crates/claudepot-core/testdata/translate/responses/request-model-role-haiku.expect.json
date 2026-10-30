@@ -1,0 +1,129 @@
+{
+  "assertions": [
+    {
+      "args": {
+        "arg": {
+          "expected": "provider-fast"
+        }
+      },
+      "source": "tests/clcd-protocol.sh:60",
+      "step": "request",
+      "subject": "json",
+      "text": ".model==$expected"
+    }
+  ],
+  "case": "request-model-role-haiku",
+  "covers": "Requested model haiku resolves to provider-fast through the role mapping",
+  "family": "responses",
+  "kind": "expect",
+  "notes": [
+    "Input is request-history-tools-image-thinking.input.json with .model set to haiku (tests/clcd-protocol.sh:60)."
+  ],
+  "origin": "suite",
+  "source": {
+    "commit": "8da773c2c74d491795245155ab14f1d791532612",
+    "lines": [
+      "tests/clcd-protocol.sh:58-61"
+    ],
+    "repo": "xiaolai/claude-driven-ai-providers"
+  },
+  "steps": [
+    {
+      "filter": "clcd-request.jq",
+      "input": {
+        "file": "request-model-role-haiku.input.json"
+      },
+      "kind": "json",
+      "label": "request",
+      "output": {
+        "input": [
+          {
+            "content": [
+              {
+                "text": "midturn instructions",
+                "type": "input_text"
+              }
+            ],
+            "role": "developer",
+            "type": "message"
+          },
+          {
+            "content": [
+              {
+                "text": "Hi",
+                "type": "input_text"
+              }
+            ],
+            "role": "user",
+            "type": "message"
+          },
+          {
+            "content": [
+              {
+                "image_url": "data:image/png;base64,AA==",
+                "type": "input_image"
+              }
+            ],
+            "role": "user",
+            "type": "message"
+          },
+          {
+            "arguments": "{\"path\":\"a\"}",
+            "call_id": "call_test",
+            "name": "clcd_tool_0",
+            "type": "function_call"
+          },
+          {
+            "call_id": "call_test",
+            "output": "[Tool error]\nmissing",
+            "type": "function_call_output"
+          }
+        ],
+        "instructions": "test instructions",
+        "model": "provider-fast",
+        "parallel_tool_calls": false,
+        "reasoning": {
+          "effort": "medium"
+        },
+        "store": false,
+        "stream": true,
+        "tool_choice": {
+          "name": "clcd_tool_0",
+          "type": "function"
+        },
+        "tools": [
+          {
+            "description": "read",
+            "name": "clcd_tool_0",
+            "parameters": {
+              "type": "object"
+            },
+            "strict": false,
+            "type": "function"
+          }
+        ]
+      },
+      "params": {
+        "arg": {
+          "effort": "medium",
+          "model": "fallback"
+        },
+        "argjson": {
+          "mapping": {
+            "fable": "provider-pro",
+            "haiku": "provider-fast",
+            "opus": "provider-pro",
+            "sonnet": "provider-standard"
+          }
+        },
+        "slurpfile": {
+          "names": [
+            {
+              "mcp__long": "clcd_tool_0"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

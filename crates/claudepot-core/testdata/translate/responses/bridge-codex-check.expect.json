@@ -1,0 +1,138 @@
+{
+  "assertions": [
+    {
+      "source": "clcd:573",
+      "step": "message",
+      "subject": "json",
+      "text": "[.content[] | select(.type==\"text\") | .text] | join(\"\") | select(.==\"CLCD_OK\")"
+    }
+  ],
+  "case": "bridge-codex-check",
+  "covers": "clcd --check probe on the Codex subscription route, collected non-streaming",
+  "family": "responses",
+  "kind": "expect",
+  "notes": [
+    "The assertion is clcd own --check acceptance test (clcd:573); clcd-regression.sh runs it in refresh mode (line 91)."
+  ],
+  "origin": "suite",
+  "source": {
+    "commit": "8da773c2c74d491795245155ab14f1d791532612",
+    "lines": [
+      "tests/clcd-regression.sh:45",
+      "tests/clcd-regression.sh:57",
+      "tests/clcd-regression.sh:86-91",
+      "clcd:572-573"
+    ],
+    "repo": "xiaolai/claude-driven-ai-providers"
+  },
+  "steps": [
+    {
+      "filter": "clcd-names.jq",
+      "input": {
+        "file": "bridge-codex-check.input.json"
+      },
+      "kind": "json",
+      "label": "names",
+      "output": {},
+      "params": {}
+    },
+    {
+      "filter": "clcd-reverse.jq",
+      "input": {
+        "step": "names"
+      },
+      "kind": "json",
+      "label": "reverse",
+      "output": {},
+      "params": {}
+    },
+    {
+      "filter": "clcd-request.jq",
+      "input": {
+        "file": "bridge-codex-check.input.json"
+      },
+      "kind": "json",
+      "label": "request",
+      "output": {
+        "input": [
+          {
+            "content": [
+              {
+                "text": "Reply with exactly CLCD_OK",
+                "type": "input_text"
+              }
+            ],
+            "role": "user",
+            "type": "message"
+          }
+        ],
+        "instructions": "",
+        "model": "legacy-codex",
+        "parallel_tool_calls": true,
+        "reasoning": {
+          "effort": "medium"
+        },
+        "store": false,
+        "stream": true,
+        "tools": []
+      },
+      "params": {
+        "arg": {
+          "effort": "medium",
+          "effort_override": "false",
+          "model": "legacy-codex",
+          "transport": "codex"
+        },
+        "argjson": {
+          "mapping": {}
+        },
+        "slurpfile": {
+          "names": [
+            {}
+          ]
+        }
+      }
+    },
+    {
+      "filter": "clcd-collect.jq",
+      "input": {
+        "file": "bridge-codex-check.events.sse"
+      },
+      "kind": "json",
+      "label": "message",
+      "output": {
+        "content": [
+          {
+            "text": "CLCD_OK",
+            "type": "text"
+          }
+        ],
+        "id": "resp_test",
+        "model": "legacy-codex",
+        "role": "assistant",
+        "stop_reason": "end_turn",
+        "stop_sequence": null,
+        "type": "message",
+        "usage": {
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "input_tokens": 10,
+          "output_tokens": 2
+        }
+      },
+      "params": {
+        "arg": {
+          "model": "legacy-codex"
+        },
+        "flags": [
+          "-Rsc"
+        ],
+        "slurpfile": {
+          "names": [
+            {}
+          ]
+        }
+      }
+    }
+  ]
+}

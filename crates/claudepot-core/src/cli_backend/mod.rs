@@ -10,7 +10,7 @@ mod wsl_probe;
 #[cfg(target_os = "macos")]
 pub mod keychain;
 #[cfg(target_os = "macos")]
-mod security_output;
+pub(crate) mod security_output;
 
 pub use error::SwapError;
 

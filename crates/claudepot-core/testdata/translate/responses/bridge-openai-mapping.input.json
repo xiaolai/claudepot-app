@@ -1,0 +1,10 @@
+{
+  "max_tokens": 512,
+  "messages": [
+    {
+      "content": "test",
+      "role": "user"
+    }
+  ],
+  "model": "claude-opus-4-1"
+}

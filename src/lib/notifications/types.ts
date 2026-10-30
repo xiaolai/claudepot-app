@@ -75,7 +75,8 @@ export type Category =
   | "memoryChanged"
   | "configTreePatched"
   | "serviceStatusChanged"
-  | "updateAvailable";
+  | "updateAvailable"
+  | "relayError";
 
 /**
  * Full enumeration used by the mirror-sweep test and any UI that
@@ -117,6 +118,7 @@ export const CATEGORY_NAMES: readonly Category[] = [
   "configTreePatched",
   "serviceStatusChanged",
   "updateAvailable",
+  "relayError",
 ] as const;
 
 /**
@@ -307,6 +309,7 @@ export function priorityForCategory(category: Category): Priority {
     case "configTreePatched":
     case "serviceStatusChanged":
     case "updateAvailable":
+    case "relayError":
       return "p3Ambient";
   }
 }

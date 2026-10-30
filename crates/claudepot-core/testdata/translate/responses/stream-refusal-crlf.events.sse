@@ -1,0 +1,6 @@
+data: {"type":"response.created","response":{"id":"refusal"}}
+data: {"type":"response.content_part.added","item_id":"m","content_index":0,"part":{"type":"refusal","refusal":""}}
+data: {"type":"response.refusal.delta","item_id":"m","content_index":0,"delta":"Cannot comply"}
+data: {"type":"response.content_part.done","item_id":"m","content_index":0,"part":{"type":"refusal"}}
+data: {"type":"response.completed","response":{"usage":{}}}
+data: [DONE]

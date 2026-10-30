@@ -1,0 +1,43 @@
+{
+  "input": [
+    {
+      "content": [
+        {
+          "text": "read",
+          "type": "input_text"
+        }
+      ],
+      "role": "user",
+      "type": "message"
+    },
+    {
+      "arguments": "{\"path\":\"a\"}",
+      "call_id": "call_one",
+      "name": "read_file",
+      "type": "function_call"
+    },
+    {
+      "arguments": "{\"path\":\"b\"}",
+      "call_id": "call_two",
+      "name": "read_file",
+      "type": "function_call"
+    },
+    {
+      "call_id": "call_one",
+      "output": "first",
+      "type": "function_call_output"
+    },
+    {
+      "call_id": "call_two",
+      "output": "second",
+      "type": "function_call_output"
+    }
+  ],
+  "instructions": "test",
+  "max_output_tokens": 512,
+  "model": "fixture-model",
+  "reasoning": {
+    "effort": "high"
+  },
+  "tools": []
+}

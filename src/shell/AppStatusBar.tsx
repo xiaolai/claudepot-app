@@ -6,6 +6,7 @@ import { RunningOpsChip } from "../components/RunningOpsChip";
 import { PendingJournalsChip } from "../components/PendingJournalsChip";
 import { RemoteWindowChip } from "../components/RemoteWindowChip";
 import { RemoteServingChip } from "../components/RemoteServingChip";
+import { RelayServingChip } from "../components/RelayServingChip";
 import { ServiceStatusDot } from "./ServiceStatusDot";
 import { Glyph } from "../components/primitives/Glyph";
 import { NF } from "../icons";
@@ -251,6 +252,9 @@ export function AppStatusBar({
               Code's local peer gate, this one is an HTTP server on the
               network. Two capabilities, two indicators. */}
           <RemoteServingChip />
+          {/* A third door: inference on this subscription for paired
+              machines, behind device tokens rather than a password. */}
+          <RelayServingChip />
           {hasPending && onOpenRepair && (
             <PendingJournalsChip
               summary={pendingSummary ?? null}

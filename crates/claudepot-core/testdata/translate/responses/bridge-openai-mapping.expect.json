@@ -1,0 +1,157 @@
+{
+  "assertions": [
+    {
+      "source": "tests/bridge-api.sh:40",
+      "step": "request",
+      "subject": "json",
+      "text": ".model==\"fixture-pro\""
+    },
+    {
+      "source": "tests/bridge-api.sh:41",
+      "step": "request",
+      "subject": "json",
+      "text": ".store==false and .stream==true and .max_output_tokens>0"
+    },
+    {
+      "source": "tests/bridge-api.sh:127",
+      "step": "message",
+      "subject": "json",
+      "text": ".content[0].text==\"API_OK\""
+    }
+  ],
+  "case": "bridge-openai-mapping",
+  "covers": "claude-opus-4-1 resolves through a profile role mapping; non-streaming collection of the reply",
+  "family": "responses",
+  "kind": "expect",
+  "notes": [
+    "The mapping is .mapping.models of the provider profile written at bridge-api.sh:180; events are bridge-openai-text.events.sse (the same mock reply, bridge-api.sh:43)."
+  ],
+  "origin": "suite",
+  "source": {
+    "commit": "8da773c2c74d491795245155ab14f1d791532612",
+    "lines": [
+      "tests/bridge-api.sh:40-43",
+      "tests/bridge-api.sh:127",
+      "tests/bridge-api.sh:180-183"
+    ],
+    "repo": "xiaolai/claude-driven-ai-providers"
+  },
+  "steps": [
+    {
+      "filter": "clcd-names.jq",
+      "input": {
+        "file": "bridge-openai-mapping.input.json"
+      },
+      "kind": "json",
+      "label": "names",
+      "output": {},
+      "params": {}
+    },
+    {
+      "filter": "clcd-reverse.jq",
+      "input": {
+        "step": "names"
+      },
+      "kind": "json",
+      "label": "reverse",
+      "output": {},
+      "params": {}
+    },
+    {
+      "filter": "clcd-request.jq",
+      "input": {
+        "file": "bridge-openai-mapping.input.json"
+      },
+      "kind": "json",
+      "label": "request",
+      "output": {
+        "input": [
+          {
+            "content": [
+              {
+                "text": "test",
+                "type": "input_text"
+              }
+            ],
+            "role": "user",
+            "type": "message"
+          }
+        ],
+        "instructions": "",
+        "max_output_tokens": 512,
+        "model": "fixture-pro",
+        "parallel_tool_calls": true,
+        "reasoning": {
+          "effort": "medium"
+        },
+        "store": false,
+        "stream": true,
+        "tools": []
+      },
+      "params": {
+        "arg": {
+          "effort": "medium",
+          "effort_override": "false",
+          "model": "fixture-standard",
+          "transport": "openai"
+        },
+        "argjson": {
+          "mapping": {
+            "custom": "fixture-standard",
+            "fable": "fixture-pro",
+            "haiku": "fixture-mini",
+            "opus": "fixture-pro",
+            "sonnet": "fixture-standard",
+            "subagent": "fixture-mini"
+          }
+        },
+        "slurpfile": {
+          "names": [
+            {}
+          ]
+        }
+      }
+    },
+    {
+      "filter": "clcd-collect.jq",
+      "input": {
+        "file": "bridge-openai-text.events.sse"
+      },
+      "kind": "json",
+      "label": "message",
+      "output": {
+        "content": [
+          {
+            "text": "API_OK",
+            "type": "text"
+          }
+        ],
+        "id": "resp_test",
+        "model": "fixture-pro",
+        "role": "assistant",
+        "stop_reason": "end_turn",
+        "stop_sequence": null,
+        "type": "message",
+        "usage": {
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        }
+      },
+      "params": {
+        "arg": {
+          "model": "fixture-pro"
+        },
+        "flags": [
+          "-Rsc"
+        ],
+        "slurpfile": {
+          "names": [
+            {}
+          ]
+        }
+      }
+    }
+  ]
+}

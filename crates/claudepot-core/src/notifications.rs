@@ -108,6 +108,11 @@ pub enum Category {
     ConfigTreePatched,
     ServiceStatusChanged,
     UpdateAvailable,
+    /// The relay server reported an upstream error (rate limited,
+    /// unreachable, refused credential). Log-only: the two conditions
+    /// that need action (`owner_conflict`, `identity_changed`) raise the
+    /// relay banner instead, so one event never takes two tiers.
+    RelayError,
     /// Claude Code is about to delete saved conversations under its
     /// `cleanupPeriodDays` window. P1 rather than P0: it needs
     /// attention before the next CC launch, but it does not block the
@@ -282,7 +287,8 @@ impl Category {
             | BannerResolved => P2Acknowledge,
 
             // P3 — Ambient
-            MemoryChanged | ConfigTreePatched | ServiceStatusChanged | UpdateAvailable => P3Ambient,
+            MemoryChanged | ConfigTreePatched | ServiceStatusChanged | UpdateAvailable
+            | RelayError => P3Ambient,
         }
     }
 
@@ -329,6 +335,7 @@ impl Category {
             ConfigTreePatched => ("Config file changed externally", "Background", true),
             ServiceStatusChanged => ("anthropic.com status changed", "Background", true),
             UpdateAvailable => ("Update available", "Background", true),
+            RelayError => ("Relay upstream error", "Background", true),
         };
         CategoryMeta {
             id: self,
@@ -384,6 +391,7 @@ impl Category {
             ConfigTreePatched,
             ServiceStatusChanged,
             UpdateAvailable,
+            RelayError,
         ]
     }
 }
@@ -494,7 +502,7 @@ mod tests {
         // Synthetic exhaustive match: this fails to compile if a new
         // variant is added without updating `all()`. Update the
         // counter and the match arms in lockstep with the enum.
-        const EXPECTED: usize = 33;
+        const EXPECTED: usize = 34;
         let actual = Category::all().len();
         assert_eq!(
             actual, EXPECTED,

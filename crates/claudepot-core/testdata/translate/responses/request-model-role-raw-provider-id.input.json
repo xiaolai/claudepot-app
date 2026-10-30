@@ -1,0 +1,79 @@
+{
+  "messages": [
+    {
+      "content": "midturn instructions",
+      "role": "system"
+    },
+    {
+      "content": [
+        {
+          "text": "Hi",
+          "type": "text"
+        },
+        {
+          "source": {
+            "data": "AA==",
+            "media_type": "image/png",
+            "type": "base64"
+          },
+          "type": "image"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "thinking": "hidden",
+          "type": "thinking"
+        },
+        {
+          "id": "call_test",
+          "input": {
+            "path": "a"
+          },
+          "name": "mcp__long",
+          "type": "tool_use"
+        }
+      ],
+      "role": "assistant"
+    },
+    {
+      "content": [
+        {
+          "content": [
+            {
+              "text": "missing",
+              "type": "text"
+            }
+          ],
+          "is_error": true,
+          "tool_use_id": "call_test",
+          "type": "tool_result"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "model": "raw-provider-id",
+  "system": [
+    {
+      "text": "test instructions",
+      "type": "text"
+    }
+  ],
+  "tool_choice": {
+    "disable_parallel_tool_use": true,
+    "name": "mcp__long",
+    "type": "tool"
+  },
+  "tools": [
+    {
+      "description": "read",
+      "input_schema": {
+        "type": "object"
+      },
+      "name": "mcp__long"
+    }
+  ]
+}

@@ -335,7 +335,7 @@ pub async fn serve_cmd(ctx: &AppContext) -> Result<()> {
 /// so handling only SIGINT means the ordinary way to stop a server is
 /// the one way that leaves the hook installed. Measured — the first
 /// version of this handler did exactly that.
-async fn shutdown_signal() -> &'static str {
+pub(crate) async fn shutdown_signal() -> &'static str {
     #[cfg(unix)]
     {
         use tokio::signal::unix::{signal, SignalKind};

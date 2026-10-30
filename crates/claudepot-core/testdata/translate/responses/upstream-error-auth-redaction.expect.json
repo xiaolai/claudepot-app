@@ -1,0 +1,68 @@
+{
+  "assertions": [
+    {
+      "equivalent": ".status_line|startswith(\"403 \")",
+      "source": "tests/bridge-api.sh:119",
+      "step": "mapped",
+      "subject": "equiv",
+      "text": "[ \"$status\" = 403 ]"
+    },
+    {
+      "equivalent": "tojson|contains(\"00000000000000000000000000000000\")|not",
+      "source": "tests/bridge-api.sh:120",
+      "step": "mapped",
+      "subject": "equiv",
+      "text": "! grep -q \"$CLAI_TEST_KEY\""
+    },
+    {
+      "source": "tests/bridge-api.sh:121",
+      "step": "mapped",
+      "subject": "json@.body",
+      "text": ".error.message|contains(\"<redacted>\")"
+    }
+  ],
+  "case": "upstream-error-auth-redaction",
+  "covers": "HTTP 403 echoing the API key: status kept, key redacted, authentication_error",
+  "family": "responses",
+  "kind": "expect",
+  "notes": [
+    "The key is removed by bash substitution of the live key (clcd:438), not by the token regex in the jq filter: a translator must redact its own credential explicitly."
+  ],
+  "origin": "suite",
+  "source": {
+    "commit": "8da773c2c74d491795245155ab14f1d791532612",
+    "lines": [
+      "tests/bridge-api.sh:33-36",
+      "tests/bridge-api.sh:118-121"
+    ],
+    "repo": "xiaolai/claude-driven-ai-providers"
+  },
+  "steps": [
+    {
+      "filter": "clcd-upstream-error.jq + clcd-retry-after.awk, bash glue as clcd:435-447",
+      "input": {
+        "file": "upstream-error-auth-redaction.upstream-body.json",
+        "headers_file": "upstream-error-auth-redaction.upstream-headers.txt"
+      },
+      "kind": "json",
+      "label": "mapped",
+      "output": {
+        "body": {
+          "error": {
+            "message": "Invalid key <redacted>",
+            "type": "authentication_error"
+          },
+          "type": "error"
+        },
+        "retry_after": null,
+        "status_line": "403 Codex"
+      },
+      "params": {
+        "api_key_redacted_by_bash": "00000000000000000000000000000000",
+        "arg": {
+          "status": "403"
+        }
+      }
+    }
+  ]
+}

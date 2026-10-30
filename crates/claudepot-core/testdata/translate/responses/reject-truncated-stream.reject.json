@@ -1,0 +1,78 @@
+{
+  "assertions": [
+    {
+      "source": "tests/clcd-protocol.sh:35",
+      "step": "stream",
+      "subject": "rejected",
+      "text": "if head -n 2 filters/events | jq -Rnj --arg model test --slurpfile names filters/reverse.json -f filters/stream.jq"
+    }
+  ],
+  "case": "reject-truncated-stream",
+  "covers": "A Responses stream that ends without a terminal event is an error, after message_start was already emitted",
+  "family": "responses",
+  "kind": "reject",
+  "notes": [
+    "partial_output_raw is what a client has already received when the error fires (message_start)."
+  ],
+  "origin": "suite",
+  "source": {
+    "commit": "8da773c2c74d491795245155ab14f1d791532612",
+    "lines": [
+      "tests/clcd-protocol.sh:35"
+    ],
+    "repo": "xiaolai/claude-driven-ai-providers"
+  },
+  "steps": [
+    {
+      "error": "Codex stream ended before completion",
+      "exit_code": 5,
+      "filter": "clcd-stream.jq",
+      "input": {
+        "file": "reject-truncated-stream.events.sse"
+      },
+      "kind": "reject",
+      "label": "stream",
+      "params": {
+        "arg": {
+          "model": "test"
+        },
+        "flags": [
+          "-Rnj"
+        ],
+        "slurpfile": {
+          "names": [
+            {
+              "clcd_tool_0": "mcp__long"
+            }
+          ]
+        }
+      },
+      "partial_output_lines": [
+        {
+          "event": "message_start"
+        },
+        {
+          "data": {
+            "message": {
+              "content": [],
+              "id": "resp_test",
+              "model": "test",
+              "role": "assistant",
+              "stop_reason": null,
+              "stop_sequence": null,
+              "type": "message",
+              "usage": {
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "input_tokens": 0,
+                "output_tokens": 0
+              }
+            },
+            "type": "message_start"
+          }
+        }
+      ],
+      "partial_output_raw": "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"resp_test\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"test\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}\n\n"
+    }
+  ]
+}

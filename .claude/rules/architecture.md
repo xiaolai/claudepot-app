@@ -86,8 +86,12 @@ stop — it belongs in `claudepot-core`.
 2. `/usr/bin/security` subprocess (verified-write pattern) — for
    Claudepot's own secrets that BOTH the differently-signed GUI
    `.app` and `claudepot` CLI binaries must read: account credential
-   blobs (`cli_backend/storage.rs`) and the GitHub PAT
-   (`session_export_delivery.rs`). The `keyring` crate is wrong for
+   blobs (`cli_backend/storage.rs`), the GitHub PAT
+   (`session_export_delivery.rs`), route secrets
+   (`routes/keychain.rs` — the wrapper's helper script and a headless
+   relay both read them) and relay device tokens
+   (`relay/token_store.rs`). The last two share one copy of the
+   pattern, `security_cli.rs`. The `keyring` crate is wrong for
    these slots for two reasons: (a) its SecItem-based write silently
    succeeds into an ephemeral per-app keychain on Developer ID-signed
    binaries without a provisioning profile, and (b) SecItemAdd items
@@ -96,12 +100,16 @@ stop — it belongs in `claudepot-core`.
    `security -i` (secret hex-encoded over stdin, never argv), then
    verify by reading the item back — `security -i` exiting 0 is not
    proof the item landed.
-3. `keyring` crate — only for Claudepot-owned slots without the
-   cross-binary requirement (route secrets,
-   `routes/keychain.rs`), and for all Claudepot-owned slots on
-   Linux/Windows (Secret Service / Credential Manager are per-user,
-   not per-binary — the GitHub PAT slot uses `keyring` there,
-   cfg-gated `not(target_os = "macos")`).
+3. `keyring` crate — for Claudepot-owned slots on Linux/Windows
+   (Secret Service / Credential Manager are per-user, not per-binary —
+   the GitHub PAT, route-secret and relay-token slots use `keyring`
+   there, cfg-gated `not(target_os = "macos")`). **The workspace
+   enables no `keyring` backend feature, so today `keyring` is its
+   in-memory mock on every platform**: writes succeed and are gone in
+   the next process, and a test that reads back through the same
+   `Entry` passes. A `keyring` slot is not durable until a backend
+   feature is chosen; prove one with a test that reads from a second
+   process.
 4. 0600 SQLite column, no OS keychain at all — the shipped pattern
    for local secret *inventories* the user pastes in and expects to
    read back across binaries and platforms without prompts:

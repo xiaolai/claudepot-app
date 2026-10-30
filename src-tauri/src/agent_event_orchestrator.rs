@@ -727,10 +727,9 @@ mod tests {
     use super::*;
     use chrono::{Duration as ChronoDuration, TimeZone};
 
-    /// Process-wide guard for tests that set `CLAUDEPOT_DATA_DIR`, which is
-    /// global to the process and therefore shared by every test thread in
-    /// this binary.
-    static DATA_DIR_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    /// Process-wide guard for tests that set `CLAUDEPOT_DATA_DIR`: the
+    /// binary-wide lock, shared with `commands::tests`.
+    use crate::DATA_DIR_ENV_LOCK as DATA_DIR_LOCK;
 
     fn ts(min: i64) -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 5, 22, 12, 0, 0).unwrap() + ChronoDuration::minutes(min)

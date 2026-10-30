@@ -139,6 +139,12 @@ pub struct TrayDesktopSwitched {
     pub to_email: String,
 }
 
+/// The relay server's ambient state, emitted while it serves and once
+/// when it stops: serving, active streams, and the one blocking
+/// condition (`owner_conflict` / `identity_changed`). Payload:
+/// `relay_server::RelayStatusEvent`.
+pub const RELAY_STATUS: &str = "relay-status";
+
 /// Full live-session roster snapshot.
 pub const LIVE_ALL: &str = "live-all";
 

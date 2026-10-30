@@ -7,6 +7,7 @@ import { useStatusIssues, type StatusIssue } from "./useStatusIssues";
 import { useStatusBannerEmits } from "./useStatusBannerEmits";
 import { useSnoozeAutoClear } from "./useSnoozeAutoClear";
 import { useDesktopIdentitySync } from "./useDesktopIdentitySync";
+import { useRelayIssues } from "./useRelayIssues";
 
 /**
  * Shell status-issues pipeline, extracted from AppShell. Owns:
@@ -145,9 +146,15 @@ export function useShellStatusIssues(setSection: (id: string) => void): {
     onAdoptLiveDesktop,
     onImportDesktop,
   });
+  // The relay's blocking conditions share this one banner stack rather
+  // than mounting a second (`rules/design.md` signal budget).
+  const relayIssues = useRelayIssues(setSection);
   const visibleIssues = useMemo(
-    () => rawIssues.filter((i) => !(i.dismissable && isDismissed(i.id))),
-    [rawIssues, isDismissed],
+    () =>
+      [...rawIssues, ...relayIssues].filter(
+        (i) => !(i.dismissable && isDismissed(i.id)),
+      ),
+    [rawIssues, relayIssues, isDismissed],
   );
 
   // Phase 5: banner state machine. Watches the visible-issues list

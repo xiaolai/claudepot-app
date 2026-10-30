@@ -71,6 +71,7 @@ pub mod pricing;
 pub mod project;
 pub mod protected;
 pub mod quick_prompt;
+pub mod relay;
 pub mod release_update;
 pub mod remote;
 pub mod repair;
@@ -570,16 +571,16 @@ pub async fn tray_set_alert_count(
 mod tests {
     use super::*;
     use claudepot_core::cli_backend::swap;
-    use std::sync::Mutex;
 
     /// Tests in this module mutate process-global env vars
     /// (`CLAUDEPOT_DATA_DIR`, `CLAUDEPOT_CREDENTIAL_BACKEND`). Cargo
     /// runs unit tests within a single binary in parallel by default,
-    /// so we serialize through this lock to keep the env from racing.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
+    /// so we serialize through the binary-wide lock to keep the env from
+    /// racing — never a module-local one (see `DATA_DIR_ENV_LOCK`).
     fn lock() -> std::sync::MutexGuard<'static, ()> {
-        ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+        crate::DATA_DIR_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
     }
 
     fn setup_data_dir() -> tempfile::TempDir {

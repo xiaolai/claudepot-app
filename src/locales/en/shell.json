@@ -69,7 +69,8 @@
     "memoryChanged": "CLAUDE.md changed externally",
     "configTreePatched": "Config file changed externally",
     "serviceStatusChanged": "anthropic.com status changed",
-    "updateAvailable": "Update available"
+    "updateAvailable": "Update available",
+    "relayError": "Relay upstream error"
   },
   "statusbar": {
     "projects_one": "{{count}} project",

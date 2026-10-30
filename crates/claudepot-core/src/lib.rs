@@ -124,6 +124,7 @@ pub mod protected_paths;
 pub(crate) mod proxy;
 pub mod quick_prompt;
 pub mod redaction;
+pub mod relay;
 pub mod release_channel;
 pub mod remote;
 pub mod resolve;
@@ -132,6 +133,8 @@ pub mod rotation;
 pub mod routes;
 pub mod secret_patterns;
 pub mod secure_perms;
+#[cfg(target_os = "macos")]
+pub mod security_cli;
 pub mod service_status;
 pub mod services;
 pub mod session;

@@ -190,7 +190,22 @@
     "noActiveCli": "没有可重新登录的活动 CLI 账户。",
     "imported": "已导入 {{email}}",
     "importFailed": "导入失败",
-    "noMatchingAccount": "没有与 {{email}} 匹配的已注册账户。"
+    "noMatchingAccount": "没有与 {{email}} 匹配的已注册账户。",
+    "relay": {
+      "action": "打开中继设置",
+      "owner_conflict": {
+        "label": "中继已停止服务某个账户",
+        "detail": "另一个进程现在持有此账户的令牌刷新权，继续服务会与 Claude Code 争抢令牌。请取消发布它，或停止另一个中继。"
+      },
+      "identity_changed": {
+        "label": "某个中继账户现在以另一身份登录",
+        "detail": "已发布上游背后的账户身份发生了变化。重新发布即可接受新身份。"
+      },
+      "caKeyUnavailable": {
+        "label": "中继的 CA 密钥不可读",
+        "detail": "无法读取中继的证书颁发机构密钥。已配对的机器信任该 CA，因此在它可读之前，中继不会启动，正在运行的中继也无法在证书过期前续期。"
+      }
+    }
   },
   "menu": {
     "synced": "已从 CC 同步 {{email}}。",
@@ -259,5 +274,9 @@
     "resetsInHours": "{{base}} · {{hours}} 小时后重置",
     "resetsInHoursMinutes": "{{base}} · {{hours}} 小时 {{minutes}} 分钟后重置",
     "resetsInDays": "{{base}} · {{days}} 天后重置"
+  },
+  "relayLog": {
+    "title": "中继上游错误",
+    "body": "某个上游报告了 {{code}}。中继仍在服务；「设置 → 中继」会显示每个上游。"
   }
 }

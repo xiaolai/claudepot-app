@@ -1,0 +1,2 @@
+data: {"type":"response.created","response":{"id":"terminal"}}
+data: {"type":"response.failed","response":{"usage":{}}}

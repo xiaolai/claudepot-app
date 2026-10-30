@@ -162,5 +162,51 @@
     "foundryApiKey": "Foundry API 密钥",
     "foundryKeyPlaceholder": "Azure Foundry API 密钥",
     "skipFoundryAuth": "跳过 Foundry 认证"
+  },
+  "relayServers": {
+    "label": "中继服务器",
+    "loading": "正在探测已配对的中继服务器",
+    "loadFailed": "无法读取已配对的中继服务器：{{message}}",
+    "empty": "尚未配对任何中继服务器。请在终端中配对：",
+    "runNote": "只读。通过中继的运行请在终端中用 <code>claudepot relay run</code> 启动。",
+    "reachable": "可连接",
+    "reachableRtt": "可连接 · {{ms}} ms",
+    "unreachable": "无法连接",
+    "upstreamsLabel": "{{name}} 上的上游",
+    "default": "默认",
+    "ready": "就绪",
+    "notReady": "未就绪",
+    "tierMeasured": "已在 {{model}} 上测量：TTFB {{ttfb}} ms · 评分 {{score}} ms",
+    "tierConnect": "速度未测量 · 评分 {{score}} ms",
+    "reason": {
+      "unreachable": "无法连接到该中继",
+      "server_id_changed": "应答的中继与配对时的不是同一个",
+      "not_approved": "未在此中继上批准",
+      "other_target": "此中继以该名称发布了不同的目标",
+      "not_offered": "未发布，或未授权给此设备",
+      "fingerprint_changed": "批准后目标已变更——请运行 <code>claudepot relay accept</code>",
+      "not_accepted": "需要确认——请运行 <code>claudepot relay accept</code>",
+      "credential_not_ready": "中继上的凭据尚未就绪",
+      "owner_conflict": "中继上的 Claude Code 正登录着此账户",
+      "no_capacity": "没有空闲的请求名额",
+      "cooldown": "已被限速，还需 {{secs}} 秒",
+      "saturated5h": "5 小时用量已达 {{pct}}%",
+      "saturated7d": "7 天用量已达 {{pct}}%",
+      "unknown": "不可用"
+    },
+    "probe": {
+      "fingerprint_mismatch": "它的证书不是你批准的那一个。",
+      "bad_ca": "无法读取它的固定证书。",
+      "transport": "无法连接，或它的证书不是已批准的那一个。",
+      "refused": "中继拒绝了请求。",
+      "bad_response": "中继返回了此版本无法理解的响应。",
+      "tls": "无法配置 TLS。",
+      "not_paired": "中继已不再接受此设备——请重新配对。",
+      "unpinned": "未保存此中继的固定证书——请重新配对。",
+      "bad_address": "保存的地址无效。",
+      "no_token": "未保存此中继的设备令牌——请重新配对。",
+      "credential_store_locked": "凭据存储已锁定——请解锁后刷新。",
+      "credential_store": "无法从凭据存储读取设备令牌。"
+    }
   }
 }

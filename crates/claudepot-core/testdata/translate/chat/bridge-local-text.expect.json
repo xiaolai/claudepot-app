@@ -1,0 +1,273 @@
+{
+  "assertions": [
+    {
+      "source": "tests/bridge-api.sh:139",
+      "step": "reply_message",
+      "subject": "json",
+      "text": ".content[0].text==\"CHAT_OK\""
+    }
+  ],
+  "case": "bridge-local-text",
+  "covers": "Local chat route: no metadata lookup, no reasoning_effort, text reply collected",
+  "family": "chat",
+  "kind": "expect",
+  "notes": [
+    "Reply events are roundtrip-gemini.reply.events.sse (the same mock reply, bridge-api.sh:68,73)."
+  ],
+  "origin": "suite",
+  "source": {
+    "commit": "8da773c2c74d491795245155ab14f1d791532612",
+    "lines": [
+      "tests/bridge-api.sh:68",
+      "tests/bridge-api.sh:73",
+      "tests/bridge-api.sh:137-139",
+      "tests/bridge-api.sh:163-166"
+    ],
+    "repo": "xiaolai/claude-driven-ai-providers"
+  },
+  "steps": [
+    {
+      "filter": "clcd-names.jq",
+      "input": {
+        "file": "bridge-local-text.input.json"
+      },
+      "kind": "json",
+      "label": "names",
+      "output": {},
+      "params": {}
+    },
+    {
+      "filter": "clcd-reverse.jq",
+      "input": {
+        "step": "names"
+      },
+      "kind": "json",
+      "label": "reverse",
+      "output": {},
+      "params": {}
+    },
+    {
+      "filter": "clcd-request.jq",
+      "input": {
+        "file": "bridge-local-text.input.json"
+      },
+      "kind": "json",
+      "label": "request",
+      "output": {
+        "input": [
+          {
+            "content": [
+              {
+                "text": "test",
+                "type": "input_text"
+              }
+            ],
+            "role": "user",
+            "type": "message"
+          }
+        ],
+        "instructions": "",
+        "max_output_tokens": 512,
+        "model": "fixture-local",
+        "parallel_tool_calls": true,
+        "reasoning": {
+          "effort": "medium"
+        },
+        "store": false,
+        "stream": true,
+        "tools": []
+      },
+      "params": {
+        "arg": {
+          "effort": "medium",
+          "effort_override": "false",
+          "model": "fixture-local",
+          "transport": "local"
+        },
+        "argjson": {
+          "mapping": {}
+        },
+        "slurpfile": {
+          "names": [
+            {}
+          ]
+        }
+      }
+    },
+    {
+      "filter": "chat-request.jq",
+      "input": {
+        "step": "request"
+      },
+      "kind": "json",
+      "label": "upstream_request",
+      "output": {
+        "max_tokens": 512,
+        "messages": [
+          {
+            "content": "",
+            "role": "system"
+          },
+          {
+            "content": [
+              {
+                "text": "test",
+                "type": "text"
+              }
+            ],
+            "role": "user"
+          }
+        ],
+        "model": "fixture-local",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true
+        },
+        "tools": []
+      },
+      "params": {
+        "arg": {
+          "provider": "local"
+        },
+        "slurpfile": {
+          "metadata": [
+            {}
+          ]
+        }
+      }
+    },
+    {
+      "filter": "chat-stream.jq",
+      "input": {
+        "file": "roundtrip-gemini.reply.events.sse"
+      },
+      "kind": "sse",
+      "label": "reply_normalized",
+      "output_lines": [
+        {
+          "data": {
+            "response": {
+              "id": "chat_reply"
+            },
+            "type": "response.created"
+          }
+        },
+        {
+          "data": {
+            "content_index": 0,
+            "item_id": "chat_text",
+            "part": {
+              "text": "",
+              "type": "output_text"
+            },
+            "type": "response.content_part.added"
+          }
+        },
+        {
+          "data": {
+            "content_index": 0,
+            "delta": "CHAT_OK",
+            "item_id": "chat_text",
+            "type": "response.output_text.delta"
+          }
+        },
+        {
+          "data": {
+            "content_index": 0,
+            "item_id": "chat_text",
+            "part": {
+              "type": "output_text"
+            },
+            "type": "response.content_part.done"
+          }
+        },
+        {
+          "data": {
+            "response": {
+              "id": "chat_reply",
+              "output": [
+                {
+                  "content": [
+                    {
+                      "text": "CHAT_OK",
+                      "type": "output_text"
+                    }
+                  ],
+                  "type": "message"
+                }
+              ],
+              "status": "completed",
+              "usage": {
+                "input_tokens": 2,
+                "input_tokens_details": {
+                  "cached_tokens": 0
+                },
+                "output_tokens": 2
+              }
+            },
+            "type": "response.completed"
+          }
+        }
+      ],
+      "output_raw": "data: {\"type\":\"response.created\",\"response\":{\"id\":\"chat_reply\"}}\n\ndata: {\"type\":\"response.content_part.added\",\"item_id\":\"chat_text\",\"content_index\":0,\"part\":{\"type\":\"output_text\",\"text\":\"\"}}\n\ndata: {\"type\":\"response.output_text.delta\",\"item_id\":\"chat_text\",\"content_index\":0,\"delta\":\"CHAT_OK\"}\n\ndata: {\"type\":\"response.content_part.done\",\"item_id\":\"chat_text\",\"content_index\":0,\"part\":{\"type\":\"output_text\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"chat_reply\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"CHAT_OK\"}]}],\"usage\":{\"input_tokens\":2,\"output_tokens\":2,\"input_tokens_details\":{\"cached_tokens\":0}}}}\n\n",
+      "params": {
+        "arg": {
+          "model": "fixture-local"
+        },
+        "flags": [
+          "-Rnj"
+        ]
+      }
+    },
+    {
+      "glue": "normalize_chat (clcd:344-359)",
+      "input": {
+        "step": "reply_normalized"
+      },
+      "kind": "glue",
+      "label": "reply_stream",
+      "output_raw": "data: {\"type\":\"response.created\",\"response\":{\"id\":\"chat_reply\"}}\n\ndata: {\"type\":\"response.content_part.added\",\"item_id\":\"chat_text\",\"content_index\":0,\"part\":{\"type\":\"output_text\",\"text\":\"\"}}\n\ndata: {\"type\":\"response.output_text.delta\",\"item_id\":\"chat_text\",\"content_index\":0,\"delta\":\"CHAT_OK\"}\n\ndata: {\"type\":\"response.content_part.done\",\"item_id\":\"chat_text\",\"content_index\":0,\"part\":{\"type\":\"output_text\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"chat_reply\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"CHAT_OK\"}]}],\"usage\":{\"input_tokens\":2,\"output_tokens\":2,\"input_tokens_details\":{\"cached_tokens\":0}}}}\n\n"
+    },
+    {
+      "filter": "clcd-collect.jq",
+      "input": {
+        "step": "reply_stream"
+      },
+      "kind": "json",
+      "label": "reply_message",
+      "output": {
+        "content": [
+          {
+            "text": "CHAT_OK",
+            "type": "text"
+          }
+        ],
+        "id": "chat_reply",
+        "model": "fixture-local",
+        "role": "assistant",
+        "stop_reason": "end_turn",
+        "stop_sequence": null,
+        "type": "message",
+        "usage": {
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "input_tokens": 2,
+          "output_tokens": 2
+        }
+      },
+      "params": {
+        "arg": {
+          "model": "fixture-local"
+        },
+        "flags": [
+          "-Rsc"
+        ],
+        "slurpfile": {
+          "names": [
+            {}
+          ]
+        }
+      }
+    }
+  ]
+}

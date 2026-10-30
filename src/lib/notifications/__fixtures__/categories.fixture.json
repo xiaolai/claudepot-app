@@ -198,6 +198,12 @@
       "group": "Background",
       "id": "updateAvailable",
       "priority": "p3Ambient"
+    },
+    {
+      "defaultEnabled": true,
+      "group": "Background",
+      "id": "relayError",
+      "priority": "p3Ambient"
     }
   ]
 }

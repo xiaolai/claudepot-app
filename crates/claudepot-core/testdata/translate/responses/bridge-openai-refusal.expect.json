@@ -1,0 +1,138 @@
+{
+  "assertions": [
+    {
+      "source": "tests/bridge-api.sh:116",
+      "step": "message",
+      "subject": "json",
+      "text": ".content[0].text==\"Cannot comply\""
+    }
+  ],
+  "case": "bridge-openai-refusal",
+  "covers": "A refusal in response.completed output is collected as text (non-streaming)",
+  "family": "responses",
+  "kind": "expect",
+  "notes": [
+    "No max_tokens in the request: clcd defaults max_output_tokens to 4096 (clcd:275)."
+  ],
+  "origin": "suite",
+  "source": {
+    "commit": "8da773c2c74d491795245155ab14f1d791532612",
+    "lines": [
+      "tests/bridge-api.sh:54",
+      "tests/bridge-api.sh:116",
+      "tests/bridge-api.sh:154"
+    ],
+    "repo": "xiaolai/claude-driven-ai-providers"
+  },
+  "steps": [
+    {
+      "filter": "clcd-names.jq",
+      "input": {
+        "file": "bridge-openai-refusal.input.json"
+      },
+      "kind": "json",
+      "label": "names",
+      "output": {},
+      "params": {}
+    },
+    {
+      "filter": "clcd-reverse.jq",
+      "input": {
+        "step": "names"
+      },
+      "kind": "json",
+      "label": "reverse",
+      "output": {},
+      "params": {}
+    },
+    {
+      "filter": "clcd-request.jq",
+      "input": {
+        "file": "bridge-openai-refusal.input.json"
+      },
+      "kind": "json",
+      "label": "request",
+      "output": {
+        "input": [
+          {
+            "content": [
+              {
+                "text": "test",
+                "type": "input_text"
+              }
+            ],
+            "role": "user",
+            "type": "message"
+          }
+        ],
+        "instructions": "",
+        "max_output_tokens": 4096,
+        "model": "gpt-6.1-sol",
+        "parallel_tool_calls": true,
+        "reasoning": {
+          "effort": "medium"
+        },
+        "store": false,
+        "stream": true,
+        "tools": []
+      },
+      "params": {
+        "arg": {
+          "effort": "medium",
+          "effort_override": "false",
+          "model": "gpt-6.1-sol",
+          "transport": "openai"
+        },
+        "argjson": {
+          "mapping": {}
+        },
+        "slurpfile": {
+          "names": [
+            {}
+          ]
+        }
+      }
+    },
+    {
+      "filter": "clcd-collect.jq",
+      "input": {
+        "file": "bridge-openai-refusal.events.sse"
+      },
+      "kind": "json",
+      "label": "message",
+      "output": {
+        "content": [
+          {
+            "text": "Cannot comply",
+            "type": "text"
+          }
+        ],
+        "id": "refusal",
+        "model": "gpt-6.1-sol",
+        "role": "assistant",
+        "stop_reason": "end_turn",
+        "stop_sequence": null,
+        "type": "message",
+        "usage": {
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        }
+      },
+      "params": {
+        "arg": {
+          "model": "gpt-6.1-sol"
+        },
+        "flags": [
+          "-Rsc"
+        ],
+        "slurpfile": {
+          "names": [
+            {}
+          ]
+        }
+      }
+    }
+  ]
+}

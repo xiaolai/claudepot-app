@@ -163,5 +163,51 @@
     "foundryApiKey": "Foundry API key",
     "foundryKeyPlaceholder": "Azure Foundry API key",
     "skipFoundryAuth": "Skip Foundry auth"
+  },
+  "relayServers": {
+    "label": "Relay servers",
+    "loading": "Probing paired relay servers",
+    "loadFailed": "Could not read paired relay servers: {{message}}",
+    "empty": "No paired relay servers. Pair one from a terminal:",
+    "runNote": "Read-only. Runs through a relay launch from a terminal with <code>claudepot relay run</code>.",
+    "reachable": "Reachable",
+    "reachableRtt": "Reachable · {{ms}} ms",
+    "unreachable": "Unreachable",
+    "upstreamsLabel": "Upstreams on {{name}}",
+    "default": "Default",
+    "ready": "Ready",
+    "notReady": "Not ready",
+    "tierMeasured": "Measured on {{model}}: TTFB {{ttfb}} ms · score {{score}} ms",
+    "tierConnect": "Speed unmeasured · score {{score}} ms",
+    "reason": {
+      "unreachable": "The relay could not be reached",
+      "server_id_changed": "Answered as a different relay than the one paired",
+      "not_approved": "Not approved on this relay",
+      "other_target": "This relay publishes a different target under this name",
+      "not_offered": "Not published, or not granted to this device",
+      "fingerprint_changed": "Target changed since you approved it — run <code>claudepot relay accept</code>",
+      "not_accepted": "Acceptance required — run <code>claudepot relay accept</code>",
+      "credential_not_ready": "The credential on the relay is not ready",
+      "owner_conflict": "Claude Code on the relay is signed into this account",
+      "no_capacity": "No free request slots",
+      "cooldown": "Rate-limited for {{secs}} s more",
+      "saturated5h": "5-hour usage at {{pct}}%",
+      "saturated7d": "7-day usage at {{pct}}%",
+      "unknown": "Not available"
+    },
+    "probe": {
+      "fingerprint_mismatch": "Its certificate is not the one you approved.",
+      "bad_ca": "Its pinned certificate could not be read.",
+      "transport": "Could not connect, or its certificate is not the approved one.",
+      "refused": "The relay refused the request.",
+      "bad_response": "The relay sent a response this version does not understand.",
+      "tls": "TLS could not be configured.",
+      "not_paired": "The relay no longer accepts this device — pair it again.",
+      "unpinned": "No pinned certificate is stored for this relay — pair it again.",
+      "bad_address": "Its stored address is not valid.",
+      "no_token": "No device token is stored for this relay — pair it again.",
+      "credential_store_locked": "The credential store is locked — unlock it and refresh.",
+      "credential_store": "The device token could not be read from the credential store."
+    }
   }
 }

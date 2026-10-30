@@ -1,0 +1,4 @@
+data: {"type":"response.created","response":{"id":"refusal"}}
+
+data: {"type":"response.completed","response":{"id":"refusal","status":"completed","output":[{"type":"message","content":[{"type":"refusal","refusal":"Cannot comply"}]}],"usage":{}}}
+

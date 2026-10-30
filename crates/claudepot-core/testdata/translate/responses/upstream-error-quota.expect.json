@@ -1,0 +1,65 @@
+{
+  "assertions": [
+    {
+      "equivalent": ".status_line|startswith(\"429 \")",
+      "source": "tests/clcd-regression.sh:70",
+      "step": "mapped",
+      "subject": "equiv",
+      "text": "[ \"$status\" = 429 ]"
+    },
+    {
+      "equivalent": ".retry_after==\"7\"",
+      "source": "tests/clcd-regression.sh:70",
+      "step": "mapped",
+      "subject": "equiv",
+      "text": "grep -q '^Retry-After: 7$'"
+    },
+    {
+      "source": "tests/clcd-regression.sh:71",
+      "step": "mapped",
+      "subject": "json@.body",
+      "text": ".error.type==\"rate_limit_error\""
+    }
+  ],
+  "case": "upstream-error-quota",
+  "covers": "HTTP 429 becomes rate_limit_error and Retry-After is forwarded",
+  "family": "responses",
+  "kind": "expect",
+  "origin": "suite",
+  "source": {
+    "commit": "8da773c2c74d491795245155ab14f1d791532612",
+    "lines": [
+      "tests/clcd-regression.sh:40",
+      "tests/clcd-regression.sh:70-71"
+    ],
+    "repo": "xiaolai/claude-driven-ai-providers"
+  },
+  "steps": [
+    {
+      "filter": "clcd-upstream-error.jq + clcd-retry-after.awk, bash glue as clcd:435-447",
+      "input": {
+        "file": "upstream-error-quota.upstream-body.json",
+        "headers_file": "upstream-error-quota.upstream-headers.txt"
+      },
+      "kind": "json",
+      "label": "mapped",
+      "output": {
+        "body": {
+          "error": {
+            "message": "Subscription limit reached",
+            "type": "rate_limit_error"
+          },
+          "type": "error"
+        },
+        "retry_after": "7",
+        "status_line": "429 Codex"
+      },
+      "params": {
+        "api_key_redacted_by_bash": "",
+        "arg": {
+          "status": "429"
+        }
+      }
+    }
+  ]
+}

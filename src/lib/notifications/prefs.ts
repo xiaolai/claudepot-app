@@ -60,6 +60,7 @@ const COLD_START_ENABLED_BY_DEFAULT: ReadonlyArray<Category> = [
   "configTreePatched",
   "serviceStatusChanged",
   "updateAvailable",
+  "relayError",
 ];
 const COLD_START_ENABLED_SET = new Set<Category>(COLD_START_ENABLED_BY_DEFAULT);
 

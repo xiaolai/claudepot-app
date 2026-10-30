@@ -168,6 +168,20 @@
       "message": "set a password first — enabling without one would open a surface nobody can log into, and that is not a useful state to persist"
     },
     {
+      "code": "relay.failed",
+      "owner": "command",
+      "params": [
+        "detail"
+      ],
+      "message": "a relay is serving on this machine — stop it first, or make this change from the process that serves"
+    },
+    {
+      "code": "relay.revoke_outcome_unknown",
+      "owner": "command",
+      "params": [],
+      "message": "the serving relay did not confirm the revocation, so the device may or may not be revoked — `claudepot relay devices` shows its state, and revoking again is safe"
+    },
+    {
       "code": "session_move.invalid_session_id",
       "owner": "command",
       "params": [

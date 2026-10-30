@@ -1,0 +1,53 @@
+{
+  "assertions": [
+    {
+      "source": "tests/chat.sh:22",
+      "step": "normalized",
+      "subject": "rejected",
+      "text": "if head -n 1 \"$tmp/events\"|jq -Rnj --arg model fixture-model -f \"$repo/adapters/chat-stream.jq\""
+    }
+  ],
+  "case": "reject-truncated-stream",
+  "covers": "A chat stream that ends before a finish reason is an error",
+  "family": "chat",
+  "kind": "reject",
+  "origin": "suite",
+  "source": {
+    "commit": "8da773c2c74d491795245155ab14f1d791532612",
+    "lines": [
+      "tests/chat.sh:22"
+    ],
+    "repo": "xiaolai/claude-driven-ai-providers"
+  },
+  "steps": [
+    {
+      "error": "Chat stream ended before a finish reason",
+      "exit_code": 5,
+      "filter": "chat-stream.jq",
+      "input": {
+        "file": "reject-truncated-stream.events.sse"
+      },
+      "kind": "reject",
+      "label": "normalized",
+      "params": {
+        "arg": {
+          "model": "fixture-model"
+        },
+        "flags": [
+          "-Rnj"
+        ]
+      },
+      "partial_output_lines": [
+        {
+          "data": {
+            "response": {
+              "id": "chat_fixture"
+            },
+            "type": "response.created"
+          }
+        }
+      ],
+      "partial_output_raw": "data: {\"type\":\"response.created\",\"response\":{\"id\":\"chat_fixture\"}}\n\n"
+    }
+  ]
+}

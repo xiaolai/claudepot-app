@@ -798,5 +798,9 @@
   "remote": {
     "failed": "无法更改远程服务。{{detail}}",
     "bad_device_id": "这不是有效的设备 ID。{{detail}}"
+  },
+  "relay": {
+    "failed": "无法更改中继服务。{{detail}}",
+    "revoke_outcome_unknown": "从终端运行的中继服务收到了请求，但没有确认结果，因此该设备可能已被吊销，也可能没有。下方列表会显示其状态；再次吊销是安全的。"
   }
 }

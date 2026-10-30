@@ -1,0 +1,304 @@
+{
+  "cases": [
+    {
+      "case": "bridge-local-text",
+      "covers": "Local chat route: no metadata lookup, no reasoning_effort, text reply collected",
+      "family": "chat",
+      "kind": "expect",
+      "origin": "suite"
+    },
+    {
+      "case": "reject-incomplete-tool-call-arguments",
+      "covers": "A tool call whose argument fragments never complete is refused at the finish reason",
+      "family": "chat",
+      "kind": "reject",
+      "origin": "derived"
+    },
+    {
+      "case": "reject-malformed-stream",
+      "covers": "Unparseable chat SSE data is an error, reported as a Chat stream problem",
+      "family": "chat",
+      "kind": "reject",
+      "origin": "suite"
+    },
+    {
+      "case": "reject-missing-metadata",
+      "covers": "Gemini replay without the stored metadata is refused, never sent without the signature",
+      "family": "chat",
+      "kind": "reject",
+      "origin": "suite"
+    },
+    {
+      "case": "reject-replay-missing-metadata",
+      "covers": "The same replay under another model finds no metadata (scoped by model and call id) and is refused before any upstream call",
+      "family": "chat",
+      "kind": "reject",
+      "origin": "suite"
+    },
+    {
+      "case": "reject-truncated-stream",
+      "covers": "A chat stream that ends before a finish reason is an error",
+      "family": "chat",
+      "kind": "reject",
+      "origin": "suite"
+    },
+    {
+      "case": "roundtrip-chat-sh-signature",
+      "covers": "Gemini chat stream with two parallel calls, a fragmented argument and a thought signature on one call -> normalized Responses events + cache entries -> replay request restoring extra_content and grouping both calls in one assistant message; CRLF framing gives identical output",
+      "family": "chat",
+      "kind": "expect",
+      "origin": "suite"
+    },
+    {
+      "case": "roundtrip-gemini",
+      "covers": "R2-7 chain on the Gemini route: Anthropic request -> Responses -> chat request; chat stream (parallel calls, fragmented argument, thought signature) -> cache + Anthropic message (collected and streamed); tool_result replay -> next chat request with call ids, arguments and extra_content restored; final text reply",
+      "family": "chat",
+      "kind": "expect",
+      "origin": "suite"
+    },
+    {
+      "case": "bridge-codex-check",
+      "covers": "clcd --check probe on the Codex subscription route, collected non-streaming",
+      "family": "responses",
+      "kind": "expect",
+      "origin": "suite"
+    },
+    {
+      "case": "bridge-grok-text",
+      "covers": "Grok Responses route: same as OpenAI but the reasoning field is removed",
+      "family": "responses",
+      "kind": "expect",
+      "origin": "suite"
+    },
+    {
+      "case": "bridge-openai-mapping",
+      "covers": "claude-opus-4-1 resolves through a profile role mapping; non-streaming collection of the reply",
+      "family": "responses",
+      "kind": "expect",
+      "origin": "suite"
+    },
+    {
+      "case": "bridge-openai-refusal",
+      "covers": "A refusal in response.completed output is collected as text (non-streaming)",
+      "family": "responses",
+      "kind": "expect",
+      "origin": "suite"
+    },
+    {
+      "case": "bridge-openai-text",
+      "covers": "OpenAI Responses route: request gets max_output_tokens and store:false; streamed text comes back",
+      "family": "responses",
+      "kind": "expect",
+      "origin": "suite"
+    },
+    {
+      "case": "exception-unfinished-tool-call",
+      "covers": "REVIEWED EXCEPTION, NOT A GOLDEN: a function_call that never receives output_item.done is still emitted as a complete tool_use with input {} and stop_reason tool_use",
+      "family": "responses",
+      "kind": "expect",
+      "origin": "derived"
+    },
+    {
+      "case": "reject-control-output_format",
+      "covers": "Request control output_format is refused, not silently ignored",
+      "family": "responses",
+      "kind": "reject",
+      "origin": "suite"
+    },
+    {
+      "case": "reject-control-temperature",
+      "covers": "Request control temperature is refused, not silently ignored",
+      "family": "responses",
+      "kind": "reject",
+      "origin": "suite"
+    },
+    {
+      "case": "reject-control-top_k",
+      "covers": "Request control top_k is refused, not silently ignored",
+      "family": "responses",
+      "kind": "reject",
+      "origin": "suite"
+    },
+    {
+      "case": "reject-control-top_p",
+      "covers": "Request control top_p is refused, not silently ignored",
+      "family": "responses",
+      "kind": "reject",
+      "origin": "suite"
+    },
+    {
+      "case": "reject-stop-sequences",
+      "covers": "Non-empty stop_sequences are refused",
+      "family": "responses",
+      "kind": "reject",
+      "origin": "suite"
+    },
+    {
+      "case": "reject-truncated-stream",
+      "covers": "A Responses stream that ends without a terminal event is an error, after message_start was already emitted",
+      "family": "responses",
+      "kind": "reject",
+      "origin": "suite"
+    },
+    {
+      "case": "reject-unsupported-content",
+      "covers": "An unknown content block type is refused before dispatch",
+      "family": "responses",
+      "kind": "reject",
+      "origin": "suite"
+    },
+    {
+      "case": "request-adaptive-effort",
+      "covers": "output_config.effort (adaptive thinking) becomes reasoning.effort",
+      "family": "responses",
+      "kind": "expect",
+      "origin": "suite"
+    },
+    {
+      "case": "request-effort-override",
+      "covers": "An explicit bridge effort (CLCD_EFFORT) overrides the request effort",
+      "family": "responses",
+      "kind": "expect",
+      "origin": "suite"
+    },
+    {
+      "case": "request-history-tools-image-thinking",
+      "covers": "Anthropic request -> Responses: system to instructions, mid-turn system to developer, user image to input_image data URL, thinking block dropped, tool_use to function_call with wire name, error tool_result to \"[Tool error]\" output, tool_choice tool + disable_parallel_tool_use",
+      "family": "responses",
+      "kind": "expect",
+      "origin": "suite"
+    },
+    {
+      "case": "request-model-role-claude-3-5-sonnet",
+      "covers": "Requested model claude-3-5-sonnet resolves to provider-standard through the role mapping",
+      "family": "responses",
+      "kind": "expect",
+      "origin": "suite"
+    },
+    {
+      "case": "request-model-role-claude-fable-5-1",
+      "covers": "Requested model claude-fable-5-1 resolves to provider-pro through the role mapping",
+      "family": "responses",
+      "kind": "expect",
+      "origin": "suite"
+    },
+    {
+      "case": "request-model-role-claude-opus-4-1",
+      "covers": "Requested model claude-opus-4-1 resolves to provider-pro through the role mapping",
+      "family": "responses",
+      "kind": "expect",
+      "origin": "suite"
+    },
+    {
+      "case": "request-model-role-fable",
+      "covers": "Requested model fable resolves to provider-pro through the role mapping",
+      "family": "responses",
+      "kind": "expect",
+      "origin": "suite"
+    },
+    {
+      "case": "request-model-role-haiku",
+      "covers": "Requested model haiku resolves to provider-fast through the role mapping",
+      "family": "responses",
+      "kind": "expect",
+      "origin": "suite"
+    },
+    {
+      "case": "request-model-role-opus",
+      "covers": "Requested model opus resolves to provider-pro through the role mapping",
+      "family": "responses",
+      "kind": "expect",
+      "origin": "suite"
+    },
+    {
+      "case": "request-model-role-raw-provider-id",
+      "covers": "Requested model raw-provider-id resolves to raw-provider-id through the role mapping",
+      "family": "responses",
+      "kind": "expect",
+      "origin": "suite"
+    },
+    {
+      "case": "request-model-role-sonnet",
+      "covers": "Requested model sonnet resolves to provider-standard through the role mapping",
+      "family": "responses",
+      "kind": "expect",
+      "origin": "suite"
+    },
+    {
+      "case": "stream-refusal-crlf",
+      "covers": "CRLF-framed stream with a refusal part becomes text, and [DONE] is tolerated",
+      "family": "responses",
+      "kind": "expect",
+      "origin": "suite"
+    },
+    {
+      "case": "stream-terminal-error",
+      "covers": "error becomes an Anthropic error event",
+      "family": "responses",
+      "kind": "expect",
+      "origin": "suite"
+    },
+    {
+      "case": "stream-terminal-failed",
+      "covers": "response.failed becomes an Anthropic error event",
+      "family": "responses",
+      "kind": "expect",
+      "origin": "suite"
+    },
+    {
+      "case": "stream-terminal-incomplete",
+      "covers": "response.incomplete maps to stop_reason max_tokens (every incomplete reason; reviewed exception)",
+      "family": "responses",
+      "kind": "expect",
+      "origin": "suite"
+    },
+    {
+      "case": "stream-text-and-tool",
+      "covers": "Responses SSE -> Anthropic SSE: text part, function call with wire-name reversal, block indices, cached-token usage split",
+      "family": "responses",
+      "kind": "expect",
+      "origin": "suite"
+    },
+    {
+      "case": "upstream-error-auth-redaction",
+      "covers": "HTTP 403 echoing the API key: status kept, key redacted, authentication_error",
+      "family": "responses",
+      "kind": "expect",
+      "origin": "suite"
+    },
+    {
+      "case": "upstream-error-context",
+      "covers": "A context-length 400 becomes invalid_request_error prefixed \"prompt is too long:\"",
+      "family": "responses",
+      "kind": "expect",
+      "origin": "suite"
+    },
+    {
+      "case": "upstream-error-quota",
+      "covers": "HTTP 429 becomes rate_limit_error and Retry-After is forwarded",
+      "family": "responses",
+      "kind": "expect",
+      "origin": "suite"
+    }
+  ],
+  "counts": {
+    "by_family": {
+      "chat": 8,
+      "responses": 32
+    },
+    "by_kind": {
+      "expect": 28,
+      "reject": 12
+    },
+    "by_origin": {
+      "derived": 2,
+      "suite": 38
+    },
+    "total": 40
+  },
+  "generated_with": "jq-1.7.1-apple",
+  "source": {
+    "commit": "8da773c2c74d491795245155ab14f1d791532612",
+    "repo": "xiaolai/claude-driven-ai-providers"
+  }
+}

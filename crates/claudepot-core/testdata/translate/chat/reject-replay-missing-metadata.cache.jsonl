@@ -1,0 +1,2 @@
+{"id":"gemini_call","model":"fixture-gemini","extra_content":{"google":{"thought_signature":"fixture-private-signature"}}}
+{"id":"parallel_call","model":"fixture-gemini","extra_content":{}}

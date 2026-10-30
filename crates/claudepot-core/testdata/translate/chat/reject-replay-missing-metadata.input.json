@@ -1,0 +1,46 @@
+{
+  "max_tokens": 512,
+  "messages": [
+    {
+      "content": "read",
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "id": "gemini_call",
+          "input": {
+            "path": "a"
+          },
+          "name": "read_file",
+          "type": "tool_use"
+        },
+        {
+          "id": "parallel_call",
+          "input": {
+            "path": "b"
+          },
+          "name": "read_file",
+          "type": "tool_use"
+        }
+      ],
+      "role": "assistant"
+    },
+    {
+      "content": [
+        {
+          "content": "file data",
+          "tool_use_id": "gemini_call",
+          "type": "tool_result"
+        },
+        {
+          "content": "file data",
+          "tool_use_id": "parallel_call",
+          "type": "tool_result"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "stream": false
+}

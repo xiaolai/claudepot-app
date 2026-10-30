@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { ScreenHeader } from "../shell/ScreenHeader";
 import { Button } from "../components/primitives/Button";
@@ -9,9 +9,11 @@ import { api } from "../api";
 import { renderError } from "../lib/i18n-error";
 import { useAppState } from "../providers/AppStateProvider";
 import type { PathStatus, RouteSettingsDto, RouteSummaryDto } from "../types";
+import type { RelayClientServer } from "../api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { AddRouteModal, EditRouteModal } from "./third-party/AddRouteModal";
 import { RouteCard } from "./third-party/RouteCard";
+import { RelayServersList } from "./third-party/RelayServersList";
 import {
   EVENT_OPEN_ADD_ROUTE,
   clearFromNetworkPanelBreadcrumb,
@@ -63,8 +65,29 @@ export function ThirdPartySection() {
   // process's own (minimal) env.
   const [pathStatus, setPathStatus] = useState<PathStatus>("unknown");
   const [addingToPath, setAddingToPath] = useState(false);
+  // Paired relay servers, read-only. Probing them is network I/O that
+  // can take seconds, so it runs beside the routes load rather than
+  // inside it; a newer refresh supersedes an older probe still in
+  // flight, so a slow answer cannot overwrite a fresh one.
+  const [relayServers, setRelayServers] = useState<RelayClientServer[] | null>(
+    null,
+  );
+  const [relayError, setRelayError] = useState<string | null>(null);
+  const relaySeq = useRef(0);
 
   const refresh = useCallback(async () => {
+    const seq = ++relaySeq.current;
+    void api
+      .relayClientServers()
+      .then((list) => {
+        if (seq !== relaySeq.current) return;
+        setRelayServers(list);
+        setRelayError(null);
+      })
+      .catch((e: unknown) => {
+        if (seq !== relaySeq.current) return;
+        setRelayError(renderError(e));
+      });
     // The shell PATH probe is supplementary and can be slow — keep it
     // off the critical path so it can neither fail nor stall the
     // whole section. Kicked off in parallel; its rejection collapses
@@ -418,6 +441,8 @@ export function ThirdPartySection() {
             ))}
           </div>
         )}
+
+        <RelayServersList servers={relayServers} error={relayError} />
       </div>
 
       <AddRouteModal

@@ -1,0 +1,8 @@
+data: {"type":"response.created","response":{"id":"resp_test"}}
+
+data: {"type":"response.content_part.added","item_id":"m","content_index":0,"part":{"type":"output_text","text":""}}
+
+data: {"type":"response.output_text.delta","item_id":"m","content_index":0,"delta":"API_OK"}
+
+data: {"type":"response.completed","response":{"id":"resp_test","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"API_OK"}]}],"usage":{}}}
+

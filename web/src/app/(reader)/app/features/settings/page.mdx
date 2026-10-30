@@ -1,7 +1,7 @@
 export const metadata = {
   title: "Settings",
   description:
-    "Fifteen sub-panes covering preferences, appearance, notifications, network, the remote appliance, auto-rotation, transcript retention, health, MCP installer, cleanup, protected paths, GitHub PAT, lock-recovery, diagnostics, and About.",
+    "Sixteen sub-panes covering preferences, appearance, notifications, network, the remote appliance, auto-rotation, the subscription relay, transcript retention, health, MCP installer, cleanup, protected paths, GitHub PAT, lock-recovery, diagnostics, and About.",
 };
 
 # Settings
@@ -9,7 +9,7 @@ export const metadata = {
 ![ClauDepot — settings tab](/screenshots/settings.png)
 
 ClauDepot's preference surface and the operational controls that
-don't belong to any single tab. Fifteen sub-panes, grouped into
+don't belong to any single tab. Sixteen sub-panes, grouped into
 *Core* (everyday prefs) and *Advanced* (less-touched, ending at
 About).
 
@@ -99,6 +99,28 @@ evaluator in `claudepot-core::rotation::eval` is fully unit-tested,
 including cycle-boundary regressions. See
 [`dev-docs/auto-rotation.md`](https://github.com/xiaolai/claudepot-app/blob/main/dev-docs/auto-rotation.md)
 for the design.
+
+## Relay
+
+Lets Claude Code on your other tailnet machines use an account
+registered here, with no login on those machines. Publish an
+account, start the relay, then pair a machine with a short-lived
+code; that machine gets a device token that reaches inference and
+nothing else. The account Claude Code is using on this Mac is never
+offered.
+
+Like Remote, the relay runs inside ClauDepot, so **quitting stops
+it**. It always serves TLS. Each paired device shows when it was last
+seen and an estimate of today's spend.
+
+**Revoke cuts a device off at once**, open streams included. A relay started from a terminal
+(`claudepot relay serve`) shows as serving, and the pane locks its
+other controls rather than editing state under it. On macOS and
+Linux, Revoke still works there, because it reaches the running
+relay; the reverse holds too, so `claudepot relay revoke` in a
+terminal reaches a relay serving in the window. On Windows, or when
+the running relay can't be reached, Revoke is disabled and says to
+stop that relay first.
 
 ## Retention
 

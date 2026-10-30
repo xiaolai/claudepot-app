@@ -1,0 +1,3 @@
+data: {"type":"response.created","response":{"id":"resp_test"}}
+data: {"type":"response.output_item.added","item":{"id":"fc1","type":"function_call","call_id":"call1","name":"clcd_tool_0"}}
+data: {"type":"response.completed","response":{"usage":{"input_tokens":100,"input_tokens_details":{"cached_tokens":30},"output_tokens":7}}}

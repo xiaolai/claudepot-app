@@ -1,0 +1,6 @@
+data: {"id":"chat_reply","choices":[{"delta":{"content":"CHAT_OK"},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":2}}
+
+data: [DONE]
+
