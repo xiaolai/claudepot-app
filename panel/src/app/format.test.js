@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { ago, basename, bytes, compact, long, modelLabel, short, span, tightPath, until, groupTools, verifyChip, resetAt } from './format.js';
+import { ago, badgeCount, basename, bytes, compact, long, modelLabel, short, span, tightPath, until, groupTools, verifyChip, resetAt } from './format.js';
 
 test('basename handles all four path shapes', () => {
   assert.equal(basename('/Users/joker/code/claudepot'), 'claudepot');
@@ -232,4 +232,11 @@ test('resetAt says nothing when the server gave no timestamp', () => {
 
 test('resetAt says nothing for a timestamp it cannot read', () => {
   assert.equal(resetAt('not a date'), null);
+});
+
+test('badgeCount stops counting past two digits and shows nothing for zero', () => {
+  assert.equal(badgeCount(0), null);
+  assert.equal(badgeCount(undefined), null);
+  assert.equal(badgeCount(99), 99);
+  assert.equal(badgeCount(100), '99+');
 });

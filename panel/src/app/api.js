@@ -37,7 +37,7 @@ export class ApiError extends Error {
   }
 }
 
-/** Thrown when the request never reached the host at all. */
+/** Thrown when the host could not be reached, or never answered a read. */
 export class OfflineError extends Error {
   constructor(cause) {
     super('offline');
@@ -46,7 +46,49 @@ export class OfflineError extends Error {
   }
 }
 
-async function request(method, path, { body, idempotencyKey, signal } = {}) {
+/**
+ * How long a read may go unanswered before it counts as no answer.
+ *
+ * Long on purpose: the list costs a real host about a third of a second, so
+ * this only ever catches a request that is stuck, and a slow answer is still
+ * an answer.
+ */
+export const READ_DEADLINE_MS = 30_000;
+
+/**
+ * Reads carry a deadline and mutations do not. `fetch` waits for as long as
+ * the connection stays open, so without one a stuck read is "Loading…" for
+ * good, and stops every poll behind it. A mutation that gave up would have to
+ * report "nothing was sent", which it could not know: the prompt may have
+ * arrived and only the answer got lost.
+ */
+function request(method, path, options = {}) {
+  return method === 'GET' ? read(path, options) : send(method, path, options);
+}
+
+async function read(path, { signal, ...options }) {
+  // Combined by hand: `AbortSignal.any` is too recent for older iOS.
+  const ctrl = new AbortController();
+  const abort = () => ctrl.abort();
+  if (signal?.aborted) abort();
+  else signal?.addEventListener('abort', abort, { once: true });
+
+  let expired = false;
+  const timer = setTimeout(() => {
+    expired = true;
+    abort();
+  }, READ_DEADLINE_MS);
+  try {
+    return await send('GET', path, { ...options, signal: ctrl.signal });
+  } catch (e) {
+    throw expired && e?.name === 'AbortError' ? new OfflineError(e) : e;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
+  }
+}
+
+async function send(method, path, { body, idempotencyKey, signal } = {}) {
   const headers = {};
   const token = readToken();
   if (token) headers.Authorization = `Bearer ${token}`;

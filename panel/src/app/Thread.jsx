@@ -11,7 +11,7 @@
 // read mark and sending live in `useThreadState`. What is left here is
 // rendering, which is the only thing a reviewer should have to read to
 // know what this screen looks like.
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { api } from './api.js';
 import { ago, modelLabel, tightPath, groupTools } from './format.js';
@@ -81,9 +81,13 @@ export function Thread({ session, onBack, onChanged, conn, tools = 'grouped', in
           display: 'flex',
           alignItems: 'center',
           gap: 'var(--s2)',
-          height: 'var(--bar-h-back)',
+          // Grows with the details line, which wraps. At a fixed height a long
+          // branch pushed the title out of the top and ran under the notice.
+          minHeight: 'var(--bar-h-back)',
           flexShrink: 0,
-          padding: inPane ? '0 var(--s3) 0 var(--gut)' : '0 var(--s3) 0 var(--chev-inset)',
+          padding: inPane
+            ? 'var(--s1) var(--s3) var(--s1) var(--gut)'
+            : 'var(--s1) var(--s3) var(--s1) var(--chev-inset)',
         }}
       >
         {/* In the wide layout the thread sits BESIDE the list rather
@@ -100,6 +104,7 @@ export function Thread({ session, onBack, onChanged, conn, tools = 'grouped', in
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
             }}
+            title={session.title || undefined}
           >
             {session.title || 'Untitled session'}
           </div>
@@ -107,19 +112,20 @@ export function Thread({ session, onBack, onChanged, conn, tools = 'grouped', in
               Session rows elsewhere are truncated and point here — see
               rules/path-display.md, State B. */}
           <div
-            className="mono selectable"
+            className="mono selectable dots"
             style={{
+              display: 'flex',
+              flexWrap: 'wrap',
               fontSize: 'var(--t-micro)',
               color: 'var(--fg4)',
-              overflow: 'hidden',
-              whiteSpace: 'nowrap',
+              overflowWrap: 'anywhere',
             }}
             title={session.project_path || undefined}
           >
-            {tightPath(session.project_path, 28)}
-            {session.branch ? ` · ${session.branch}` : ''}
-            {session.models?.length === 1 ? ` · ${modelLabel(session.models[0])}` : ''}
-            {session.models?.length > 1 ? ` · ${session.models.length} models` : ''}
+            <span>{tightPath(session.project_path, 28)}</span>
+            {session.branch && <span>{session.branch}</span>}
+            {session.models?.length === 1 && <span>{modelLabel(session.models[0])}</span>}
+            {session.models?.length > 1 && <span>{session.models.length} models</span>}
           </div>
         </div>
         <CopyPath path={session.project_path} label="Copy the project path" />
@@ -495,6 +501,23 @@ function Composer({
   onPickQuick,
   hasQuick,
 }) {
+  // As tall as what is typed, up to the cap in its style. Set here rather than
+  // in that style because it is measured: height has to be released first, or
+  // a field can only ever grow. Before the paint, so it never shows the wrong
+  // height. A narrower window means more lines for the same text.
+  const field = useRef(null);
+  useLayoutEffect(() => {
+    const el = field.current;
+    if (!el) return undefined;
+    const fitHeight = () => {
+      el.style.height = 'auto';
+      el.style.height = `${el.scrollHeight}px`;
+    };
+    fitHeight();
+    window.addEventListener('resize', fitHeight);
+    return () => window.removeEventListener('resize', fitHeight);
+  }, [text]);
+
 
   return (
     <div
@@ -566,7 +589,7 @@ function Composer({
           </span>
           <span style={{ fontSize: 'var(--t-nano)', color: 'var(--fg4)' }}>
             {staged.chars < 1000 ? staged.chars : `${(staged.chars / 1000).toFixed(1)}k`} chars
-            {staged.restricts_tools ? ' · tool limits not carried' : ''}
+            {staged.restricts_tools ? '\u00a0· tool limits not carried' : ''}
           </span>
           <button
             onClick={() => onStage(null)}
@@ -638,17 +661,20 @@ function Composer({
           /
         </button>
         <textarea
+          ref={field}
           value={text}
           onChange={(e) => onText(e.target.value)}
           rows={1}
           disabled={disabled}
           aria-label="Message this session"
-          // Short enough not to wrap. The `/` button costs 54px, which
-          // left the field 184px at 390 — and "Message this session…"
-          // wrapped to a second line the one-row height then clipped.
+          // One row tall, so a placeholder that wrapped had its second line
+          // cut with nothing to show it. `one-line-hint` ends it in an
+          // ellipsis instead. A disabled field says only that: the reason
+          // is written out in full below it.
+          className="one-line-hint"
           placeholder={
             disabled
-              ? reason || 'Unavailable'
+              ? 'Unavailable'
               : staged
                 ? 'Add a note…'
                 : holding

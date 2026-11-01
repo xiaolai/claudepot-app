@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ApiError, OfflineError, api, readToken, writeToken } from './api.js';
+import { requestSlot } from './poll.js';
 
 /** Poll interval for the sessions list, in ms. */
 const POLL_MS = 4000;
@@ -67,7 +68,11 @@ export function useSessions({ enabled, onUnauthorized }) {
   const [sessions, setSessions] = useState(null);
   const [approvals, setApprovals] = useState([]);
   const [conn, setConn] = useState('online');
-  const inflight = useRef(null);
+  // One slot each, applied as each answers. A server too old to know about
+  // approvals, or one whose queue directory is unreadable, must not blank the
+  // session list beside it, and a slow answer about approvals must not hold it
+  // up. Only the list says whether the host is reachable.
+  const [slots] = useState(() => ({ list: requestSlot(), waiting: requestSlot() }));
   // The version this bundle was served by, captured once. If the
   // server later reports a different one it has been upgraded under
   // us, and — since the bundle is embedded in that binary — the code
@@ -78,40 +83,42 @@ export function useSessions({ enabled, onUnauthorized }) {
   const bootVersion = useRef(null);
   const [stale, setStale] = useState(false);
 
-  const refresh = useCallback(async () => {
-    if (!readToken()) return;
-    inflight.current?.abort();
-    const ctrl = new AbortController();
-    inflight.current = ctrl;
-    try {
-      // Both on one tick, and settled independently: a server too old
-      // to know about approvals, or one whose queue directory is
-      // unreadable, must not blank the session list beside it.
-      const [list, waiting] = await Promise.allSettled([
-        api.sessions(ctrl.signal),
-        api.approvals(ctrl.signal),
-      ]);
-      if (inflight.current !== ctrl) return;
-      if (list.status === 'rejected') throw list.reason;
-      setSessions(list.value?.sessions ?? []);
-      setApprovals(waiting.status === 'fulfilled' ? (waiting.value?.approvals ?? []) : []);
-      setConn('online');
+  const ask = useCallback(
+    (how) => {
+      if (!readToken()) return Promise.resolve();
+      const list = slots.list[how](api.sessions).then((r) => {
+        if (r.status === 'dropped') return;
+        if (r.status === 'rejected') {
+          if (r.reason instanceof OfflineError) setConn('offline');
+          else if (r.reason instanceof ApiError && r.reason.status === 401) onUnauthorized?.();
+          else setConn('online');
+          return;
+        }
+        setSessions(r.value?.sessions ?? []);
+        setConn('online');
 
-      const seen = list.value?.server_version;
-      if (seen) {
-        // An older server that does not report one leaves this null and
-        // nothing ever goes stale — the check fails off, which is right
-        // for a nag.
-        if (bootVersion.current === null) bootVersion.current = seen;
-        else if (seen !== bootVersion.current) setStale(true);
-      }
-    } catch (e) {
-      if (e?.name === 'AbortError' || inflight.current !== ctrl) return;
-      if (e instanceof OfflineError) setConn('offline');
-      else if (e instanceof ApiError && e.status === 401) onUnauthorized?.();
-      else setConn('online');
-    }
-  }, [onUnauthorized]);
+        const seen = r.value?.server_version;
+        if (seen) {
+          // An older server that does not report one leaves this null and
+          // nothing ever goes stale — the check fails off, which is right
+          // for a nag.
+          if (bootVersion.current === null) bootVersion.current = seen;
+          else if (seen !== bootVersion.current) setStale(true);
+        }
+      });
+      const waiting = slots.waiting[how](api.approvals).then((r) => {
+        if (r.status === 'fulfilled') setApprovals(r.value?.approvals ?? []);
+        // The host refused: there is no queue to show. Not hearing from it
+        // says nothing about the queue, so what is on screen stays.
+        else if (r.reason instanceof ApiError) setApprovals([]);
+      });
+      return Promise.all([list, waiting]);
+    },
+    [slots, onUnauthorized],
+  );
+
+  // Something just changed, or someone asked: the answer on its way is old.
+  const refresh = useCallback(() => ask('now'), [ask]);
 
   useEffect(() => {
     if (!enabled) {
@@ -127,17 +134,17 @@ export function useSessions({ enabled, onUnauthorized }) {
     // The visibility listener refreshes on the way back, so nothing is
     // stale by the time it is looked at.
     const id = window.setInterval(() => {
-      if (document.visibilityState === 'visible') refresh();
+      if (document.visibilityState === 'visible') ask('tick');
     }, POLL_MS);
-    const onVisible = () => document.visibilityState === 'visible' && refresh();
+    const onVisible = () => document.visibilityState === 'visible' && ask('tick');
     document.addEventListener('visibilitychange', onVisible);
     return () => {
       window.clearInterval(id);
       document.removeEventListener('visibilitychange', onVisible);
-      inflight.current?.abort();
-      inflight.current = null;
+      slots.list.stop();
+      slots.waiting.stop();
     };
-  }, [enabled, refresh]);
+  }, [enabled, refresh, ask, slots]);
 
   return { sessions, approvals, conn, refresh, stale };
 }

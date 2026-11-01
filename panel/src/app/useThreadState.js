@@ -45,6 +45,19 @@ export function useFollowTail(sessionId, total, events) {
     if (el && atEnd.current) el.scrollTop = el.scrollHeight;
   }, [events]);
 
+  // The composer growing takes its height from this box, which would otherwise
+  // slide the last message behind it. No scroll event fires, so nothing else
+  // notices.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(() => {
+      if (atEnd.current) el.scrollTop = el.scrollHeight;
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   /**
    * Record the read mark, if the user is actually looking at the tail.
    *

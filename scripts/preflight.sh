@@ -193,6 +193,8 @@ if [ "$rust_only" -eq 0 ]; then
     pnpm test
     pnpm check:render:self-test
     pnpm check:render
+    pnpm check:layout:self-test
+    pnpm check:layout
   )
   ok "panel"
 

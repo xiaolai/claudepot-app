@@ -619,6 +619,80 @@ Three consequences follow from `lg` and each was a bug at least once:
   inset ring instead, since it may already be carrying the live glow and
   two backgrounds on one card read as a rendering fault.
 
+**The panel fills the window at every step, and so does its text.**
+Accounts, Settings and sign-in were held to 720px and 380px at `lg`, on
+the argument that a list row or a password field 1600px wide is not a
+layout anyone specified. That was the same cap the desktop app removed
+(`.claude/rules/design.md`, "Pane width"), for the same reason: the
+window is the measure and the user sets it. It also stopped nothing below
+`lg`, where an 899px window already drew an 807px password field. The
+session list beside the thread takes 30% of the stage, with `--pane-list` as
+its floor so the list stays readable on a small window, at the thread's expense, and the thread
+header still shortens the project path to 28 characters, with the full path
+in its `title` and copy button.
+`panel/src/app/widths.test.js` scans the source, which catches the usual
+spellings and proves nothing: a `max-width` other than `none` or `max-content`, a length of 100px
+or more (6em or more, any `ch`, or a viewport or container unit under 100) in a width, flex or grid-column
+declaration, and `nowrap` with hidden overflow and no ellipsis in one block. It
+cannot see a width computed at runtime, a `calc` whose numbers stay under the limit, a width set through a token it allows, a percentage, a fixed height
+with hidden overflow, or a clip made by two elements, so a layout change still
+needs a look in a browser.
+
+**Wrapped details keep their separators out of the text.** A `·` written in the
+text, or as a flex item, opens a line whenever the row wraps there, and a browser
+only decides that after the text is fixed. `.dots` in `controls.css` draws each
+dot in its item's own padding and clips one dot's width off the container's left
+edge, so whichever item starts a line loses its dot. An empty item is hidden, or
+it would take that clipped place and leave the next dot showing. A `·` inside one
+run of text sits after a non-breaking space for the same reason. On live cards
+and the thread header, details still take two lines where they do not fit: about
+366-476px of details in a 247px text column at 1200 wide. The old single line only
+fit because it clipped. History rows are the exception, below.
+
+**The composer placeholder needs both selectors.** `.one-line-hint` is one row
+tall while empty, and the field grows as text is typed. In Chrome neither `:placeholder-shown` nor `::placeholder` alone gives an
+ellipsis: one clips and the other wraps. The field half stops applying once
+anything is typed, so typed text still wraps. A disabled field's placeholder says
+only "Unavailable", and the reason is written out below it.
+
+**`IcoFill` needs a filled shape.** With none, it draws the outline paths with the
+stroke off, which left Settings as two dots, so a tab whose icon has no shape in
+`FPATH` sets `line: true` and draws a bold outline. The tab badge sits beside the
+icon rather than over it, because over the filled Sessions icon it hid half the shape.
+
+**History rows keep their details to one line.** Height is what lets a list be
+scanned, and at narrow widths wrapped details took a row from 68px to 104px. The
+row still wraps, and `.dots-one-line` hides every line after the first, so the
+first item that does not fit goes whole, with everything after it. Order is
+priority: had errors, project, when, branch, messages, tokens, model, duration. The
+warning leads because a long project name used to push it onto the hidden line. The
+project asks for half the row when the line is laid out and takes back what is
+left, so a long name shortens with an ellipsis rather than leaving a row that
+says "had errors" and nothing else. The row's `title` lists them all, and on a
+phone, with no hover, opening the row is the way to them. Live cards and the
+thread header keep wrapping.
+
+**The poll waits; it does not abort.** Every poll used to abort the one before it,
+so a host slower than the 4s interval was never heard, and nothing said so.
+`poll.js` gives each poll a slot: a tick is dropped while a request is out, and
+only a refresh a person or a change asked for replaces one. A request that never
+answers would then hold its slot for good, so reads carry a 30s deadline
+(`READ_DEADLINE_MS`) that surfaces as offline. Writes carry none, because
+`explainSend` tells the user an offline send was not sent, and a timed-out write
+may have been. The thread's first read retries while offline, because following
+starts only after a first page has arrived; without that, a read that hit the
+deadline left the thread on its error until it was reopened.
+
+**A clipped control adds no scroll.** `Seg` cannot shrink and `List` is `overflow: hidden`, so a row too narrow for both cut the Theme control off by 17px at 320 wide while every page-overflow check stayed at zero. Those rows set `flexWrap: 'wrap'`, and the label takes `flex: '1 1 auto'`: at a basis of 0 the label always "fits" and the row never wraps. A check for this has to compare each box to its clipping ancestor, not the page to the window.
+
+**At the wide step the stage row needs `minHeight: 0`.** It is a flex child of
+a column, so without that it grows to its tallest pane and the column clips the
+rest. That shipped from 0.5.0 to 0.7.1: from 900px up the session list did not
+scroll with the wheel, an open thread's composer sat below the window (1786px
+down in an 800px window, beside an 1824px list), and Settings could not be
+scrolled to its end on a window shorter than it. jsdom has no layout, so
+`check:render` cannot see this; `widths.test.js` now asserts the value.
+
 **The back gesture closes the thread; it used to leave the app.** The
 panel kept no history at all — one entry for its whole life — and iOS
 Safari's edge swipe and Android's back both drive session history, so

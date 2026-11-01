@@ -3,20 +3,9 @@
 import { useEffect, useState } from 'react';
 
 import { api, explainSend, newIdempotencyKey } from './api.js';
-import { ago, basename, compact, modelLabel, span } from './format.js';
+import { ago, badgeCount, basename, compact, modelLabel, span } from './format.js';
 
 const { Badge, Chip, Dot, Group, Ico, Item, List, Surface } = window;
-
-/**
- * Badge text. Past two digits the exact number stops being information
- * and starts being a wide pill — a session left alone over a weekend
- * accrues hundreds of events, and "how many" is not the question the
- * badge answers.
- */
-function badgeCount(n) {
-  if (!n) return null;
-  return n > 99 ? '99+' : n;
-}
 
 function greet(now = new Date()) {
   const h = now.getHours();
@@ -68,7 +57,7 @@ function summarize(sessions, approvals, conn) {
     waiting && `${waiting} waiting on you`,
     attached && `${attached} attached`,
   ].filter(Boolean);
-  return parts.length ? parts.join(' · ') : 'Nothing needs you right now';
+  return parts.length ? parts.join('\u00a0· ') : 'Nothing needs you right now';
 }
 
 export function Sessions({
@@ -173,10 +162,11 @@ export function Sessions({
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
                     }}
+                    title={s.title || undefined}
                   >
                     {s.title || 'Untitled session'}
                   </div>
-                  <Meta s={s} />
+                  <Meta s={s} oneLine />
                 </div>
                 {s.unread > 0 && <Badge n={badgeCount(s.unread)} tone="accent" />}
                 <Ico n="chevR" s="sm" w="thin" c="var(--fg4)" />
@@ -237,7 +227,7 @@ function Header({ host, sub }) {
 }
 
 /**
- * The dense line under a session title.
+ * The details under a session title.
  *
  * State B under `rules/path-display.md`: the project path is truncated
  * to its basename with the full string in `title`. The canonical copy
@@ -245,12 +235,22 @@ function Header({ host, sub }) {
  * opens. Do not add a copy button per row; at 28 rows it is noise, and
  * that is the trade the rule names.
  *
+ * `oneLine` is for a list row, whose height is what lets a list be scanned.
+ * A row opens onto the thread header, which shows every detail in full; on a
+ * phone there is no hover, so that is the only way to the rest there. The
+ * warning comes first because it must be the one thing that always stays: a
+ * longer project name beside it pushed it onto the hidden line.
+ *
  * `showProject` is false on a live card, where the header already names
  * the project. Saying it twice in six inches of screen is worse than
  * either place saying it once.
  */
-function Meta({ s, showProject = true }) {
+function Meta({ s, showProject = true, oneLine = false }) {
+  // Most useful first: on one line, the first item that does not fit goes, and
+  // everything after it with it.
   const bits = [];
+  const when = ago(s.last_ts);
+  if (when !== '—') bits.push(when);
   if (s.branch) bits.push(s.branch);
   if (s.messages) bits.push(`${s.messages} msg`);
   // Input + output only. The server sends all four components because
@@ -261,33 +261,33 @@ function Meta({ s, showProject = true }) {
   if (billable) bits.push(`${compact(billable)} tok`);
   if (s.models?.length === 1) bits.push(modelLabel(s.models[0]));
   else if (s.models?.length > 1) bits.push(`${s.models.length} models`);
-  const when = ago(s.last_ts);
-  if (when !== '—') bits.push(when);
   const d = span(s.first_ts, s.last_ts);
   if (d) bits.push(d);
 
+  const everything = [s.has_error && 'had errors', s.project_path, ...bits].filter(Boolean).join('\u00a0· ');
   return (
     <div
-      className="mono"
+      className={oneLine ? 'mono dots dots-one-line' : 'mono dots'}
       style={{
         display: 'flex',
-        gap: 'var(--s2)',
+        // Wraps between items, and inside one only when it is wider than
+        // the row: a long branch has no spaces to break at. On one clipped
+        // line this cut a model name mid-word and hid "had errors", so
+        // `dots-one-line` keeps the wrap and hides the lines after the first:
+        // an item that does not fit goes whole.
+        flexWrap: 'wrap',
+        overflowWrap: 'anywhere',
         fontSize: 'var(--t-micro)',
         color: 'var(--fg4)',
         marginTop: 'var(--s1)',
-        overflow: 'hidden',
-        whiteSpace: 'nowrap',
       }}
-      title={s.project_path || undefined}
+      title={everything}
     >
-      {showProject && <span style={{ color: 'var(--fg3)' }}>{basename(s.project_path)}</span>}
+      {s.has_error && <span style={{ color: 'var(--wn)' }}>had errors</span>}
+      {showProject && <span className="dots-project" style={{ color: 'var(--fg3)' }}>{basename(s.project_path)}</span>}
       {bits.map((b, i) => (
-        <span key={i}>
-          {showProject || i > 0 ? '· ' : ''}
-          {b}
-        </span>
+        <span key={i}>{b}</span>
       ))}
-      {s.has_error && <span style={{ color: 'var(--wn)' }}>· had errors</span>}
     </div>
   );
 }
@@ -387,6 +387,7 @@ function LiveCard({ s, selected, onOpen, onChanged, conn }) {
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
           }}
+          title={s.project_path || undefined}
         >
           {basename(s.project_path)}
         </span>

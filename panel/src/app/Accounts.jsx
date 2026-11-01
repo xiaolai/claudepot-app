@@ -99,6 +99,7 @@ function AccountRow({ a, v, meters, busy, onActivate }) {
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
           }}
+          title={a.email}
         >
           {a.email}
         </div>
@@ -133,9 +134,11 @@ function AccountRow({ a, v, meters, busy, onActivate }) {
       {meters.length > 0 && (
         <div
           style={{
-            display: 'flex',
+            // A grid, so a long model label wraps inside its own cell. Each
+            // cell was as wide as its label, which put the rings out of line.
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(var(--meter-md), 1fr))',
             gap: 'var(--s3)',
-            flexWrap: 'wrap',
             marginTop: 'var(--s3)',
           }}
         >
@@ -153,6 +156,7 @@ function AccountRow({ a, v, meters, busy, onActivate }) {
                 flexDirection: 'column',
                 alignItems: 'center',
                 gap: 'var(--s1)',
+                minWidth: 0,
               }}
             >
               <Meter pct={Math.round(m.w.utilization)} size="md" />
@@ -160,7 +164,8 @@ function AccountRow({ a, v, meters, busy, onActivate }) {
                 style={{
                   fontSize: 'var(--t-micro)',
                   color: 'var(--fg3)',
-                  whiteSpace: 'nowrap',
+                  textAlign: 'center',
+                  overflowWrap: 'anywhere',
                 }}
               >
                 {m.sub}
@@ -170,15 +175,10 @@ function AccountRow({ a, v, meters, busy, onActivate }) {
                   can act on — 96% of a week reads very differently if it
                   clears tonight than if it clears on Friday. Absent for
                   a window the server gave no timestamp, which is every
-                  window at 0%: nothing used, nothing waiting to reset.
-
-                  `block`, because `max-width` does not apply to a
-                  non-replaced inline element. */}
+                  window at 0%: nothing used, nothing waiting to reset. */}
               {resetAt(m.w.resets_at) && (
                 <span
                   style={{
-                    display: 'block',
-                    maxWidth: 'var(--meter-md)',
                     fontSize: 'var(--t-nano)',
                     color: 'var(--fg4)',
                     textAlign: 'center',

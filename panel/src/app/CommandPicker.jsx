@@ -141,7 +141,7 @@ export function CommandPicker({ sessionId, onStage, onClose }) {
                     /{c.name}
                   </span>
                   <span style={{ marginLeft: 'auto', fontSize: 'var(--t-nano)', color: 'var(--fg4)' }}>
-                    {sourceLabel(c.source)} · {size(c.body_chars)}
+                    {sourceLabel(c.source)}{'\u00a0· '}{size(c.body_chars)}
                   </span>
                 </div>
                 {c.description && (

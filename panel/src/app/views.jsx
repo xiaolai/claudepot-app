@@ -66,8 +66,11 @@ export function CopyPath({ path, label = 'Copy path' }) {
       aria-label={label}
       title={path}
       style={{
-        width: 'var(--tap-xs)',
-        height: 'var(--tap-xs)',
+        // A full-size target that takes up only the space of the small icon,
+        // so a finger can hit it and the header line stays as tall as before.
+        width: 'var(--tap)',
+        height: 'var(--tap)',
+        margin: 'calc((var(--tap-xs) - var(--tap)) / 2)',
         display: 'grid',
         placeItems: 'center',
         borderRadius: 'var(--r-pill)',

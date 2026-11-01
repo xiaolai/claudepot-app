@@ -138,12 +138,15 @@ export function Settings({ theme, onTheme, tools, onTools, host, onSignOut, onRe
 
       <Group title="Appearance">
         <List>
-          <Item first>
-            <span style={{ flex: 1, fontSize: 'var(--t-sub)' }}>Theme</span>
+          {/* A Seg cannot shrink and List clips, so a row too narrow for both
+              would cut the control off with no scroll to show it. The label's
+              auto basis is what makes the row wrap: at 0 it always "fits". */}
+          <Item first style={{ flexWrap: 'wrap' }}>
+            <span style={{ flex: '1 1 auto', fontSize: 'var(--t-sub)' }}>Theme</span>
             <Seg opts={THEMES} v={theme} onChange={onTheme} />
           </Item>
-          <Item>
-            <span style={{ flex: 1, fontSize: 'var(--t-sub)' }}>
+          <Item style={{ flexWrap: 'wrap' }}>
+            <span style={{ flex: '1 1 auto', fontSize: 'var(--t-sub)' }}>
               Tool calls
               {/* The reason for the default, where the person changing
                   it can read it: measured across five real sessions on

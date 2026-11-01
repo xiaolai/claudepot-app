@@ -66,6 +66,17 @@ export function compact(n) {
   return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
+/**
+ * Badge text. Past two digits the exact number stops being information
+ * and starts being a wide pill — a session left alone over a weekend
+ * accrues hundreds of events, and "how many" is not the question the
+ * badge answers.
+ */
+export function badgeCount(n) {
+  if (!n) return null;
+  return n > 99 ? '99+' : n;
+}
+
 /** Basename of a path, native separator either way. */
 export function basename(path) {
   if (!path) return '';

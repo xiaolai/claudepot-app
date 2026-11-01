@@ -20,6 +20,7 @@
 //   lg  ≥900      left icon rail, list and thread side by side
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { badgeCount } from './format.js';
 import { Login } from './Login.jsx';
 import { Sessions } from './Sessions.jsx';
 import { Thread } from './Thread.jsx';
@@ -33,7 +34,9 @@ const { Badge, Ico, IcoFill, Wire, useBP } = window;
 const TABS = [
   { v: 'sessions', ico: 'layers', n: 'Sessions' },
   { v: 'accounts', ico: 'user', n: 'Accounts' },
-  { v: 'settings', ico: 'sliders', n: 'Settings' },
+  // `line`: this icon has no filled shape. `IcoFill` falls back to the outline
+  // paths with the stroke off, which left only the two slider knobs.
+  { v: 'settings', ico: 'sliders', n: 'Settings', line: true },
 ];
 
 function TabBtn({ t, on, badge, rail, onGo }) {
@@ -62,16 +65,25 @@ function TabBtn({ t, on, badge, rail, onGo }) {
       }}
     >
       <span style={{ position: 'relative', display: 'grid', placeItems: 'center' }}>
-        {on ? (
+        {on && t.line ? (
+          <Ico n={t.ico} s="xl" w="bold" c="var(--ac)" />
+        ) : on ? (
           <IcoFill n={t.ico} s="xl" c="var(--ac)" />
         ) : (
           <Ico n={t.ico} s="xl" w="thin" c="var(--fg3)" />
         )}
         {n > 0 && (
+          // Beside the icon, not over it: laid over the filled one, the badge
+          // hid half its shape and left a wedge. The widest count tucks in by
+          // a corner, because beside the icon it crosses the rail's edge.
           <span
-            style={{ position: 'absolute', top: 'calc(var(--s1) * -1)', right: 'calc(var(--s2) * -1)' }}
+            style={{
+              position: 'absolute',
+              top: 'calc(var(--s1) * -1)',
+              left: n > 99 ? 'calc(100% - var(--s1))' : '100%',
+            }}
           >
-            <Badge n={n} />
+            <Badge n={badgeCount(n)} />
           </span>
         )}
       </span>
@@ -273,7 +285,7 @@ export function Panel() {
   if (!token) {
     return (
       <Shell theme={theme} bp={bp} innerRef={shell}>
-        <Column measure="measure-form">
+        <Column>
           <Login onSignedIn={signIn} />
         </Column>
       </Shell>
@@ -323,16 +335,16 @@ export function Panel() {
   // Wide: the list keeps its place and the thread opens beside it. The
   // other two tabs have no detail view, so they take the full width
   // rather than leaving an empty pane next to them.
+  // `minHeight: 0` is what gives the panes a height of their own to scroll in.
+  // Without it the row grew to its tallest pane and Column clipped the rest:
+  // the list could not scroll and the composer sat below the window.
   const stage = wide ? (
-    <div style={{ flex: 1, minWidth: 0, display: 'flex' }}>
+    <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex' }}>
       <div
-        // Accounts and Settings have no detail pane, so they take the
-        // whole width — and then need a reading measure, or a list row
-        // in a 1600px window is 1600px of hairline. See `controls.css`.
-        className={view === 'sessions' ? undefined : 'measure'}
         style={{
           flexShrink: 0,
-          width: view === 'sessions' ? 'var(--pane-list)' : 'auto',
+          // Grows with the window, so a wider window gets longer rows too.
+          width: view === 'sessions' ? 'max(var(--pane-list), 30%)' : 'auto',
           flex: view === 'sessions' ? undefined : 1,
           minWidth: 0,
           display: 'flex',
@@ -488,10 +500,9 @@ function Shell({ theme, bp, innerRef, children }) {
 }
 
 /** Everything that is not the rail: header, stage, tab bar. */
-function Column({ measure, children }) {
+function Column({ children }) {
   return (
     <div
-      className={measure}
       style={{
         flex: 1,
         minWidth: 0,

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ApiError, OfflineError, api, readToken, writeToken } from './api.js';
+import { ApiError, OfflineError, READ_DEADLINE_MS, api, readToken, writeToken } from './api.js';
 
 /**
  * The fetch layer, which every screen goes through and nothing tested.
@@ -118,4 +118,74 @@ test('a 204 is null rather than a parse failure', async () => {
   harness({ status: 204, payload: null });
   writeToken('tok');
   assert.equal(await api.sessions(), null);
+});
+
+/**
+ * A read with no deadline is a screen that says "Loading…" for good: `fetch`
+ * waits as long as the connection stays open, and now that a poll waits for
+ * the request before it, one stuck read would also stop every poll after it.
+ */
+function hangingFetch() {
+  const calls = [];
+  globalThis.fetch = (path, init) =>
+    new Promise((_, reject) => {
+      calls.push({ path, init });
+      if (init.signal?.aborted) reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+      init.signal?.addEventListener('abort', () =>
+        reject(Object.assign(new Error('aborted'), { name: 'AbortError' })),
+      );
+    });
+  return calls;
+}
+
+test('a read that never answers becomes OfflineError at its deadline', async (t) => {
+  harness();
+  const calls = hangingFetch();
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const read = api.sessions();
+  const seen = assert.rejects(read, OfflineError);
+  t.mock.timers.tick(READ_DEADLINE_MS - 1);
+  assert.equal(calls[0].init.signal.aborted, false, 'still inside the deadline');
+  t.mock.timers.tick(1);
+  assert.equal(calls[0].init.signal.aborted, true);
+  await seen;
+});
+
+test('a slow read inside its deadline still returns', async (t) => {
+  harness();
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let answer;
+  globalThis.fetch = () => new Promise((resolve) => { answer = resolve; });
+  const read = api.sessions();
+  t.mock.timers.tick(READ_DEADLINE_MS - 1);
+  answer({ ok: true, status: 200, text: async () => '{"sessions":[]}' });
+  assert.deepEqual(await read, { sessions: [] });
+});
+
+test('the caller can still abort a read, and that stays an abort', async () => {
+  harness();
+  hangingFetch();
+  const ctrl = new AbortController();
+  const read = api.sessions(ctrl.signal);
+  ctrl.abort();
+  await assert.rejects(read, (e) => e.name === 'AbortError');
+});
+
+test('a signal already aborted stops the read', async () => {
+  harness();
+  hangingFetch();
+  const ctrl = new AbortController();
+  ctrl.abort();
+  await assert.rejects(api.sessions(ctrl.signal), (e) => e.name === 'AbortError');
+});
+
+// "Cannot reach this Mac — nothing was sent" would be false: the prompt may
+// have arrived and only the answer got lost.
+test('a mutation has no deadline, because giving up would misreport it', async (t) => {
+  harness();
+  const calls = hangingFetch();
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  api.sendPrompt('s', 'hi', 'key');
+  t.mock.timers.tick(READ_DEADLINE_MS * 10);
+  assert.equal(calls[0].init.signal, undefined);
 });

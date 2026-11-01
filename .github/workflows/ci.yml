@@ -360,3 +360,11 @@ jobs:
         run: |
           pnpm check:render:self-test
           pnpm check:render
+
+      # Real Chrome, because jsdom has no layout. ubuntu-latest ships it, and
+      # a runner without it fails here rather than skipping.
+      - name: Panel lays out
+        working-directory: panel
+        run: |
+          pnpm check:layout:self-test
+          pnpm check:layout

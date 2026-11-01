@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ApiError, OfflineError, api } from './api.js';
+import { requestSlot } from './poll.js';
 
 /** Rows fetched per page. */
 export const PAGE = 60;
@@ -47,23 +48,32 @@ export function useTranscript(sessionId) {
     setLoading(true);
     setError(null);
 
-    api
-      .transcriptTail(sessionId, { limit: PAGE, signal: ctrl.signal })
-      .then((page) => {
-        if (generation.current !== mine) return;
-        setEvents(page.events);
-        setCursor(page.next_cursor);
-        setTotal(page.total);
-      })
-      .catch((e) => {
-        if (generation.current !== mine || e?.name === 'AbortError') return;
-        setError(e instanceof OfflineError ? 'offline' : e instanceof ApiError ? e.code : 'error');
-      })
-      .finally(() => {
-        if (generation.current === mine) setLoading(false);
-      });
+    let retry;
+    const load = () =>
+      api
+        .transcriptTail(sessionId, { limit: PAGE, signal: ctrl.signal })
+        .then((page) => {
+          if (generation.current !== mine) return;
+          setEvents(page.events);
+          setCursor(page.next_cursor);
+          setTotal(page.total);
+          setError(null);
+        })
+        .catch((e) => {
+          if (generation.current !== mine || e?.name === 'AbortError') return;
+          setError(e instanceof OfflineError ? 'offline' : e instanceof ApiError ? e.code : 'error');
+          // Offline passes, and a read that outran its deadline counts as
+          // offline. Without this the thread stays on the error until it is
+          // reopened: following starts only after a first page has arrived.
+          if (e instanceof OfflineError) retry = window.setTimeout(load, POLL_MS);
+        })
+        .finally(() => {
+          if (generation.current === mine) setLoading(false);
+        });
+    load();
 
     return () => {
+      window.clearTimeout(retry);
       ctrl.abort();
       if (inflight.current === ctrl) inflight.current = null;
       // Bumped on unmount too, not only on a session change: every
@@ -81,45 +91,38 @@ export function useTranscript(sessionId) {
     if (error || total === null) return undefined;
     const mine = generation.current;
 
-    let polling = null;
+    const slot = requestSlot();
 
     const tick = async () => {
       if (document.visibilityState !== 'visible') return;
-      const ctrl = new AbortController();
-      polling = ctrl;
-      try {
-        const page = await api.transcriptSince(sessionId, cursor, {
-          limit: PAGE,
-          signal: ctrl.signal,
-        });
-        // The session may have changed, or the component gone, while
-        // this was in flight.
-        if (generation.current !== mine) return;
+      const r = await slot.tick((signal) =>
+        api.transcriptSince(sessionId, cursor, { limit: PAGE, signal }),
+      );
+      // The session list owns the connection banner; a failed poll here
+      // just means the next one tries again.
+      if (r.status !== 'fulfilled') return;
+      const page = r.value;
+      // The session may have changed, or the component gone, while
+      // this was in flight.
+      if (generation.current !== mine) return;
 
-        // The cursor advances **before** the empty check, and that
-        // ordering is the whole point. A page can carry raw events that
-        // render as nothing — a `stop_hook_summary` is dropped, and a
-        // real transcript has two per assistant turn. Returning early on
-        // an empty render would leave the cursor where it was and poll
-        // the same range forever, never reaching the next real message.
-        setCursor(page.next_cursor);
-        setTotal(page.total);
+      // The cursor advances **before** the empty check, and that
+      // ordering is the whole point. A page can carry raw events that
+      // render as nothing — a `stop_hook_summary` is dropped, and a
+      // real transcript has two per assistant turn. Returning early on
+      // an empty render would leave the cursor where it was and poll
+      // the same range forever, never reaching the next real message.
+      setCursor(page.next_cursor);
+      setTotal(page.total);
 
-        if (!page.events.length) return;
-        setEvents((prev) => {
-          // The cursor makes duplicates impossible in principle; the
-          // filter makes them impossible in fact, because two ticks can
-          // overlap if one is slow.
-          const known = new Set(prev.map((e) => e.index));
-          const fresh = page.events.filter((e) => !known.has(e.index));
-          return fresh.length ? [...prev, ...fresh] : prev;
-        });
-      } catch {
-        // The session list owns the connection banner; a failed poll
-        // here just means the next one tries again.
-      } finally {
-        if (polling === ctrl) polling = null;
-      }
+      if (!page.events.length) return;
+      setEvents((prev) => {
+        // The cursor makes duplicates impossible in principle; the
+        // filter makes them impossible in fact.
+        const known = new Set(prev.map((e) => e.index));
+        const fresh = page.events.filter((e) => !known.has(e.index));
+        return fresh.length ? [...prev, ...fresh] : prev;
+      });
     };
 
     const h = window.setInterval(tick, POLL_MS);
@@ -127,8 +130,7 @@ export function useTranscript(sessionId) {
       window.clearInterval(h);
       // An in-flight poll outlives the interval otherwise, and would
       // resolve into a component that is gone.
-      polling?.abort();
-      polling = null;
+      slot.stop();
     };
   }, [sessionId, cursor, total, error]);
 

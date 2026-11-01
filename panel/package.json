@@ -11,7 +11,9 @@
     "preview": "vite preview",
     "check:render": "node scripts/render-check.mjs",
     "check:render:self-test": "node scripts/render-check.mjs --self-test",
-    "test": "node --test \"src/**/*.test.js\""
+    "check:layout": "node scripts/layout-check.mjs",
+    "check:layout:self-test": "node scripts/layout-check.mjs --self-test",
+    "test": "node --test --test-timeout=60000 \"src/**/*.test.js\""
   },
   "dependencies": {
     "react": "^19.1.0",
