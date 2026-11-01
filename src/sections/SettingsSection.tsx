@@ -142,17 +142,10 @@ export function SettingsSection() {
         subtitle={t("header.subtitle")}
       />
 
-      <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+      <div className="settings-shell">
         <SettingsNav active={tab} onSelect={setTab} />
 
-        <main
-          style={{
-            flex: 1,
-            minWidth: 0,
-            overflow: "auto",
-            padding: "var(--sp-24) var(--sp-32) var(--sp-40)",
-          }}
-        >
+        <main className="settings-main">
           <h2
             style={{
               fontSize: "var(--fs-lg)",
@@ -212,9 +205,8 @@ function SettingsNav({
 
   return (
     <aside
+      className="settings-nav"
       style={{
-        width: "var(--settings-nav-width)",
-        flexShrink: 0,
         borderRight: "var(--bw-hair) solid var(--line)",
         background: "var(--bg-sunken)",
         padding: "var(--sp-16) 0",
@@ -225,7 +217,7 @@ function SettingsNav({
         <div key={gi} style={{ marginBottom: "var(--sp-16)" }}>
           {group.label && (
             <div
-              className="mono-cap"
+              className="mono-cap settings-nav-group-label"
               style={{
                 padding: "var(--sp-6) var(--sp-16)",
                 color: "var(--fg-faint)",
@@ -242,6 +234,7 @@ function SettingsNav({
                 type="button"
                 onClick={() => onSelect(p.id)}
                 aria-current={isActive ? "page" : undefined}
+                title={p.label}
                 className="pm-focus"
                 style={{
                   display: "flex",
@@ -265,7 +258,7 @@ function SettingsNav({
                   color={isActive ? "var(--accent)" : "currentColor"}
                   style={{ fontSize: "var(--fs-base)" }}
                 />
-                <span>{p.label}</span>
+                <span className="settings-nav-label">{p.label}</span>
               </button>
             );
           })}
@@ -647,7 +640,6 @@ export function LocksPane({
           onChange={(e) => gc.setLockPath(e.target.value)}
           style={{
             ...inputStyle,
-            minWidth: "var(--filter-input-width)",
             width: "100%",
           }}
         />
@@ -2299,7 +2291,6 @@ function SettingsGroup({
         display: "flex",
         flexDirection: "column",
         gap: "var(--sp-14)",
-        maxWidth: "var(--content-cap-md)",
       }}
     >
       {desc && (
@@ -2329,33 +2320,23 @@ function Row({
   children: React.ReactNode;
 }) {
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "var(--settings-label-col) 1fr",
-        gap: "var(--sp-16)",
-        alignItems: "start",
-        padding: "var(--sp-8) 0",
-        borderBottom: "var(--bw-hair) solid var(--line)",
-      }}
-    >
-      <div>
-        <div style={{ fontSize: "var(--fs-sm)", color: "var(--fg)" }}>
-          {label}
-        </div>
-        {hint && (
-          <div
-            style={{
-              fontSize: "var(--fs-xs)",
-              color: "var(--fg-faint)",
-              marginTop: "var(--sp-3)",
-              lineHeight: "var(--lh-body)",
-            }}
-          >
-            {hint}
-          </div>
-        )}
+    <div className="settings-row">
+      <div style={{ fontSize: "var(--fs-sm)", color: "var(--fg)" }}>
+        {label}
       </div>
+      {hint && (
+        <div
+          className="settings-row-hint"
+          style={{
+            fontSize: "var(--fs-xs)",
+            color: "var(--fg-faint)",
+            marginTop: "var(--sp-3)",
+            lineHeight: "var(--lh-body)",
+          }}
+        >
+          {hint}
+        </div>
+      )}
       <div style={{ display: "flex", alignItems: "center" }}>{children}</div>
     </div>
   );

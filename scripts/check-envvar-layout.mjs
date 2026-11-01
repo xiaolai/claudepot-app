@@ -46,6 +46,8 @@
 //         (2 is "app not running" — callers should skip, not fail)
 
 const PORT = process.env.MCP_BRIDGE_PORT ?? 9223;
+// tauri.conf.json's minWidth.
+const MIN_WINDOW_WIDTH = 800;
 const DEBUG = process.argv.includes("--debug");
 const SELF_TEST = process.argv.includes("--self-test");
 
@@ -183,6 +185,7 @@ const MEASURE = `(() => {
       return {
         listHeight: Math.round(lr.height),
         listScrollHeight: list.scrollHeight,
+        listOverflowX: list.scrollWidth - list.clientWidth,
         visibleRows: visible,
         totalRows: rows.length,
         scrollers,
@@ -199,26 +202,48 @@ async function measureBothStates(ws) {
   // scored the shipped bug at 136px rather than 0px, because a collapsed
   // appendix is small enough to leave the list some space. A guard that only
   // sees the easy state understates the failure it exists to catch.
-  const collapsed = await js(ws, MEASURE);
-  await js(
-    ws,
-    `(() => {
-      const d = document.querySelector('.envvar-undocumented-disclosure');
-      if (d) d.open = true;
-      return true;
-    })()`,
-  );
-  await new Promise((r) => setTimeout(r, 250));
-  const expanded = await js(ws, MEASURE);
-  // Leave the pane as we found it.
-  await js(
-    ws,
-    `(() => {
-      const d = document.querySelector('.envvar-undocumented-disclosure');
-      if (d) d.open = false;
-      return true;
-    })()`,
-  );
+  //
+  // Both at the window's minimum width, for the same reason: that is the
+  // worst case for sideways overflow, which at the default width does not
+  // exist. Rows are windowed, so this sees the rows on screen, not all 398.
+  const size = await js(ws, `({ width: innerWidth, height: innerHeight })`);
+  await send(ws, "resize_window", {
+    width: MIN_WINDOW_WIDTH,
+    height: size.height,
+    logical: true,
+  });
+  // Restored in `finally`: a failed measurement must not strand the app at
+  // its minimum width.
+  let collapsed, expanded;
+  try {
+    await new Promise((r) => setTimeout(r, 400));
+    collapsed = await js(ws, MEASURE);
+    await js(
+      ws,
+      `(() => {
+        const d = document.querySelector('.envvar-undocumented-disclosure');
+        if (d) d.open = true;
+        return true;
+      })()`,
+    );
+    await new Promise((r) => setTimeout(r, 250));
+    expanded = await js(ws, MEASURE);
+  } finally {
+    // Leave the pane as we found it, even after a failed measurement: a
+    // disclosure left open makes the next "collapsed" reading the expanded one.
+    try {
+      await js(
+        ws,
+        `(() => {
+          const d = document.querySelector('.envvar-undocumented-disclosure');
+          if (d) d.open = false;
+          return true;
+        })()`,
+      );
+    } finally {
+      await send(ws, "resize_window", { ...size, logical: true });
+    }
+  }
   return { collapsed, expanded };
 }
 
@@ -321,6 +346,12 @@ function evaluate(collapsed, expanded) {
     if (!(m.visibleRows > 0)) {
       failures.push(
         `[${state}] 0 of ${m.totalRows} rows intersect the list viewport.`,
+      );
+    }
+    if (m.listOverflowX > 1) {
+      failures.push(
+        `[${state}] .envvar-list overflows sideways by ${m.listOverflowX}px at ` +
+          `the minimum window width — a row's control or text is clipped.`,
       );
     }
   }

@@ -50,7 +50,6 @@ export function MetaMatchNote({
         display: "flex",
         flexDirection: "column",
         gap: "var(--sp-4)",
-        maxWidth: "var(--content-cap-md)",
         padding: "var(--sp-10) var(--sp-14)",
         marginTop: "var(--sp-12)",
         border: "var(--bw-hair) solid var(--line)",

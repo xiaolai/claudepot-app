@@ -1,4 +1,5 @@
 import { createContext, type ReactNode, useContext, useEffect, useId, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { NfIcon } from "../../icons";
 import { Glyph } from "./Glyph";
@@ -137,7 +138,12 @@ export function Modal({
 
   if (!open) return null;
 
-  return (
+  // Portaled because the scrim must cover the window. `position: fixed`
+  // resolves against the nearest containing block, and a query container
+  // (`container: … / inline-size`) was one under the original spec —
+  // a WebKit that still applies that containment would trap the scrim
+  // inside `.settings-shell`, leaving the sidebar live beside a modal.
+  return createPortal(
     <div
       className="modal-scrim"
       onClick={closeOnBackdrop ? onClose : undefined}
@@ -171,6 +177,10 @@ export function Modal({
           flexDirection: "column",
           overflow: "hidden",
           fontFamily: "var(--font)",
+          // Set here because the portal leaves the app root's size behind,
+          // and `body` is smaller. Text in a dialog that names no size of
+          // its own would otherwise drop from 13px to 11px.
+          fontSize: "var(--fs-base)",
           outline: "none",
         }}
       >
@@ -178,7 +188,8 @@ export function Modal({
           {children}
         </ModalLabelContext.Provider>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

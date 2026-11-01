@@ -143,7 +143,6 @@ export function RotationPane({ pushToast }: Props) {
           margin: 0,
           color: "var(--fg-muted)",
           fontSize: "var(--fs-sm)",
-          maxWidth: "var(--content-cap-md)",
         }}
       >
         <Trans

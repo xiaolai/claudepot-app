@@ -358,8 +358,6 @@ export function RetentionPane({
       style={{
         display: "grid",
         gap: "var(--sp-24)",
-        // tokens.css is the only place sizes are declared (design.md).
-        maxWidth: "var(--content-cap-lg)",
       }}
     >
       <RiskSummary report={report} />

@@ -189,9 +189,17 @@ describe("RemotePane — the design system is actually wired", () => {
     expect(pane.style.display).toBe("flex");
     expect(pane.style.flexDirection).toBe("column");
     expect(pane.style.gap).not.toBe("");
-    // Settings' `main` sets no width, and this pane carries the longest
-    // prose in it — an uncapped measure ran the full window.
-    expect(pane.style.maxWidth).not.toBe("");
+    // The pane fills Settings' `main`; a cap left most of a wide window
+    // empty. This pane carries the longest prose in Settings, and that
+    // fills too: no body-text block holds a width of its own.
+    expect(pane.style.maxWidth).toBe("");
+    const prose = Array.from(pane.querySelectorAll<HTMLElement>("*")).filter(
+      (el) => el.style.lineHeight === "var(--lh-body)",
+    );
+    expect(prose.length).toBeGreaterThan(0);
+    for (const el of prose) {
+      expect(el.style.maxWidth).toBe("");
+    }
   });
 
   it("renders through the primitives rather than hand-rolled markup", () => {

@@ -162,16 +162,20 @@
 
 .envvar-control {
   margin-left: auto;
+  max-width: 100%;
   display: flex;
   align-items: center;
   gap: var(--sp-6);
 }
 
+/* Docs carry raw markdown links, and a long URL has no break point: 111 of
+   the documented rows overflowed the list at the 800px window. */
 .envvar-doc {
   margin: 0;
   font-size: var(--fs-xs);
   color: var(--fg-muted);
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 /* Required disclosure — inline next to the control, never a tooltip. */
@@ -237,8 +241,12 @@
 
 /* ── choosers ───────────────────────────────────────────────────── */
 
+/* Wraps because the detail pane can be narrower than badge + input +
+   button: at the 800px window a row has about 290px, and without the wrap
+   "Store in settings.json" sat behind a sideways scroll. */
 .envvar-scalar {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--sp-4);
 }

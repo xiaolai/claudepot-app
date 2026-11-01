@@ -2647,7 +2647,7 @@ function AnchorPicker({
           background: "var(--bg)",
           color: "var(--fg)",
           fontSize: "var(--fs-xs)",
-          maxWidth: "240px",
+          maxWidth: "var(--scope-chip-max)",
         }}
       >
         <Glyph g={isGlobal ? NF.globe : NF.folder} color="var(--fg-muted)" />

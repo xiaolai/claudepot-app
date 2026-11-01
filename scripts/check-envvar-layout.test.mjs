@@ -23,6 +23,7 @@ import { evaluate } from "./check-envvar-layout.mjs";
 const healthy = {
   listHeight: 420,
   listScrollHeight: 900,
+  listOverflowX: 0,
   visibleRows: 9,
   totalRows: 60,
   scrollers: ["envvar-list"],
@@ -57,6 +58,13 @@ describe("check-envvar-layout — evaluate()", () => {
 
   it("catches a break that only appears when the appendix is expanded", () => {
     expect(evaluate(healthy, zeroPx).length).toBeGreaterThan(0);
+  });
+
+  it("flags a list that overflows sideways", () => {
+    // Shipped: at the 800px window "Store in settings.json" sat behind a
+    // horizontal scrollbar, with every other assertion here passing.
+    const wide = { ...healthy, listOverflowX: 146 };
+    expect(evaluate(wide, wide).join("\n")).toContain("sideways by 146px");
   });
 
   it("flags nested scroll containers", () => {

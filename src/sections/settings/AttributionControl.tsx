@@ -114,31 +114,21 @@ export function AttributionControl({
   };
 
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "var(--settings-label-col) 1fr",
-        gap: "var(--sp-16)",
-        alignItems: "start",
-        padding: "var(--sp-8) 0",
-        borderBottom: "var(--bw-hair) solid var(--line)",
-      }}
-    >
-      <div>
-        <div style={{ fontSize: "var(--fs-sm)", color: "var(--fg)" }}>
-          {t("attribution.label")}
-        </div>
-        <div
-          id={hintId}
-          style={{
-            fontSize: "var(--fs-xs)",
-            color: "var(--fg-faint)",
-            marginTop: "var(--sp-3)",
-            lineHeight: "var(--lh-body)",
-          }}
-        >
-          {t("attribution.hint")}
-        </div>
+    <div className="settings-row">
+      <div style={{ fontSize: "var(--fs-sm)", color: "var(--fg)" }}>
+        {t("attribution.label")}
+      </div>
+      <div
+        id={hintId}
+        className="settings-row-hint"
+        style={{
+          fontSize: "var(--fs-xs)",
+          color: "var(--fg-faint)",
+          marginTop: "var(--sp-3)",
+          lineHeight: "var(--lh-body)",
+        }}
+      >
+        {t("attribution.hint")}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-8)" }}>
         <div

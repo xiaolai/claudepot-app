@@ -174,8 +174,8 @@ export function NotificationLogPopover({
   // down-stream click handlers fire (matches ContextMenu pattern).
   //
   // Suspended while the Clear-confirm modal is open. The Modal
-  // primitive renders the dialog as a sibling of the popover panel
-  // (no portal), so its scrim/buttons are NOT inside `panelRef`.
+  // primitive portals the dialog to `document.body`, so its
+  // scrim/buttons are NOT inside `panelRef`.
   // Without this gate, clicking Cancel or Clear in the confirm
   // would tear down the popover before the button's onClick runs,
   // making the destructive action unreliable. Modal owns its own

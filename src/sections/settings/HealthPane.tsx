@@ -367,7 +367,6 @@ const paneStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: "var(--sp-16)",
-  maxWidth: "var(--content-cap-md)",
 };
 
 const descStyle: React.CSSProperties = {

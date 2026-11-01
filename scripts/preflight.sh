@@ -157,6 +157,10 @@ if [ "$rust_only" -eq 0 ]; then
   pnpm check:contrast:self-test && pnpm check:contrast
   ok "contrast"
 
+  step "container queries"
+  pnpm check:container-queries:self-test && pnpm check:container-queries
+  ok "container queries"
+
   step "inline flow"
   pnpm check:inline-flow:self-test && pnpm check:inline-flow
   ok "inline flow"

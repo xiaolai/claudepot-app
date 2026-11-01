@@ -65,7 +65,7 @@ export function Bubble({
     >
       <div
         style={{
-          maxWidth: "min(var(--content-cap-lg), 92%)",
+          maxWidth: "92%",
           minWidth: "min(280px, 60%)",
           padding: "var(--sp-10) var(--sp-14)",
           background: p.bg,

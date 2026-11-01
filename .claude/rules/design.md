@@ -40,6 +40,52 @@ If a value you need doesn't exist, add a semantic token to
   **Never add a rule directly to App.css.** Pick the matching shard
   (or add a new shard) and let the index pull it in.
 
+## Pane width
+
+**Panes fill the width they are given, and so does their text.** Rows,
+lists, dividers and running text all span the pane. A cap on a pane's
+container or on its text is a review finding
+(`paneLayout.contract.test.ts`, `scripts/pane-stylesheets.test.mjs`):
+Settings used to have one at the shell
+and others per pane, so a 1920-wide window showed a narrow column with
+no reason a reader could find.
+
+**The window is the measure, and the user sets it.** A 72-character cap
+on running text was tried and removed: it left the right of a wide
+window empty beside full-width rows, which read as the same defect. Long
+lines on a very wide window are the accepted cost, because someone who
+wants shorter lines can narrow the window. Sizing a dialog, truncating a
+chip or path, and keeping a transcript bubble under 100% so its side
+shows are not text caps.
+
+A fixed column caps text as surely as `max-width` does, and no scan for
+caps sees it. Settings descriptions sat in a 160px label column and
+wrapped to fifteen lines until they got their own line
+(`.settings-row-hint`).
+
+- **Adaptation is by container query, in
+  `components/pane-layout.css`.** The space a pane gets depends on
+  whether the sidebar is open, so the pane measures itself rather than
+  the window.
+- **A property a query overrides is never set inline.** An inline
+  declaration beats any stylesheet rule, so the breakpoint silently does
+  nothing.
+- **A query cannot style its own container** — it matches an ancestor.
+  It took a live check to find this in Activities, because the valid half
+  of the block still ran. `pnpm check:container-queries` fails both this
+  and the inline case above.
+- **`Modal` portals to `document.body`**, so a query container can never
+  become the containing block for its `position: fixed` scrim.
+- **Size against the minimum window, not the default.** At 800 wide with
+  the sidebar open a pane has about 450px inside its padding, so a row
+  holding a control beside text must wrap. Measure text too: an
+  unbreakable string overflows its box without moving the box, and only
+  `scrollWidth - clientWidth` on the element sees it.
+- **Also measure just above each breakpoint.** That is where a fixed
+  column leaves the least room, and it is not the minimum window: the
+  288px label column fit at 800 and at 1100, and overflowed at about 1000
+  with the sidebar open and about 800 with it collapsed.
+
 ## Icons
 
 Lucide SVG icons only, via `<Glyph g={NF.x} />` from

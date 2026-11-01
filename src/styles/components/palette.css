@@ -277,9 +277,6 @@
   font-weight: 600;
 }
 
-.empty p {
-  max-width: var(--text-max-width);
-}
 /* ---------- onboarding empty state (P3.2) ---------- */
 
 

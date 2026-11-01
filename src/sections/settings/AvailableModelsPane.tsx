@@ -40,20 +40,11 @@ export function AvailableModelsPane({ pushToast }: { pushToast: PushToast }) {
 
   return (
     <>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "var(--settings-label-col) 1fr",
-          gap: "var(--sp-16)",
-          alignItems: "start",
-          padding: "var(--sp-8) 0",
-          borderBottom: "var(--bw-hair) solid var(--line)",
-        }}
-      >
-        <div>
-          <div style={{ fontSize: "var(--fs-sm)", color: "var(--fg)" }}>
-            {t("models.label")}
-          </div>
+      <div className="settings-row">
+        <div style={{ fontSize: "var(--fs-sm)", color: "var(--fg)" }}>
+          {t("models.label")}
+        </div>
+        <div className="settings-row-hint">
           <div style={{ ...NOTE_STYLE, color: "var(--fg-faint)" }}>
             {state == null
               ? t("shared.loading")

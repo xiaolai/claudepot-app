@@ -89,7 +89,7 @@ export function DisabledScopeView({
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "minmax(0, 320px) minmax(0, 1fr)",
+          gridTemplateColumns: "minmax(0, var(--disabled-scope-list-max)) minmax(0, 1fr)",
           gap: "var(--sp-16)",
           flex: 1,
           minHeight: 0,
@@ -179,7 +179,6 @@ function Empty({
         borderRadius: "var(--r-2)",
         fontSize: "var(--fs-sm)",
         color: danger ? "var(--danger)" : "var(--fg-muted)",
-        maxWidth: "60ch",
       }}
     >
       {children}

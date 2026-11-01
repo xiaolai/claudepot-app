@@ -370,31 +370,29 @@ export function EventsSection({
             role="tabpanel"
             id="events-panel-stream"
             aria-labelledby="events-tab-stream"
-            style={{
-              flex: 1,
-              minHeight: 0,
-              display: "flex",
-            }}
+            className="events-stream-panel"
           >
-            <FilterRail filters={filters} onChange={setFilters} />
-            <div
-              style={{
-                flex: 1,
-                minWidth: 0,
-                display: "flex",
-                flexDirection: "column",
-                minHeight: 0,
-              }}
-            >
-              <DashboardStrip />
-              <MetricsStrip cards={aggCards} loading={loading} />
-              <CardStream
-                cards={cards}
-                loading={loading}
-                error={error}
-                lastSeenId={counts?.lastSeenId ?? null}
-                onCardClick={handleCardClick}
-              />
+            <div className="events-stream-layout">
+              <FilterRail filters={filters} onChange={setFilters} />
+              <div
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  display: "flex",
+                  flexDirection: "column",
+                  minHeight: 0,
+                }}
+              >
+                <DashboardStrip />
+                <MetricsStrip cards={aggCards} loading={loading} />
+                <CardStream
+                  cards={cards}
+                  loading={loading}
+                  error={error}
+                  lastSeenId={counts?.lastSeenId ?? null}
+                  onCardClick={handleCardClick}
+                />
+              </div>
             </div>
           </div>
         )}
@@ -639,13 +637,9 @@ function FilterRail({ filters, onChange }: FilterRailProps) {
   };
   return (
     <aside
+      className="events-filter-rail"
       style={{
-        width: 240,
-        flexShrink: 0,
-        borderRight: "var(--bw-subhair) solid var(--line)",
         padding: "var(--sp-16)",
-        display: "flex",
-        flexDirection: "column",
         gap: "var(--sp-20)",
         overflowY: "auto",
       }}
@@ -669,7 +663,7 @@ function FilterRail({ filters, onChange }: FilterRailProps) {
         </select>
       </FilterGroup>
       <FilterGroup label={t("filters.kind")}>
-        <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-4)" }}>
+        <div className="events-filter-kinds">
           {KIND_OPTIONS.map((opt) => {
             const checked = filters.kinds?.includes(opt.value) ?? false;
             return (
@@ -750,7 +744,10 @@ function FilterGroup({
   children: React.ReactNode;
 }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-4)" }}>
+    <div
+      className="events-filter-group"
+      style={{ display: "flex", flexDirection: "column", gap: "var(--sp-4)" }}
+    >
       <div
         style={{
           fontSize: "var(--fs-xs)",
@@ -1071,7 +1068,7 @@ function SeverityChip({ severity }: { severity: SeverityLabel }) {
   return (
     <div
       style={{
-        width: 60,
+        width: "var(--severity-chip-width)",
         flexShrink: 0,
         padding: "var(--sp-2) var(--sp-6)",
         borderRadius: "var(--r-1)",

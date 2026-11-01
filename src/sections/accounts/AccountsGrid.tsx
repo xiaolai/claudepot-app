@@ -215,7 +215,6 @@ export function AccountsGrid({
                     margin: 0,
                     fontSize: "var(--fs-xs)",
                     color: "var(--fg-muted)",
-                    maxWidth: "var(--content-cap-sm)",
                   }}
                 >
                   <Trans
@@ -253,7 +252,6 @@ export function AccountsGrid({
                     margin: 0,
                     fontSize: "var(--fs-xs)",
                     color: "var(--fg-muted)",
-                    maxWidth: "var(--content-cap-sm)",
                   }}
                 >
                   {t("grid.empty.intro")}

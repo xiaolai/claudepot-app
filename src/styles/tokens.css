@@ -210,7 +210,15 @@
   --modal-body-cap-lg:     min(720px, 85vh);
   --content-cap-sm:        400px;
   --content-cap-md:        640px;
-  --content-cap-lg:        820px;   /* wide reading column for transcripts */
+  --screen-title-min:      240px;   /* ScreenHeader title block; under this the actions wrap below it */
+  --events-filter-width:   240px;   /* Activities stream filter rail */
+  --events-filter-stack-max: 40%;   /* the same rail, stacked above the cards */
+  --severity-chip-width:    60px;   /* Activities card severity chip */
+  --scope-chip-max:        240px;   /* Config preview header scope chip */
+  --trust-bar-width:       12rem;   /* Knowledge project-group trust bar */
+  --filter-search-min:     12rem;   /* Knowledge filter search input */
+  --filter-select-max:     16rem;   /* Knowledge project filter select */
+  --disabled-scope-list-max: 320px; /* Config disabled-scope list column */
   /* Full-viewport height. `dvh` (dynamic viewport height) over `vh`
      because `100vh` overflows on iOS Safari when the address bar
      collapses. Tauri webviews don't have collapsing chrome, so the
@@ -286,7 +294,6 @@
   --list-max-height-md:       320px;  /* settings protected-paths list */
   --popover-max-height:       400px;  /* palette body */
   --progress-track-max:       320px;  /* clean progress / spinner */
-  --text-max-width:           280px;  /* onboarding-step copy */
   --skeleton-max-width:       300px;
   --pill-value-max-width:     160px;
   --session-filter-min-width: 140px;
@@ -341,7 +348,8 @@
   --kbd-h:                 18px;
 
   /* Settings row label column. */
-  --settings-label-col:    160px;
+  --settings-label-col:    288px;   /* fits the longest Settings label on one line */
+  --settings-label-col-narrow: 160px;
   --settings-kv-col:       140px;
 
   /* Toggle switch (Settings → General → Developer mode). */

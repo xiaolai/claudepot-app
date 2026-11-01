@@ -298,6 +298,12 @@ jobs:
       - name: Palette meets the contrast it promises
         run: pnpm check:contrast:self-test && pnpm check:contrast
 
+      # A rule inside `@container x` that selects the element declaring
+      # `container: x` never applies, and nothing says so: the CSS is
+      # valid and the rest of the block still fires.
+      - name: Container queries can apply
+        run: pnpm check:container-queries:self-test && pnpm check:container-queries
+
       # Text placed directly in a flex/grid container is split into
       # separate flex items, and each loses its edge spaces — "click
       # Reindex to" rendered as "clickReindexto". textContent keeps the

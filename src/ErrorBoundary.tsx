@@ -104,7 +104,6 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, State> {
                 margin: 0,
                 color: "var(--fg-muted)",
                 fontSize: "var(--fs-sm)",
-                maxWidth: "var(--modal-width-md)",
                 textAlign: "center",
               }}
             >

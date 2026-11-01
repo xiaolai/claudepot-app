@@ -40,20 +40,15 @@ export function SettingToggleRow({
   const hintId = useId();
   return (
     <div
+      className="settings-row"
       style={{
-        display: "grid",
-        gridTemplateColumns: "var(--settings-label-col) 1fr",
-        gap: "var(--sp-16)",
-        alignItems: "start",
-        padding: "var(--sp-8) 0",
         paddingLeft: indent ? "var(--sp-16)" : undefined,
-        borderBottom: "var(--bw-hair) solid var(--line)",
       }}
     >
-      <div>
-        <div style={{ fontSize: "var(--fs-sm)", color: "var(--fg)" }}>
-          {label}
-        </div>
+      <div style={{ fontSize: "var(--fs-sm)", color: "var(--fg)" }}>
+        {label}
+      </div>
+      <div className="settings-row-hint">
         <div
           id={hintId}
           style={{

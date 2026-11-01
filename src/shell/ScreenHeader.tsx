@@ -7,7 +7,7 @@ interface ScreenHeaderProps {
   title: ReactNode;
   subtitle?: ReactNode;
   crumbs?: string[];
-  /** Right-aligned actions (buttons, icon buttons). */
+  /** Actions (buttons, icon buttons): right of the title, or wrapped below it when the section is narrow. */
   actions?: ReactNode;
   style?: CSSProperties;
 }
@@ -82,10 +82,11 @@ export function ScreenHeader({
         style={{
           display: "flex",
           alignItems: "center",
+          flexWrap: "wrap",
           gap: "var(--sp-16)",
         }}
       >
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: "1 1 var(--screen-title-min)", minWidth: 0 }}>
           <h1
             style={{
               fontSize: "var(--fs-xl)",
@@ -115,8 +116,9 @@ export function ScreenHeader({
             style={{
               display: "flex",
               alignItems: "center",
+              flexWrap: "wrap",
               gap: "var(--sp-8)",
-              flexShrink: 0,
+              maxWidth: "100%",
             }}
           >
             {actions}

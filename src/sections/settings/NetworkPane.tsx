@@ -306,7 +306,6 @@ export function NetworkPane({ pushToast }: Props) {
               style={{
                 marginTop: "var(--sp-10)",
                 width: "100%",
-                maxWidth: "var(--project-detail-width)",
                 borderCollapse: "collapse",
                 fontSize: "var(--fs-sm)",
               }}

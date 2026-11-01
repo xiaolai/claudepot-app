@@ -101,7 +101,6 @@ export function EmptyState({
         style={{
           margin: 0,
           fontSize: "var(--fs-sm)",
-          maxWidth: "60ch",
           lineHeight: "var(--lh-loose)",
         }}
       >

@@ -1067,7 +1067,7 @@ export function UpdatesPanel({
   }
 
   return (
-    <div style={{ padding: "var(--sp-16)", maxWidth: "var(--content-cap-lg)" }}>
+    <div style={{ padding: "var(--sp-16)" }}>
       <SectionLabel
         right={
           <Button

@@ -93,17 +93,14 @@ const DANGER = { ...NOTE, color: "var(--danger)" } as const;
  * sections is stated once instead of being the sum of whatever the last
  * child and the next heading each asked for.
  *
- * The cap matters more on this pane than on its neighbours: it carries
- * a long intro and four multi-sentence warnings, and Settings' `main`
- * sets no width, so on a wide window those ran the full window. Every
- * other substantial pane here already caps — `HealthPane`,
- * `McpInstallerPane`, `RetentionPane`, `RotationPane`, `NetworkPane`.
+ * No width cap here. The pane and its text fill Settings' `main` like
+ * every other pane. A container cap left most of a wide window empty,
+ * and each pane had picked its own (640, 820, 420 or none).
  */
 const PANE = {
   display: "flex",
   flexDirection: "column",
   gap: "var(--sp-24)",
-  maxWidth: "var(--content-cap-md)",
 } as const;
 
 /** One section: its heading and the content that heading names. */

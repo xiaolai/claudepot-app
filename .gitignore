@@ -80,6 +80,12 @@ typescript
 # workflow step pointing at a file a fresh clone does not have.
 !/scripts/check-motion.mjs
 !/scripts/check-contrast.mjs
+# `check:container-queries` — every @container rule can apply. Invoked by
+# ci.yml and preflight.sh, same rule as above.
+!/scripts/check-container-queries.mjs
+# Stylesheet half of `paneLayout.contract.test.ts`. `pnpm test` runs it, so an
+# ignored copy would pass here and never run in CI.
+!/scripts/pane-stylesheets.test.mjs
 # `check:inline-flow` — prose inside a flex/grid container keeps its
 # spaces. Invoked by ci.yml and preflight.sh, same rule as above.
 !/scripts/check-inline-flow.mjs

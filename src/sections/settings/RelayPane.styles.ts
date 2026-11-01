@@ -14,7 +14,6 @@ export const PANE = {
   display: "flex",
   flexDirection: "column",
   gap: "var(--sp-24)",
-  maxWidth: "var(--content-cap-md)",
 } as const;
 export const SECTION = { display: "flex", flexDirection: "column" } as const;
 export const ROW_NAME = { fontSize: "var(--fs-sm)" } as const;

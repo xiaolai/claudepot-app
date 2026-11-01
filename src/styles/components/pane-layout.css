@@ -1,0 +1,145 @@
+/* Pane layout — how sections use the width they are given, and how
+   they adapt when it shrinks.
+
+   Container queries, not media queries: the space a pane gets depends
+   on whether the sidebar is open, not on the window alone, so the pane
+   measures itself. The breakpoints below are literals because a custom
+   property cannot appear in a container-query condition.
+
+   Properties a query overrides live here, never inline — an inline
+   declaration beats any stylesheet rule, so a breakpoint written
+   against one silently does nothing.                                   */
+
+/* ---------- Settings shell: nav + pane ---------- */
+
+.settings-shell {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  container: settings-shell / inline-size;
+}
+
+.settings-nav {
+  width: var(--settings-nav-width);
+  flex-shrink: 0;
+}
+
+/* The pane fills the shell, and nothing inside it caps its width: rows,
+   lists, dividers and running text all span it. The window is the
+   measure, and the user sets that. */
+.settings-main {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: var(--sp-24) var(--sp-32) var(--sp-40);
+}
+
+/* One label/control row, shared by every Settings form row. The label
+   column aligns the controls; the description gets its own line, because
+   inside that column it wrapped to fifteen lines whatever the window's width.
+   The hint is placed explicitly, so its source order stays label, hint,
+   control while the control takes the slot beside the label. */
+.settings-row {
+  display: grid;
+  grid-template-columns: var(--settings-label-col) minmax(0, 1fr);
+  column-gap: var(--sp-16);
+  align-items: start;
+  padding: var(--sp-8) 0;
+  border-bottom: var(--bw-hair) solid var(--line);
+}
+
+.settings-row-hint {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  min-width: 0;
+}
+
+/* Narrow shell: the nav becomes an icon rail. Each label stays in the
+   accessibility tree (clipped, not removed) and the button carries a
+   `title`, so the rail keeps its names. */
+@container settings-shell (max-width: 720px) {
+  .settings-nav {
+    width: auto;
+  }
+  .settings-nav-group-label {
+    display: none;
+  }
+  .settings-nav-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .settings-main {
+    padding: var(--sp-16) var(--sp-20) var(--sp-32);
+  }
+}
+
+/* The label column narrows well before the nav does. The nav still takes
+   its full width here, so the wide column would leave a control less room
+   than its content needs: the model list needs a shell of about 827px.
+   The default window gives a shell of 840, and keeps the wide column. */
+@container settings-shell (max-width: 830px) {
+  .settings-row {
+    grid-template-columns: var(--settings-label-col-narrow) minmax(0, 1fr);
+  }
+}
+
+/* ---------- Activities stream: filter rail + cards ---------- */
+
+.events-stream-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  container: events-stream / inline-size;
+}
+
+/* A separate element because a container query cannot style its own
+   container: it matches against an ancestor, so a rule for
+   `.events-stream-panel` inside the query below never applies. */
+.events-stream-layout {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+.events-filter-rail {
+  width: var(--events-filter-width);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: var(--bw-subhair) solid var(--line);
+}
+
+.events-filter-kinds {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+/* Narrow stream: the rail becomes a wrapping band above the cards,
+   so the cards keep the full width. */
+@container events-stream (max-width: 640px) {
+  .events-stream-layout {
+    flex-direction: column;
+  }
+  .events-filter-rail {
+    width: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    max-height: var(--events-filter-stack-max);
+    border-right: none;
+    border-bottom: var(--bw-subhair) solid var(--line);
+  }
+  .events-filter-group {
+    flex: 1 1 var(--banner-min-width);
+  }
+  .events-filter-kinds {
+    flex-direction: row;
+    flex-wrap: wrap;
+    column-gap: var(--sp-12);
+  }
+}

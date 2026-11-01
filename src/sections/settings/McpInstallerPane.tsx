@@ -150,7 +150,7 @@ export function McpInstallerPane({
   }, [installing, scope, projectPath]);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-24)", maxWidth: "var(--content-cap-md)" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-24)" }}>
       {/* ─── Server health ─────────────────────────────────── */}
       <section>
         <SectionLabel>{t("mcp.serverHealth")}</SectionLabel>

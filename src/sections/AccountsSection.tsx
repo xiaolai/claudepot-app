@@ -368,8 +368,6 @@ export function AccountsSection({
             flexDirection: "column",
             alignItems: "center",
             gap: "var(--sp-12)",
-            maxWidth: "var(--content-cap-md)",
-            margin: "0 auto",
           }}
         >
           <h2

@@ -62,7 +62,7 @@ export const SETTINGS_PANES = [
   // have to go hunting for is a broken emergency control.
   { id: "remote",
     get label() { return i18n.t("panes.remote", { ns: "settings" }); },
-    glyph: NF.globe, group: "core",
+    glyph: NF.smartphone, group: "core",
     keywords: ["panel", "phone", "lan", "appliance", "server", "pair", "device", "revoke",
                "password",
                // Folded in when Quick prompts stopped being its own pane:
@@ -72,7 +72,7 @@ export const SETTINGS_PANES = [
   // lost machine's token.
   { id: "relay",
     get label() { return i18n.t("panes.relay", { ns: "settings" }); },
-    glyph: NF.server, group: "core",
+    glyph: NF.waypoints, group: "core",
     keywords: ["relay", "subscription", "share", "tailnet", "tailscale", "gateway",
                "pair", "device", "revoke", "publish", "upstream"] },
   { id: "retention",
@@ -86,7 +86,7 @@ export const SETTINGS_PANES = [
   // Claudepot's own self-check (platform, accounts, data dir).
   { id: "health",
     get label() { return i18n.t("panes.health", { ns: "settings" }); },
-    glyph: NF.shield, group: "core",
+    glyph: NF.stethoscope, group: "core",
     keywords: ["doctor", "claude doctor"] },
   { id: "mcp",
     get label() { return i18n.t("panes.mcp", { ns: "settings" }); },

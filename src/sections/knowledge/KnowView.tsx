@@ -502,7 +502,7 @@ function ProjectGroup({
             ariaLabel={t("know.copyProjectPathAria", { path: group.projectPath })}
           />
         )}
-        <div style={{ width: "12rem", maxWidth: "40%" }}>
+        <div style={{ width: "var(--trust-bar-width)", maxWidth: "40%" }}>
           <TrustBar mix={group.mix} />
         </div>
       </div>
@@ -584,7 +584,7 @@ function FilterBar({
         onChange={(e) => onQuery(e.currentTarget.value)}
         placeholder={t("know.filters.placeholder")}
         aria-label={t("know.filters.searchAria")}
-        style={{ minWidth: "12rem", flex: "0 1 16rem" }}
+        style={{ minWidth: "var(--filter-search-min)", flex: "0 1 var(--filter-select-max)" }}
       />
       <select
         value={stateFilter}
@@ -619,7 +619,7 @@ function FilterBar({
         value={projectFilter}
         onChange={(e) => onProject(e.currentTarget.value)}
         aria-label={t("know.filters.projectAria")}
-        style={{ ...selectStyle(), maxWidth: "16rem" }}
+        style={{ ...selectStyle(), maxWidth: "var(--filter-select-max)" }}
       >
         <option value="all">{t("know.filters.allProjects")}</option>
         {injectProject && (
