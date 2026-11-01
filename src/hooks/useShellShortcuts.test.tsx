@@ -5,7 +5,10 @@ import { useShellShortcuts } from "./useShellShortcuts";
 function press(
   key: string,
   mods: Partial<
-    Pick<KeyboardEvent, "metaKey" | "ctrlKey" | "altKey" | "shiftKey">
+    Pick<
+      KeyboardEvent,
+      "metaKey" | "ctrlKey" | "altKey" | "shiftKey" | "code"
+    >
   > = {},
 ) {
   window.dispatchEvent(
@@ -122,6 +125,27 @@ describe("useShellShortcuts", () => {
       "Developer mode off",
     );
     expect(localStorage.getItem("cp-dev-mode")).toBe("0");
+  });
+
+  // On macOS, Option rewrites `key`: ⌥B types "∫" and ⌥L types "¬", so
+  // a four-modifier combo matched on `key` alone can never fire there.
+  // `code` names the physical key and is untouched by modifiers.
+  it("⌃⌥⌘L still toggles when Option has rewritten the key", () => {
+    const { args } = renderShortcuts();
+    press("¬", { code: "KeyL", metaKey: true, ctrlKey: true, altKey: true });
+    expect(args.pushToast).toHaveBeenCalledWith("info", "Developer mode on");
+  });
+
+  it("⌃⌥⌘B shows Boards when Option has rewritten the key", () => {
+    const { args } = renderShortcuts();
+    press("∫", { code: "KeyB", metaKey: true, ctrlKey: true, altKey: true });
+    expect(args.setSection).toHaveBeenCalledWith("boards");
+  });
+
+  it("⌃⌥⌘ with a different physical key does not show Boards", () => {
+    const { args } = renderShortcuts();
+    press("∫", { code: "KeyN", metaKey: true, ctrlKey: true, altKey: true });
+    expect(args.setSection).not.toHaveBeenCalled();
   });
 
   it("⌘L without the full four-modifier combo does NOT toggle dev mode", () => {

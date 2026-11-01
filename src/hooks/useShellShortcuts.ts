@@ -79,7 +79,9 @@ export function useShellShortcuts(args: {
   useEffect(() => {
     const onDevKey = (e: KeyboardEvent) => {
       if (!e.metaKey || !e.ctrlKey || !e.altKey) return;
-      if (e.key !== "l" && e.key !== "L") return;
+      // Match the physical key too: on macOS, Option rewrites `key`
+      // (⌥L types "¬"), so a `key`-only check never fires there.
+      if (e.key !== "l" && e.key !== "L" && e.code !== "KeyL") return;
       e.preventDefault();
       const next = !readDevMode();
       writeDevMode(next);
@@ -105,7 +107,8 @@ export function useShellShortcuts(args: {
   useEffect(() => {
     const onBoardsKey = (e: KeyboardEvent) => {
       if (!e.metaKey || !e.ctrlKey || !e.altKey) return;
-      if (e.key !== "b" && e.key !== "B") return;
+      // Physical key too — Option rewrites `key` (⌥B types "∫").
+      if (e.key !== "b" && e.key !== "B" && e.code !== "KeyB") return;
       if (isShortcutContextBlocked()) return;
       e.preventDefault();
       const next = toggleSection("boards");
