@@ -6,6 +6,43 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.7.2 — beta (released 2026-11-01)
+
+### Changed
+
+- **Panes and their text fill the window.** Settings and other panes
+  no longer stop at a narrow column on a wide window. Layout now
+  follows the space a pane actually has, so it also holds up with the
+  sidebar open on a small window. To get shorter lines, narrow the
+  window.
+- **The remote panel fills its width too.** History rows keep their
+  details to one line: a warning shows first, and a long project name
+  is shortened rather than dropped.
+- **Settings → Locks asks for a project path and confirms first.** The
+  field used to ask for a lock file path, which the command does not
+  take. Breaking a lock now asks before it runs, because it does not
+  check whether the lock's holder is still running.
+- **The Config → Env variables list follows Claude Code 2.1.314.**
+
+### Fixed
+
+- **Claude Desktop installed through WinGet reads as a direct install**
+  on Windows. The update check looked for Claude Code's package id, so
+  it never found Desktop, and an upgrade could have targeted the wrong
+  app. It now uses Desktop's own id.
+- **⌃⌥⌘L and ⌃⌥⌘B did nothing on macOS.** Option changes the character
+  a key types, so the shortcuts never matched. They now also match the
+  physical key.
+- **The remote panel could never hear a host that answers slowly.** Each
+  poll cancelled the previous request, so a host slower than the poll
+  interval never got an answer through. A slow request now finishes,
+  with a deadline so it cannot wait forever.
+
+### Documentation
+
+- A new Boards page on claudepot.com, and fuller pages for the other
+  feature areas.
+
 ## 0.7.1 — beta (released 2026-10-31)
 
 ### Fixed
