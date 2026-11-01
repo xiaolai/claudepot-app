@@ -24,6 +24,8 @@
 use crate::proc_utils::NoWindowExt;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use crate::updates::detect::DesktopSource;
+#[cfg(target_os = "windows")]
+use crate::updates::detect::WINGET_DESKTOP_ID;
 use crate::updates::detect::{detect_desktop_install, is_desktop_running, DesktopInstall};
 use crate::updates::errors::{Result, UpdateError};
 #[cfg(target_os = "macos")]
@@ -55,7 +57,7 @@ pub struct DesktopUpdateOutcome {
 /// Routing:
 /// - macOS Homebrew Cask → `brew upgrade --cask claude`
 /// - macOS direct DMG → fetch zip + verify codesign + ditto into place
-/// - Windows WinGet → `winget upgrade Anthropic.ClaudeCode`
+/// - Windows WinGet → `winget upgrade Anthropic.Claude` (`WINGET_DESKTOP_ID`)
 /// - Windows Squirrel direct install → refused (Squirrel-Windows
 ///   only updates while Desktop is running, which is outside our
 ///   precondition)
@@ -115,7 +117,7 @@ async fn winget_upgrade_cask() -> Result<DesktopUpdateOutcome> {
             "upgrade",
             "--exact",
             "--id",
-            "Anthropic.ClaudeCode",
+            WINGET_DESKTOP_ID,
             "--accept-source-agreements",
             "--accept-package-agreements",
         ])
@@ -127,7 +129,7 @@ async fn winget_upgrade_cask() -> Result<DesktopUpdateOutcome> {
     let output = timeout(Duration::from_secs(600), fut)
         .await
         .map_err(|_| {
-            UpdateError::Refused("`winget upgrade Anthropic.ClaudeCode` timed out".into())
+            UpdateError::Refused(format!("`winget upgrade {WINGET_DESKTOP_ID}` timed out"))
         })?
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -140,7 +142,7 @@ async fn winget_upgrade_cask() -> Result<DesktopUpdateOutcome> {
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     if !output.status.success() {
         return Err(UpdateError::Subprocess {
-            cmd: "winget upgrade Anthropic.ClaudeCode".into(),
+            cmd: format!("winget upgrade {WINGET_DESKTOP_ID}"),
             status: output.status.code().unwrap_or(-1),
             stderr,
         });

@@ -91,6 +91,13 @@ impl DesktopSource {
     }
 }
 
+/// Claude Desktop's WinGet package id (`manifests/a/Anthropic/Claude`
+/// in microsoft/winget-pkgs). Not `Anthropic.ClaudeCode` — that is the
+/// CLI, and probing or upgrading it here once made every WinGet
+/// Desktop install read as a direct install and upgraded the wrong app.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) const WINGET_DESKTOP_ID: &str = "Anthropic.Claude";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DesktopInstall {
     pub app_path: PathBuf,
@@ -439,7 +446,7 @@ pub fn detect_desktop_install() -> Option<DesktopInstall> {
         for app_path in candidates {
             if app_path.exists() {
                 let version = read_windows_exe_version(&app_path);
-                let source = if winget_package_installed("Anthropic.ClaudeCode") {
+                let source = if winget_package_installed(WINGET_DESKTOP_ID) {
                     DesktopSource::Homebrew // re-using the "package-manager managed" lane
                 } else {
                     DesktopSource::DirectDmg
@@ -708,6 +715,14 @@ fn is_pid_alive(pid: i32) -> bool {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    #[test]
+    fn winget_desktop_id_names_desktop_not_the_cli() {
+        // `winget list --exact --id` matches whole ids, so the CLI's
+        // `Anthropic.ClaudeCode` would never find a Desktop install.
+        assert_eq!(WINGET_DESKTOP_ID, "Anthropic.Claude");
+        assert_ne!(WINGET_DESKTOP_ID, "Anthropic.ClaudeCode");
+    }
 
     #[test]
     fn empty_path_yields_no_active_binary() {
