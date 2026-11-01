@@ -36,6 +36,10 @@ written after. Notes are read on demand; they are not optional.
 from this file alone** — the note holds the argument against the obvious
 alternative, which is what stops a decision being silently reverted.
 
+`docs/feature-ledger.md` is the one list of user-facing features — code,
+user doc and first release per row. A new section, Settings pane, CLI
+verb or web feature page needs a row; `verify-docs` fails without one.
+
 `.claude/rules/*.md` are loaded into every session as well and are not
 repeated here. `dev-docs/` is gitignored: a pointer into it resolves only
 on a machine that already has it.
@@ -70,14 +74,16 @@ notices, and the previous bundle ships with no error anywhere.
 ```bash
 cargo test --workspace               # Rust
 cargo xtask verify-cc-parity         # CC settings-merge parity goldens (parity-harness/README.md)
-cargo xtask verify-docs              # README / data-dir note / event-channel / screenshot contracts
+cargo xtask verify-docs              # README / data-dir note / event-channel / screenshot / feature-ledger contracts
 pnpm test                            # React (Vitest + RTL, jsdom)
 pnpm test:coverage                   # React with coverage report
 cd panel && pnpm check:render        # the built remote panel actually mounts
+cd panel && pnpm check:layout        # ...and lays out, in real Chrome (CHROME_PATH sets one)
 pnpm check:classes                   # every className has a rule; every text field draws chrome
 pnpm check:a11y                      # every role="switch" has an accessible name
 pnpm check:motion                    # the reduced-motion override reaches the primitives
 pnpm check:contrast                  # the prefers-contrast override is not lost to source order
+pnpm check:container-queries         # every @container rule can apply; none styles its own container
 pnpm check:catalogs                  # en↔zh key / placeholder / <Trans> tag parity
 pnpm check:inline-flow               # prose inside a flex/grid container keeps its spaces
 pnpm check:envvar-layout             # needs a screen; CI runs its unit half only
@@ -295,8 +301,8 @@ ssh <user>@<host> "security unlock-keychain -p <password>; bash /tmp/claude-logi
 - **Build cross-check data is valid only on an exact version match**;
   otherwise the section renders "unavailable for this version".
 - **"Safe to apply" is not "safe to display"** —
-  `ANTHROPIC_CUSTOM_HEADERS` is pre-trust-safe and can still carry
-  `Authorization: Bearer …`.
+  `ANTHROPIC_CUSTOM_HEADERS` is pre-trust-safe when its headers look
+  benign, and its stored value can still carry `Authorization: Bearer …`.
 - User scope only. `CLAUDE_CONFIG_DIR` is read-only here.
 
 ## Locating CC's global config — one resolver
