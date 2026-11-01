@@ -185,7 +185,7 @@
     },
     {
       "name": "CLAUDE_CODE_EFFORT_LEVEL",
-      "why": "The enum-drift case. Its own prose lists six values; ENUM_OVERRIDES carried four, so the docs never 'deferred to another page' here and the override was silently dropping max and auto. Derived from prose now, and the superset assertion fails loudly if an override ever undercuts prose again.",
+      "why": "The enum-drift case, twice. ENUM_OVERRIDES once carried four of six values and silently dropped max and auto. The docs later moved auto out of the Values: clause, so prose alone yields five while CC 2.1.314 still accepts auto; the override restores it, and the superset assertion fails loudly if an override ever undercuts prose.",
       "control": "enum",
       "values": ["low", "medium", "high", "xhigh", "max", "auto"]
     },
@@ -277,10 +277,10 @@
       "safety": { "pretrust_safe": true, "provider_managed": true }
     },
     {
-      "name": "CLAUDE_AFK_COUNTDOWN_MS",
-      "why": "The docs' bare-backtick default form, 'Default `20000` (20 seconds)' — distinct from the parenthetical and colon forms, and the one the stricter extractor almost dropped.",
+      "name": "CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS",
+      "why": "The docs' bare-backtick default form, 'Default `600000` (10 minutes)' — distinct from the parenthetical and colon forms, and the one the stricter extractor almost dropped. (Carried by CLAUDE_AFK_COUNTDOWN_MS until the docs dropped that row on 2026-10-31.)",
       "control": "number",
-      "default": "20000",
+      "default": "600000",
       "unit": "ms"
     }
   ]

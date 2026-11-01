@@ -434,9 +434,12 @@ pane:
   documented row is hidden or tagged `not in build`.
 - **Safety attributes are orthogonal, not tiers.** CC's `SAFE_ENV_VARS`
   answers "safe to apply from an untrusted source"; this pane needs
-  "safe to display". `ANTHROPIC_CUSTOM_HEADERS` is both pre-trust-safe
-  **and** able to carry `Authorization: Bearer …`. Collapsing the two
-  axes leaks it.
+  "safe to display". `ANTHROPIC_CUSTOM_HEADERS` is pre-trust-safe only
+  *conditionally* — CC applies it early when every header name looks
+  benign, and refuses when one matches its `/auth|key|token|…/` pattern
+  (read in 2.1.314's `sh()`). That refusal is about applying, not
+  storing: the value with `Authorization: Bearer …` still sits in the
+  settings file this pane renders. Collapsing the two axes leaks it.
 
 `~/.claude.json` carries its own `env` block that CC applies *first*
 (`utils/managedEnv.ts:136,188`), so a row with no settings entry reads

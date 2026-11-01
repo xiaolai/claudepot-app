@@ -219,13 +219,19 @@ HAZARD_DISABLE_UPDATES = {"DISABLE_AUTOUPDATER", "DISABLE_UPDATES"}
 
 CC_DERIVED_HAZARDS = HAZARD_REDIRECT | HAZARD_TRUST_CERT | HAZARD_SWITCH_PROJECT
 
-# Enums where the docs row genuinely defers to another page. Applied to the
-# spec, and asserted to be a superset of anything parseable from the prose.
+# Enums where the docs row defers to another page, or names a valid value
+# outside its own `Values:` clause. Applied to the spec, and asserted to be a
+# superset of anything parseable from the prose.
 #
-# Currently empty: CLAUDE_CODE_EFFORT_LEVEL used to live here with four of its
-# six values, which is exactly the drift the superset assertion now catches —
-# its own prose lists all six, so it is derived rather than overridden.
-ENUM_OVERRIDES: dict[str, list[str]] = {}
+# CLAUDE_CODE_EFFORT_LEVEL once lived here with four of its six values — the
+# drift the superset assertion now catches. It is back because the docs
+# (fetched 2026-10-31) moved `auto` out of `Values:` into a separate "set it
+# to `auto` or `unset`" sentence; parsed alone the row drops `auto`, which
+# 2.1.314's `ev()` still accepts (`unset`/`auto` → send no effort). `unset`
+# is left out: it behaves identically, and one spelling is enough to offer.
+ENUM_OVERRIDES: dict[str, list[str]] = {
+    "CLAUDE_CODE_EFFORT_LEVEL": ["low", "medium", "high", "xhigh", "max", "auto"],
+}
 
 # Curated enums for variables the docs page mentions only in prose, outside the
 # `## Variables` table, and therefore does not produce a row for. Parked, not
@@ -720,6 +726,12 @@ def _resolve(chunk: str, body: str, seen: frozenset) -> list:
         if m:
             names.append(m.group(1))
             continue
+        # A spread of an inline literal — what the bundler leaves of a
+        # feature-flagged `...(flag ? [..] : [])` (2.1.314 emits `...[]`).
+        m = re.fullmatch(r"\.\.\.\[(.*)\]", item, re.S)
+        if m:
+            names += _resolve(chunk, m.group(1), seen)
+            continue
         m = re.fullmatch(r"\.\.\.([\w$]+)", item)
         if not m:
             _extract_fail(f"unrecognised member `{item[:60]}`")
@@ -838,6 +850,11 @@ _FIX_DECOY = ('// @bun\nvar zz=new Set(["WRONG"]),ww=new Set(["WRONG2"]);'
               'function dr(e,n){return zz.has(e)&&Le(n)||ww.has(e)&&Ss(n)}\n')
 _FIX_EXPECT = (["A_ALWAYS"], {"ANTHROPIC_CUSTOM_HEADERS": "when_headers_benign",
                               "B_TRUTHY": "when_truthy", "C_FALSY": "when_falsy"})
+# 2.1.314: the bundler folds a compiled-out feature-flagged spread
+# (`...(flag ? ["X"] : [])`) to `...[]`, and a compiled-in one to
+# `...["X"]`. Both are inline array literals and resolve in place.
+_FIX_SETS_SPREAD = ('var Gc=new Set([...[],"A_ALWAYS"]),yQ=new Set(["B_TRUTHY",...[]]),'
+                    'Vc=new Set([...["C_FALSY"]]);')
 
 
 def check_extractor_fixtures() -> list:
@@ -846,6 +863,7 @@ def check_extractor_fixtures() -> list:
         "inline": "// @bun\n" + _FIX_HELPERS + _FIX_SETS + _FIX_INLINE + "\n",
         "factored": ("// @bun\n" + _FIX_HELPERS + _FIX_SETS + _FIX_FACTORED + "\n"
                      + _FIX_DECOY),
+        "literal-spread": "// @bun\n" + _FIX_HELPERS + _FIX_SETS_SPREAD + _FIX_INLINE + "\n",
     }
     for name, text in cases.items():
         try:
