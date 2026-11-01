@@ -844,10 +844,12 @@ enum AutoMemoryAction {
         #[arg(long)]
         project: Option<String>,
     },
-    /// Set `autoMemoryEnabled = true`. Without `--project`, writes
-    /// to `~/.claude/settings.json` (global). With `--project`,
-    /// writes to `<PROJECT>/.claude/settings.local.json`.
+    /// Set `autoMemoryEnabled = true`. Writes to
+    /// `~/.claude/settings.json` (global) unless `--project-scope` is
+    /// given, which writes to `<PROJECT>/.claude/settings.local.json`.
     Enable {
+        /// Project the state is reported for, and written to with
+        /// `--project-scope` (default: the current directory).
         #[arg(long)]
         project: Option<String>,
         /// Apply at project scope (writes to `.claude/settings.local.json`).

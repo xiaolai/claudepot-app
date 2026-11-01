@@ -24,6 +24,7 @@ const APP_DOCS_PATHS = [
   "/app/features/accounts",
   "/app/features/activities",
   "/app/features/automations",
+  "/app/features/boards",
   "/app/features/global",
   "/app/features/keys",
   "/app/features/memory",

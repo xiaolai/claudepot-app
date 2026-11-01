@@ -28,6 +28,7 @@ const NAV: NavGroup[] = [
       { href: "/app/features/third-parties", label: "Third-parties" },
       { href: "/app/features/automations", label: "Automations" },
       { href: "/app/features/global", label: "Global" },
+      { href: "/app/features/boards", label: "Boards" },
       { href: "/app/features/settings", label: "Settings" },
     ],
   },

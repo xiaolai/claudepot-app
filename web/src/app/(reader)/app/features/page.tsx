@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "Features",
   description:
-    "Nine tabs in ClauDepot, mapping one-to-one to the Tauri app's primary navigation.",
+    "Ten tabs in ClauDepot, mapping one-to-one to the Tauri app's primary navigation.",
 };
 
 const FEATURES = [
@@ -54,13 +54,19 @@ const FEATURES = [
     slug: "global",
     title: "Global",
     summary:
-      "Read-only inspection of Claude Code's machine-wide state: config layers, CLAUDE.md health, the tips ledger, updates for both apps.",
+      "Claude Code's machine-wide state: config layers, env variables, artifact disable and trash, CLAUDE.md health and auto-memory, the tips ledger, updates for both apps.",
+  },
+  {
+    slug: "boards",
+    title: "Boards",
+    summary:
+      "Durable dashboards that agents write into over MCP or the command line: typed series shown as line, bar, table and KPI widgets. On trial and off by default.",
   },
   {
     slug: "settings",
     title: "Settings",
     summary:
-      "Thirteen sub-panes: prefs, appearance, notifications, network, auto-rotation rules, health, MCP installer, cleanup (prune + slim + trash with 7-day undo), protected paths, GitHub PAT, locks, diagnostics, About.",
+      "Sixteen sub-panes: prefs, appearance, notifications, network, auto-rotation rules, remote control, subscription relay, transcript retention, health, MCP installer, cleanup (prune + slim + trash with 7-day undo), protected paths, GitHub PAT, locks, diagnostics, About.",
   },
 ];
 
@@ -69,7 +75,7 @@ export default function FeaturesIndex() {
     <article>
       <h1>Features</h1>
       <p>
-        ClauDepot is organised into nine tabs that mirror the Tauri app&rsquo;s
+        ClauDepot is organised into ten tabs that mirror the Tauri app&rsquo;s
         primary navigation. Each tab is self-contained &mdash; you can use any
         one of them without configuring the others.
       </p>

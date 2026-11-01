@@ -1,0 +1,121 @@
+export const metadata = {
+  title: "Boards",
+  description:
+    "Durable dashboards that agents write into. A scheduled run appends rows overnight; you open ClauDepot in the morning and see the shape of it. On trial and off by default.",
+};
+
+# Boards
+
+An agent that runs overnight produces numbers: costs per run, test
+counts, how many files it touched. Read back as a log, they tell you
+very little. A *board* holds them as charts and tables instead. It lives
+in ClauDepot and outlives the session that wrote it, so a scheduled run
+can append at 03:00 and you can look at the result at 09:00.
+
+Boards is **on trial**. It is off by default, and its command-line verbs
+sit under `claudepot experimental`, which carries no compatibility
+promise: a verb there may change shape or be removed when the trial
+ends.
+
+## Turning it on
+
+The Boards tab does not appear until you turn it on, in either of two
+ways:
+
+- **Settings &rarr; General &rarr; Show Boards.**
+- **⌃⌥⌘B**, which shows or hides the tab from anywhere in the app except
+  while a dialog is open or a text field has focus. Turning it on also
+  takes you to it.
+
+Boards sits ninth in the sidebar, so it takes **⌘9** while it is shown.
+Turning it on or off never renumbers the tabs before it.
+
+## What a board is
+
+A board has a name, one or more **series**, and a grid of **widgets**.
+
+- **A series** is a named table with typed columns. Each column is one of
+  `timestamp`, `number`, `integer`, `string` or `bool`, and the types are
+  fixed when the series is created. A row whose cells do not match is
+  rejected, never converted. A missing value is written as `null`, and a
+  chart draws it as a gap, never as zero.
+- **A widget** shows one series. There are four kinds: **line** (a trend
+  over an x column), **bar** (a comparison across a category), **table**
+  (every column) and **KPI** (the latest non-empty value of one column,
+  with how many rows contributed). A board holds at most 24 widgets, and
+  it can have none: series can collect rows before anyone decides how to
+  show them.
+
+A board is identified by the id it receives when it is created; its
+name is only a label.
+
+## Who writes to a board
+
+ClauDepot itself does not create boards. Agents and scripts do, through
+two routes that write to the same store:
+
+- **The command line**, under `claudepot experimental board`:
+  `open` creates a board from a JSON definition (name, series, widgets),
+  `push` appends or replaces rows on a series, `list`, `get` and `show`
+  read boards back (`show` prints each series as a terminal table),
+  `clear` empties a series but keeps its definition, `rm` deletes a
+  board, and `export` / `import` move one in and out. Run
+  `claudepot experimental board --help` for the flags.
+- **MCP tools** on the ClauDepot MCP server: `claudepot_board_open`,
+  `claudepot_board_push` and `claudepot_board_list`. Boards belong to the
+  whole machine, not to one project, so these tools refuse to run on a
+  server confined to a single project, which is the server's default.
+  They work only on a server started with
+  `claudepot mcp memory-server --all-projects`.
+
+A push can carry an **idempotency key**: sending the same key again
+changes nothing, so a retried scheduled job cannot add its rows twice.
+Boards are also capped, so a runaway agent cannot fill the disk: 10,000
+rows per push, 1,000,000 rows per series, 32 series per board, 16
+columns per series and 8 KB per text cell. A board or push over a cap is
+refused, not trimmed.
+
+### Who wrote it is a claim
+
+Every push names its writer, and ClauDepot records that name without
+checking it: any program on this computer that can open the store can claim
+to be any writer. The app therefore shows the writer as **"Reported by
+…"**, never as a verified identity.
+
+## What you can do in the app
+
+The Boards tab lists every board in a table: name, state, last update,
+reported writer, and row count. Open one to see its widgets, followed by
+a table of its series with their columns, row counts, and who last
+reported writing to each.
+
+- **State** is one of three labels, worked out from the board's last
+  update: **Live** means updated in the last five minutes, **Stale**
+  means no writes for more than 30 days, and **Idle** is everything in
+  between. "Live"
+  says how recent the data is, not that anything is streaming.
+- **Updates.** Other programs write to boards, so the tab checks the
+  store every few seconds and reloads when something has changed. If you
+  have scrolled, it does not move the view: a single notice says new
+  updates arrived, with a button to jump to the latest. A push never
+  raises a notification.
+- **Large series** are shown in part, and the widget says so: a chart
+  draws at most 2,000 points ("showing N of M points"), a table shows at
+  most 500 rows, and a bar chart groups categories beyond 40.
+- **Export** saves the board as a JSON file you can import again. It
+  will not overwrite an existing file.
+- **Delete** asks for a second click and removes the board and all its
+  rows. Nothing else holds a copy, so export first.
+
+The command line additionally exports a board as one CSV file per series
+(`export --format csv`) and imports a JSON export as a new board.
+
+## Where the data lives
+
+Boards are stored in `~/.claudepot/boards.db`, a SQLite database opened
+directly by the app, the command line and the MCP server.
+
+This file is **your data, not a cache**. A board's contents exist
+nowhere else once the session that wrote them has ended, so ClauDepot
+never prunes it automatically, and upgrades keep its rows. To keep a
+copy, export the board.

@@ -1,17 +1,21 @@
 export const metadata = {
   title: "Global",
   description:
-    "Read-only inspection of your machine-wide Claude Code state: config layers, memory, tips ledger, and updates for both apps.",
+    "Your machine-wide Claude Code state: config layers, env variables, memory, tips ledger, and updates for both apps.",
 };
 
 # Global
 
 ![ClauDepot — global tab](/screenshots/global.png)
 
-The Global tab is the read-only window onto everything Claude Code
-maintains *across all your projects* — config layers, memory files,
-the tips ledger CC keeps internally, and the update channel for
-both Claude Code and Claude Desktop. Four sub-tabs.
+The Config section (formerly Global, hence this page's name) is the
+window onto everything Claude Code maintains *across all your
+projects* — config layers, memory files, the tips ledger CC keeps
+internally, and the update channel for both Claude Code and Claude
+Desktop. Four sub-tabs: Files (described under Config below), Memory,
+Tips and Updates. Mostly read-only; the few things it does write —
+env variables, disabled or trashed artifacts, two memory toggles —
+each get a section of their own.
 
 ## Config
 
@@ -27,6 +31,78 @@ inside Projects → Config; that one is forced to a project anchor.
 This one is forced to the global anchor — they share one component,
 two scopes.
 
+## Claude Code environment variables
+
+Files → Env variables edits the `env` block of your user settings file,
+`~/.claude/settings.json` (the pane shows the resolved path, since
+`CLAUDE_CONFIG_DIR` moves it). It lists Claude Code's officially
+documented variables, each with a control matched to its type — switch,
+select, integer or text — and filters for *modified*, *secret*, *risky*
+and *provider-managed*.
+
+- **Clearing is never live.** Claude Code re-applies settings `env` to a
+  running session additively: setting or changing a value usually takes
+  effect, but nothing is ever removed, so a cleared value survives in
+  running sessions until you relaunch. Every clear confirmation says so.
+- **Unset removes the key.** It never writes the documented default,
+  which would pin today's value and override whatever Claude Code
+  changes it to later. An explicit empty string is a third state,
+  distinct from both.
+- **What it can't see.** `~/.claude.json` has its own `env` block that
+  Claude Code applies first; rows it affects say so. A row with no
+  settings entry reads "No settings.json override", not "CC default" —
+  your shell may still set it, and ClauDepot can't see your shell.
+- **Secret is a separate question from safe.** Variables that can carry
+  a credential are never shown back once stored — the row only says
+  *set* — and storing one warns that the file is plaintext.
+  `ANTHROPIC_CUSTOM_HEADERS` is in this group: Claude Code applies it
+  before the trust dialog when its headers look benign, yet its value
+  can hold an
+  `Authorization: Bearer …` header.
+- **Risky variables warn before writing** — ones that redirect traffic,
+  change trusted certificates, name a program Claude Code runs, switch
+  the account or project you bill to, or stop updates.
+- **Read-only rows.** `CLAUDE_CONFIG_DIR` (Claude Code reads it before
+  settings load; set it in your shell), variables injected per run by
+  whatever launches Claude Code, and variables Claude Code reads only
+  from its launch environment.
+- **Names documented nowhere.** Keys in your file that match no
+  documented variable are listed with their values withheld. Names
+  found by scanning the Claude Code binary are listed only when your
+  installed version exactly matches the one scanned; otherwise the list
+  reads "unavailable for this version". Neither gets a control — edit
+  the file by hand.
+
+User scope only: project settings files aren't editable here, because
+Claude Code applies only a safe allowlist from them before the trust
+dialog, which makes a project-scope editor a different security design.
+
+## Disabling and trashing artifacts
+
+Selecting a skill, agent or slash command in the tree offers **Disable**
+and **Trash** in its preview header. Plugin-owned, managed-policy and
+out-of-scope files get a short notice instead of buttons — manage
+plugins from the plugin manager.
+
+- **Disable** moves the file or directory to
+  `<root>/.disabled/<kind>/…` inside the same `.claude/` folder, for
+  example `~/.claude/skills/foo/` to `~/.claude/.disabled/skills/foo/`.
+  Claude Code no longer finds it; nothing is deleted. If the name is
+  already taken among disabled artifacts, ClauDepot offers a `-N`
+  suffix.
+- **Re-enable** moves it back. Disabled artifacts appear under a
+  *Disabled* row in the tree (shown when there are any) and in
+  Settings → Cleanup → Artifacts, each with Re-enable and Move to trash.
+- **Trash** moves the artifact into `~/.claudepot/trash/` with a
+  manifest recording where it came from. Restore it from Settings →
+  Cleanup → Artifacts (with a `-N` suffix if the original spot is now
+  occupied). An entry with a broken manifest gets **Recover…**, where
+  you confirm the destination; an entry whose contents no longer match
+  the manifest refuses to restore. **Forget** deletes an entry for good.
+- **Retention** is best-effort: opening that Cleanup pane purges intact
+  trash entries older than 30 days, and *Empty old* does it on demand.
+  Damaged entries are kept until you forget them.
+
 ## Memory
 
 Health cards for your machine-wide CLAUDE.md (`~/.claude/CLAUDE.md`)
@@ -39,7 +115,29 @@ per file:
   which the model never sees no matter what they say.
 
 Pure read; ClauDepot doesn't presume to suggest what you should cut.
-The tab is a diagnostic, not an editor.
+For the files themselves the tab is a diagnostic, not an editor; its
+only writes are the two toggles below.
+
+## Auto-memory and background consolidation
+
+Two cards on the Memory tab, both writing your user settings file,
+`~/.claude/settings.json`:
+
+- **Auto-memory** writes `autoMemoryEnabled` (`true` or `false`) — whether
+  Claude Code keeps a per-project memory directory and writes topic
+  files into it. With no key it shows as on. If
+  `CLAUDE_CODE_DISABLE_AUTO_MEMORY` or `CLAUDE_CODE_SIMPLE` is set, the
+  card names the override and won't move until you clear it.
+  Per-project overrides live in Projects → Memory.
+- **Background memory consolidation** writes `autoDreamEnabled`, and has
+  three states. *Default* removes the key, leaving the decision to
+  Claude Code's server-side rollout, which ClauDepot can't see; *On* and
+  *Off* write `true` or `false`. Consolidation works inside the
+  auto-memory directory, so while auto-memory is off the card says it
+  won't run.
+
+From the command line, `claudepot settings auto-memory` covers the first
+toggle (see CLI mirror); consolidation is GUI-only.
 
 ## Tips
 
@@ -58,23 +156,38 @@ Catalog is extracted from the user's CC binary, joined against
 A unified update manager for both surfaces:
 
 - **Claude Code (CLI)** — installed version, latest available
-  version, channel. Updates run via the same npm-global-install path
-  CC uses natively.
+  version, channel. For a native or npm install, ClauDepot runs CC's
+  own `claude update` (five-minute limit). A package-manager install
+  (Homebrew, apt, dnf, apk, WinGet) is left to that package manager:
+  ClauDepot refuses and shows the exact command to run instead.
 - **Claude Desktop** — installed version, latest available, channel.
-  Updates use the platform-native flow (DMG drop on macOS, MSI on
-  Windows).
+  Desktop must be quit first. On macOS a Homebrew install updates with
+  `brew upgrade --cask claude`; a direct install downloads the release
+  zip, checks its SHA-256 and code signature, then swaps the app into
+  place. On Windows a WinGet install updates through WinGet, and a
+  direct install is left to Desktop's own updater. Setapp and Mac App
+  Store installs are managed elsewhere, and Linux has no Desktop
+  update here.
 
 ClauDepot's *own* updates live in Settings → About, not here. This
 panel is about keeping Anthropic's two apps current.
 
 ## CLI mirror
 
-Most Global tabs have CLI equivalents:
+Parts of this section have CLI equivalents:
 
 ```bash
-claudepot config show            # cascade view
-claudepot status                 # version + sanity check across surfaces
-claudepot doctor                 # deeper diagnostics
+claudepot update check                         # detect installs, probe latest CC + Desktop
+claudepot update config                        # show update settings (flags change them)
+claudepot settings auto-memory status          # effective auto-memory state, per source
+claudepot settings auto-memory enable|disable  # write autoMemoryEnabled (user scope)
+claudepot settings auto-memory clear           # remove the key
+claudepot status                               # does CC's signed-in account match ClauDepot's active one
+claudepot doctor                               # health check: installs, API reach, accounts
 ```
 
-The Memory and Tips tabs are GUI-only today.
+`--project-scope` points the auto-memory writes at a project's
+`.claude/settings.local.json` instead — the current directory, or the
+one named with `--project <path>`. The Files tree, env
+variables, artifact disable and trash, the Memory health cards,
+consolidation and Tips are GUI-only today.

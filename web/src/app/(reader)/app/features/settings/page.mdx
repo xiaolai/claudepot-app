@@ -19,6 +19,53 @@ Default section on launch, primary-account binding for the
 top-level keyboard shortcuts (⌘1..⌘8 jump to a section), and the
 small ergonomic toggles that don't deserve their own pane.
 
+### Claude Code model settings
+
+A second group in General edits Claude Code's own behaviour rather
+than ClauDepot's. Every control here writes the user layer only —
+`~/.claude/settings.json` (or the one under `CLAUDE_CONFIG_DIR`) —
+so it applies to every account that uses that config. Project,
+local and managed settings files are never written. Each change is
+a read-modify-write through the one settings-file boundary, which
+keeps every key it doesn't touch and refuses to overwrite a file it
+can't parse.
+
+- **Extended thinking by default** — `alwaysThinkingEnabled`.
+  Claude Code's default is on and is represented by the key being
+  absent, so *on* removes the key and *off* writes `false`; ClauDepot
+  never writes `true`. When `MAX_THINKING_TOKENS` is set in the
+  environment it decides instead, and the toggle is disabled with a
+  note saying so. Affects new sessions; per-session flags still win.
+- **Fast mode** — `fastMode`. The default is off, by absence, so *on*
+  writes `true` and *off* removes the key. Fast mode runs the
+  supported Opus models faster at $10 / $50 per million tokens and
+  bills to usage credits, not the plan's included usage — the pane
+  says so. `CLAUDE_CODE_DISABLE_FAST_MODE` overrides it and disables
+  the toggle. A second switch, **Require per-session opt-in**, sets
+  `fastModePerSessionOptIn`: every new session starts with fast mode
+  off until `/fast` re-arms it. Usage credits on the account, and an
+  owner's opt-in on Team and Enterprise, are also required and are
+  not visible from disk, so a toggle reading *on* can still be
+  refused by Claude Code at run time.
+- **Selectable models** — `availableModels`, an ordered allowlist of
+  family aliases (`opus`), version prefixes or full model ids, plus
+  `enforceAvailableModels` (**Apply the list to the Default model**).
+  Without enforcement, picking *Default* in `/model` bypasses the
+  list; with it, Default becomes the first entry, so order matters
+  and the list is never re-sorted. Clearing the list removes the key
+  rather than writing `[]` — Claude Code reads an empty list as
+  "only Default" — and enforcement is only written beside a non-empty list. It
+  needs Claude Code 2.1.175 or later, and is reported as ignored when
+  a managed policy file is present. Managed-only `availableModelsMatch`
+  and `deniedModels` are shown when an administrator sets them, never
+  written.
+- **Commit & PR attribution** — `attribution` and the deprecated
+  `includeCoAuthoredBy`, changed together in one write. *Default*
+  removes the commit and PR texts; *Off* writes empty texts and
+  `includeCoAuthoredBy: false`; *Custom* writes your own commit
+  trailer and PR text. Other keys inside `attribution`, such as
+  `sessionUrl`, are left as they are.
+
 ## Appearance
 
 Theme — light / dark / system. Density (paper-mono compact / cosy).
@@ -234,11 +281,31 @@ turned off) and their own trash list.
 
 ## Protected paths
 
-A list of directories ClauDepot must never write into, even when an
-operation requests it. Used to fence off sensitive trees — your
-`~/keys/`, your `~/work/clientA-only/`, anywhere a stray rename or
-trash would be costly. Validates absolute and `~`-prefixed paths;
-rejects relative paths and `..` traversal.
+Project paths whose *sibling state* survives an orphan clean. When
+cleaning removes an orphaned project, it normally deletes the
+artifact folder under `~/.claude/projects/` **and** strips that
+path's entry from the `~/.claude.json` projects map and its lines
+from `~/.claude/history.jsonl`. For a protected path the artifact
+folder is still removed — it sits inside Claude Code's own area —
+but the `~/.claude.json` entry and the history lines are left alone,
+and the clean reports how many orphans that applied to. It is not a
+write fence: nothing else in ClauDepot consults this list.
+
+Matching is exact, not by prefix: protecting `/Users` covers a
+project whose path is exactly `/Users`, not the projects beneath it.
+That is the case the defaults exist for — a session started in `/`,
+`~`, `/Users`, `/tmp` and similar (`C:\`, `C:\Users`, … on Windows),
+where stripping the entry would wipe config you almost certainly
+want to keep.
+
+Defaults are built in; the store
+(`~/.claudepot/protected-paths.json`) records only your additions and
+the defaults you removed, so a default added by a later release
+reaches you automatically. *Reset to defaults* deletes the store. If
+the file can't be read, cleaning falls back to the built-in defaults,
+never to no protection. The pane accepts absolute and `~`-prefixed
+paths, and refuses relative paths, `..` segments and bare filesystem
+or drive roots.
 
 ## GitHub
 
@@ -250,9 +317,29 @@ exit path. Per-route GitHub credentials live in the
 
 ## Locks
 
-Recovery for the `accounts.db` / `sessions.db` SQLite locks if a
-crashed ClauDepot leaves them held. Almost never needed; here for
-the rare case where a kernel panic took down the writer mid-tx.
+Force-breaks a lock file left behind by a crashed project rename.
+Each rename holds one lock, keyed on the source project's sanitized
+path, at `~/.claudepot/repair/locks/<slug>.lock`; it records the
+holder's PID, hostname and start time. (Orphan cleaning, project
+removal and import take locks in the same directory.)
+
+Most stale locks never reach this pane: the next operation breaks
+one itself when the holder is gone (a rename also writes an audit
+record of the lock it broke; the other operations only log it) — on the
+same host, when its PID is dead (by age on Windows); on another
+host, when the lock is older than 24 hours
+(`CLAUDEPOT_LOCK_STALE_HOURS` overrides). The pane is for the lock
+that check refuses to break.
+
+Enter the project's path — the rename's source — or its sanitized
+folder name; the lock is found from that, and a name that could
+escape the locks directory is refused. *Break lock* then deletes it
+**without checking whether the holder is still alive**, so break
+one only when no rename is running. The prior holder is written to
+`~/.claudepot/repair/journals/broken-lock-<timestamp>.json` and named
+in the confirmation toast. The same action, behind a confirmation,
+sits on each pending rename in Projects → Maintenance; the CLI is
+`claudepot project repair --break-lock <path>`, which asks for `-y`.
 
 ## Diagnostics
 

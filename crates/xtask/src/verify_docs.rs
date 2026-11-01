@@ -46,7 +46,10 @@
 //!    v0.4.12 memory missed one: the favicon was redrawn and the nav
 //!    logo was left pointing at `pixel-*` masters that the same commit
 //!    deleted. claudepot.com served two different marks for two
-//!    releases.
+//!    releases;
+//! 8. `docs/feature-ledger.md` names every GUI section, Settings pane,
+//!    visible CLI verb and web feature page, and every path, doc
+//!    heading and version it cites exists — see [`crate::feature_ledger`].
 //!
 //! Screenshot *freshness* is deliberately not here — see
 //! [`verify_screenshots`], which is on demand.
@@ -134,12 +137,13 @@ pub fn verify_docs(repo: &Path) -> Result<()> {
     check_web_icon_provenance(repo, &mut problems)?;
     check_cc_env_spec(repo, &mut problems)?;
     check_cc_watchlist(repo, &mut problems)?;
+    crate::feature_ledger::check_feature_ledger(repo, &mut problems)?;
 
     if problems.is_empty() {
         println!(
             "verify-docs: ok — CLI verbs, Settings panes, databases, data-dir JSON state, the \
-             shortcut gate, web icon assets, the cc-env spec and the CC \
-             watchlist all in sync"
+             shortcut gate, web icon assets, the cc-env spec, the CC \
+             watchlist and the feature ledger all in sync"
         );
         return Ok(());
     }
@@ -151,7 +155,7 @@ pub fn verify_docs(repo: &Path) -> Result<()> {
     bail!(msg)
 }
 
-fn read(repo: &Path, rel: &str) -> Result<String> {
+pub(crate) fn read(repo: &Path, rel: &str) -> Result<String> {
     let p: PathBuf = repo.join(rel);
     std::fs::read_to_string(&p).with_context(|| format!("read {}", p.display()))
 }
@@ -172,7 +176,7 @@ fn read(repo: &Path, rel: &str) -> Result<String> {
 /// narrow on purpose: it keys off the attribute clap itself reads, so a
 /// verb cannot escape documentation without also disappearing from
 /// `--help`.
-fn shipped_cli_verbs(src: &str) -> BTreeSet<String> {
+pub(crate) fn shipped_cli_verbs(src: &str) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
     let Some(start) = src.find("enum Commands {") else {
         return out;
@@ -242,7 +246,7 @@ fn check_cli_verbs(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
 
 // ─── 2. Settings panes ───────────────────────────────────────────────
 
-fn shipped_settings_panes(src: &str) -> BTreeSet<String> {
+pub(crate) fn shipped_settings_panes(src: &str) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
     for line in src.lines() {
         let Some(rest) = line.trim_start().strip_prefix("{ id: \"") else {
@@ -279,7 +283,7 @@ fn spelled(n: usize) -> Option<&'static str> {
 /// JSX-free module so the ⌘K palette could import it without pulling
 /// the lazy Settings chunk into the main bundle. The list is still the
 /// single source of truth — only its address changed.
-const SETTINGS_PANES_SRC: &str = "src/sections/settings/panes.ts";
+pub(crate) const SETTINGS_PANES_SRC: &str = "src/sections/settings/panes.ts";
 
 fn check_settings_panes(repo: &Path, problems: &mut Vec<String>) -> Result<()> {
     let src = read(repo, SETTINGS_PANES_SRC)?;

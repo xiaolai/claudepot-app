@@ -59,8 +59,8 @@ export default function AppLanding() {
         </div>
         <p>
           See <Link href="/app/features">all features</Link> for the full list:
-          accounts, activities, projects, keys, third-parties, automations,
-          global, settings.
+          accounts, activities, projects, memory, keys, third-parties,
+          automations, global, boards, settings.
         </p>
       </section>
 

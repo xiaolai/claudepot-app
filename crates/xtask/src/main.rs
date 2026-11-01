@@ -6,6 +6,7 @@
 
 mod cc_drift;
 mod data_dir_scan;
+mod feature_ledger;
 mod screenshot_fixture;
 mod verify_docs;
 

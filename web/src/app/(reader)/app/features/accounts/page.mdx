@@ -58,6 +58,38 @@ token is still valid. Useful before committing to a long task.
 The *Verify all* button at the top runs the check across every
 registered account in parallel.
 
+## Keeping stored accounts signed in
+
+A Claude Code access token lasts about eight hours. Claude Code keeps
+the token of the account it is signed in as fresh by itself, but the
+accounts ClauDepot holds in reserve have nobody doing that, so they
+used to read *Expired* everywhere a live token is needed — usage
+windows, the Activities strip, the tray — until you verified or
+switched to them.
+
+While the desktop app is open, ClauDepot now renews them in the
+background. Every five minutes it picks **at most one** stored account
+whose access token has expired and runs the same verification as the
+shield icon; when the server rejects the expired token, that check
+spends the account&rsquo;s refresh token (the long-lived credential
+that mints new access tokens) and saves the new one. Accounts take
+turns, so one that keeps failing does not block the others.
+
+What it leaves alone:
+
+- **The account Claude Code is using.** That token belongs to Claude
+  Code; ClauDepot never refreshes it.
+- **Accounts already known to be bad** — signed out, refresh token
+  rejected, or holding a different email than the one registered
+  (*drift*). Only signing in again fixes those, so it stops retrying.
+- **Tokens that have not expired yet.**
+
+A refresh renews the access token, not the login. The login itself
+ends on a fixed date, about 30 days after you signed in, shown on the
+account card as *login ends …*; after that, sign in again in the
+browser. Claude Desktop sessions are not part of this. There is no
+setting to turn it off, and the `claudepot` CLI does not run it.
+
 ## Rate limits at a glance
 
 Each account card surfaces Anthropic&rsquo;s reported utilization
@@ -77,6 +109,31 @@ toast with a Switch action; auto-mode swaps immediately, audited.
 Removing an account purges the keychain entry and the local DB row.
 Claude&rsquo;s own session files are untouched — if the account is
 currently active in a slot, ClauDepot detaches first, then deletes.
+
+## Where ClauDepot finds Claude Desktop
+
+The Desktop slot works by reading and swapping the files in Claude
+Desktop&rsquo;s data folder, which starts with its `config.json`:
+
+- **macOS:** `~/Library/Application Support/Claude`.
+- **Windows:** Desktop is an MSIX app (Windows&rsquo; packaged-app
+  format), and recent versions move their data out of the package.
+  Before the move it is in
+  `%LOCALAPPDATA%\Packages\<package family>\LocalCache\Roaming\Claude`;
+  after it, in `%LOCALAPPDATA%\Claude-Data\<package family, lowercase>`,
+  with a `.user-data-left.…` marker file left in the old folder.
+  ClauDepot follows Desktop to the new folder from 0.7.1; earlier
+  versions only looked in the old one. It never looks there when
+  `%LOCALAPPDATA%` is on a network share, because Desktop does not move
+  in that case either.
+- **Linux:** there is no Claude Desktop slot.
+
+If `config.json` is not in the folder ClauDepot checked, the error
+names that folder: *Either Desktop hasn&rsquo;t been launched yet, or it
+keeps its data somewhere Claudepot doesn&rsquo;t look.* If Desktop is
+open and signed in when you see this, compare the folder in the message
+with where your Desktop data actually is. A few rarer Windows layouts,
+such as a fallback folder under `%APPDATA%\Claude`, are not followed.
 
 ## Architecture
 

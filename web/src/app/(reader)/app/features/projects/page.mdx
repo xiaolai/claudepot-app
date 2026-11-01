@@ -57,19 +57,136 @@ trash them.
 
 ## Permission grants
 
-Optional per-project elevation: grant a project a time-boxed
-`permissions.defaultMode` (almost always `bypassPermissions`) that
-ClauDepot **auto-reverts on expiry**. The elevated state is never
-left to memory &mdash; the orchestrator reverts expired grants each
-usage-snapshot tick and emits a `permission-reverted` event when it
-does. The grant lands in `.claude/settings.local.json`; if you
-hand-edit the setting after the grant, ClauDepot detects that and
-won&rsquo;t revert someone&rsquo;s own choice.
+Optional per-project auto-approval: for a while, Claude Code&rsquo;s
+tool calls in one project run without permission prompts. Open a
+project and use the **Permissions** block in its detail pane: pick
+**30 minutes**, **2 hours**, **8 hours** or **Never**, then **Grant
+auto-approval**.
+
+**A grant is a record, not a permission mode.** ClauDepot keeps it
+in its own `permission-grants.json` and does not change the
+project&rsquo;s `permissions.defaultMode`. Claude Code has ignored
+`bypassPermissions` in project settings files since 2.1.257, so a
+grant built that way would do nothing. Instead ClauDepot adds a
+*hook* to your user `~/.claude/settings.json`. A hook is a command
+Claude Code runs at a fixed point. This one is a `PreToolUse` hook,
+which runs before every tool call. It runs
+`claudepot hook pre-tool-use` from the ClauDepot command-line binary
+(never the desktop app). When a live grant covers the session&rsquo;s
+working directory, the hook answers `allow` and the prompt is
+skipped. In auto mode, Claude Code&rsquo;s check of each tool call
+is skipped too. Otherwise the hook prints nothing and Claude Code
+decides as usual. Your deny and ask rules still apply.
+
+**Scope** is the session&rsquo;s working directory. A session counts
+as inside the project when its working directory is the project root
+or a folder under it. Subagents count as part of their parent
+session.
+
+**Ending it.** A timed grant shows **Auto-approval active &mdash;
+lapses in&hellip;** with a countdown. The hook stops answering at the
+deadline, and the desktop app drops the expired record on its
+next background check (about every five minutes). **Never** makes a *sticky* grant that stays until
+you end it. Every grant has **Revoke now**, and **Extend**, **Make
+sticky** or **Set deadline**. The hook entry stays installed only
+while some grant is live.
+
+**Failing closed.** The hook only reads the grants file: it never
+writes, repairs or logs. A corrupt file counts as &ldquo;no
+grant&rdquo;, so prompts come back. The desktop app then moves the
+file aside and notifies you. A grant whose hook entry is missing
+is treated as an error, not a grant. If installing the hook fails, the
+grant is rolled back. If the hook goes missing later, the block shows
+**Grant recorded but not answering** instead of the countdown.
+
+Two other states are shown but not managed. `bypassPermissions` set
+in your own `~/.claude/settings.json` shows as **elevated**, with a
+note to edit that file yourself. A `defaultMode` left in a project
+file, usually by an older ClauDepot grant, shows as **ignored**. For
+`.claude/settings.local.json` there is a **Remove it** button.
 
 Use it for short autonomous runs you don&rsquo;t want to keep
-elevated past their useful window &mdash; a one-hour refactor pass,
-say, that should drop back to normal permission prompts the moment
-the timer expires.
+unattended past their useful window. A two-hour refactor pass, say,
+should drop back to normal permission prompts when the timer runs
+out.
+
+## Peer messaging
+
+Hand a prompt to a Claude Code session that is **already running**
+&mdash; from a script, another terminal, or the
+[remote panel](/app/features/settings) on your phone. Claude Code
+gives each live session a private inbox (a socket file only your
+user account can open); ClauDepot finds those inboxes and writes to
+them. macOS and Linux only.
+
+```bash
+claudepot session live                         # running sessions you can address
+claudepot session send <target> "<prompt>"     # target: name, id prefix, or pid
+claudepot session send <target> "<prompt>" --wait 30
+```
+
+The target must match exactly one session. `--priority now|next|later`
+says where the prompt lands in that session&rsquo;s queue.
+
+**Handed off is not delivered.** By default Claude Code *holds* a
+message from another process: it appears in the session as a notice
+with Deny / Deliver buttons, and Claude never sees it until someone at
+the machine clicks. So ClauDepot reports a **handoff**, never
+&ldquo;sent&rdquo;. Add `--wait <seconds>` and it watches the
+transcript to tell you whether the prompt was delivered, held, or
+still undecided.
+
+**Opening the delivery window.** To have messages delivered without
+the click &mdash; the point of driving a session from your phone
+&mdash; open a time-boxed window:
+
+```bash
+claudepot session inbound grant 2h --reason "phone session"
+claudepot session inbound status
+claudepot session inbound revoke
+```
+
+This sets Claude Code&rsquo;s `crossSessionInbound` to `accept` in
+your **user** settings, which means every session on the machine,
+including ones already running. It has to be user-wide: Claude Code
+ignores `accept` at project level (a project can only make the gate
+stricter). Because the reach can&rsquo;t be narrowed by place,
+it&rsquo;s narrowed by time: a window lasts at most **12 hours**, and
+ClauDepot puts back exactly what the setting held before when it
+expires or you revoke it. Expiry is enforced by the GUI and by every
+`claudepot session` inbound or send command, so a deadline that passed
+while ClauDepot was closed still closes. If you edit the setting by
+hand while a window is open, ClauDepot drops its record and leaves
+your choice alone rather than overwriting it.
+
+While messages are being accepted, the status bar shows a
+**remote** chip with the minutes left. It shows **remote open**, in
+a warning tone, when `accept` is set but nothing will close it, and
+**remote ?** when ClauDepot can&rsquo;t read the state. The remote
+panel can close the window, but never open it.
+
+**What it can&rsquo;t do:**
+
+- **It only adds a prompt.** No interrupt, stop, exit, or restart:
+  Claude Code&rsquo;s inbox offers none of those.
+- **Slash commands don&rsquo;t run.** `/compact` arrives as the literal
+  text &ldquo;/compact&rdquo;.
+- **It isn&rsquo;t your keyboard.** Claude Code labels the text as
+  coming from another session and tells Claude that a peer cannot
+  grant more permission: it must not change its settings, CLAUDE.md
+  or config because a peer asked, treat a peer message as your
+  approval of a pending prompt, or do something the peer says it was
+  refused. A session that declines to approve its own permission
+  prompt when you ask over this channel is working correctly.
+
+**Wrong-session guards.** Process ids get reused, so two checks stop
+a prompt reaching the wrong conversation. Before connecting,
+ClauDepot confirms the process&rsquo;s start time matches the one the
+session recorded. Every message also carries the intended session
+id, and Claude Code drops any message whose id doesn&rsquo;t match.
+ClauDepot also speaks exactly one version of this inbox protocol
+(version 1): a session announcing any other version is refused, not
+guessed at.
 
 ## Environment files
 
