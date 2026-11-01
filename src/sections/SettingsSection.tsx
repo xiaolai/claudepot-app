@@ -22,6 +22,7 @@ import {
   categoryGroupLabel,
   categoryLabel,
 } from "../lib/notifications/labels";
+import { ConfirmDangerousAction } from "../components/ConfirmDangerousAction";
 import { BrandGithubMark } from "../components/primitives/BrandGithubMark";
 import { Button } from "../components/primitives/Button";
 import { ExternalLink } from "../components/primitives/ExternalLink";
@@ -626,19 +627,22 @@ function AppearancePane() {
 /*                        Locks pane                           */
 /* ──────────────────────────────────────────────────────────── */
 
-function LocksPane({
+export function LocksPane({
   pushToast,
 }: {
   pushToast: (t: "info" | "error", msg: string) => void;
 }) {
   const { t } = useTranslation("settings");
   const gc = useSettingsActions(pushToast);
+  // The break deletes the lock without checking its holder, so it
+  // confirms first — matching Projects → Maintenance and the CLI's -y.
+  const [confirming, setConfirming] = useState(false);
   return (
     <SettingsGroup desc={t("locks.desc")}>
       <Row label={t("locks.pathLabel")}>
         <input
           type="text"
-          placeholder="/absolute/path/to/lockfile"
+          placeholder="/path/to/project"
           value={gc.lockPath}
           onChange={(e) => gc.setLockPath(e.target.value)}
           style={{
@@ -652,7 +656,7 @@ function LocksPane({
         <Button
           variant="solid"
           danger
-          onClick={gc.breakLock}
+          onClick={() => setConfirming(true)}
           disabled={gc.lockBusy || !gc.lockPath.trim()}
           title={t("locks.breakTitle")}
         >
@@ -664,6 +668,23 @@ function LocksPane({
           </DisabledReason>
         )}
       </div>
+      {confirming && (
+        <ConfirmDangerousAction
+          title={t("locks.confirmTitle")}
+          confirmLabel={t("locks.breakButton")}
+          consequences={
+            <>
+              <p>{t("locks.confirmBody")}</p>
+              <p className="mono small selectable">{gc.lockPath.trim()}</p>
+            </>
+          }
+          onCancel={() => setConfirming(false)}
+          onConfirm={() => {
+            setConfirming(false);
+            void gc.breakLock();
+          }}
+        />
+      )}
     </SettingsGroup>
   );
 }

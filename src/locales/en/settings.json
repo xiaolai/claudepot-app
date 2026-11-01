@@ -71,12 +71,14 @@
     "resolvedDark": "dark"
   },
   "locks": {
-    "desc": "Force-break a stale lock file left behind by a crashed rename. Generates an audit trail.",
-    "pathLabel": "Lock file path",
+    "desc": "Force-break a stale lock left behind by a crashed project rename. Enter the renamed project's original path, or its sanitized folder name. The prior holder is recorded in an audit file.",
+    "pathLabel": "Project path",
     "breakButton": "Break lock",
-    "breakTitle": "Force-break the lock file and create an audit trail",
+    "breakTitle": "Force-break the project's lock and create an audit trail",
     "breaking": "Breaking lock…",
-    "enterPath": "Enter a lock file path"
+    "enterPath": "Enter a project path",
+    "confirmTitle": "Break lock?",
+    "confirmBody": "Deletes this project's lock without checking whether its holder is still running. Break it only when no rename is in progress — a live one can corrupt in-flight state."
   },
   "diagnostics": {
     "groupDesc": "Read-only view of platform, active slots, and the identity Claude Code is currently authenticated as.",
