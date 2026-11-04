@@ -231,11 +231,15 @@ jobs:
               strategy :github_latest
             end
 
-            # Symbol form, not the string ">= :catalina". Homebrew
-            # deprecated string comparison for \`depends_on macos:\` and
-            # warns on every command that loads the cask; the bare symbol
-            # already means "this version or newer".
-            depends_on macos: :catalina
+            # No \`depends_on macos:\` on purpose. The app's floor is 10.15
+            # (tauri.conf.json minimumSystemVersion), below the oldest
+            # macOS Homebrew itself runs on, so a floor here can never
+            # refuse anyone. Homebrew 7 made \`:catalina\` a hard error
+            # ("disabled! There is no replacement") that broke every
+            # command loading this cask, and each newer symbol is
+            # scheduled to fail the same way when its support ends.
+            # Add one back only if the app's floor rises above
+            # Homebrew's.
 
             app "Claudepot.app"
 
