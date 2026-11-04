@@ -6,6 +6,17 @@ Versioning scheme:
 - `0.1.x` — beta
 - `1.0.0+` — stable
 
+## 0.7.3 — beta (released 2026-11-04)
+
+### Fixed
+
+- **Homebrew loads the cask again.** Homebrew 7 dropped support for
+  macOS Catalina and now refuses any cask that names it, so every
+  `brew` command touching `claudepot` failed with "depends_on macos:
+  :catalina is disabled". The cask no longer sets a macOS floor; it
+  never needed one, because Homebrew itself requires a newer macOS
+  than Claudepot does.
+
 ## 0.7.2 — beta (released 2026-11-01)
 
 ### Changed
